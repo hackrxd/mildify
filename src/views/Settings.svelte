@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
+  import { lyrics } from "../lib/lyrics.svelte";
   import { session } from "../lib/session.svelte";
 
   const config = $derived(session.status?.config);
@@ -14,6 +15,40 @@
     ready: "Ready. It shows up in every Spotify app as a speaker.",
     error: "Couldn't connect. Retrying automatically.",
   };
+
+  let serverUrl = $state(session.status?.config.lyrics_server_url ?? "");
+  let apiKey = $state("");
+  let lyricsUser = $state("");
+  let lyricsPassword = $state("");
+  let lyricsBusy = $state(false);
+  const lyricsSource = $derived(session.status?.lyrics_source ?? null);
+
+  $effect(() => {
+    if (config?.lyrics_server_url) lyrics.refreshServer();
+  });
+
+  async function saveServer() {
+    const url = serverUrl.trim().replace(/\/+$/, "");
+    if (url === (config?.lyrics_server_url ?? "")) return;
+    await session.saveSettings({ lyrics_server_url: url });
+    serverUrl = session.status?.config.lyrics_server_url ?? "";
+    if (session.status?.config.lyrics_server_url) await lyrics.refreshServer();
+    else lyrics.server = null;
+  }
+
+  async function saveKey() {
+    if (!apiKey.trim()) return;
+    await session.saveSettings({ spicy_lyrics_key: apiKey.trim() });
+    apiKey = "";
+  }
+
+  async function lyricsSignIn(e: SubmitEvent) {
+    e.preventDefault();
+    lyricsBusy = true;
+    if (await lyrics.signIn(lyricsUser, lyricsPassword)) lyricsUser = "";
+    lyricsPassword = "";
+    lyricsBusy = false;
+  }
 
   function saveName() {
     const name = deviceName.trim();
@@ -75,6 +110,77 @@
         onchange={(e) => session.saveSettings({ normalisation: e.currentTarget.checked })}
       />
     </label>
+  </section>
+
+  <section>
+    <h2>Lyrics</h2>
+
+    <label class="row">
+      <span>
+        <span class="label">Lyrics server</span>
+        <span class="muted small">A Native Spotify lyrics server. Leave empty to call Spicy Lyrics directly with your own key.</span>
+      </span>
+      <input
+        class="field"
+        placeholder="https://lyrics.example.com"
+        spellcheck="false"
+        bind:value={serverUrl}
+        onblur={saveServer}
+        onkeydown={(e) => e.key === "Enter" && saveServer()}
+      />
+    </label>
+
+    {#if config?.lyrics_server_url}
+      {@const server = lyrics.server}
+      <div class="row">
+        <span>
+          {#if !server}
+            <span class="label">Checking the server…</span>
+          {:else if !server.reachable}
+            <span class="label">Can't reach the server</span>
+            <span class="muted small">{server.error}</span>
+          {:else if server.username}
+            <span class="label">Signed in as {server.username}</span>
+            <span class="muted small">Server {server.version ?? ""}</span>
+          {:else if server.auth_required}
+            <span class="label">This server needs an account</span>
+            <span class="muted small">Ask the server's admin for a username and password.</span>
+          {:else}
+            <span class="label">Connected</span>
+            <span class="muted small">Server {server.version ?? ""}, no sign-in needed</span>
+          {/if}
+        </span>
+        {#if server?.username}
+          <button class="btn quiet" onclick={() => lyrics.signOut()}><Icon name="signOut" size={16} /> Sign out</button>
+        {:else}
+          <button class="btn quiet" onclick={() => lyrics.refreshServer()}><Icon name="refresh" size={16} /> Check again</button>
+        {/if}
+      </div>
+      {#if server?.reachable && server.auth_required && !server.username}
+        <form class="row login" onsubmit={lyricsSignIn}>
+          <input class="field" placeholder="Username" autocomplete="username" bind:value={lyricsUser} required />
+          <input class="field" type="password" placeholder="Password" autocomplete="current-password" bind:value={lyricsPassword} required />
+          <button class="btn primary" type="submit" disabled={lyricsBusy}>{lyricsBusy ? "Signing in…" : "Sign in"}</button>
+        </form>
+      {/if}
+    {:else}
+      <form class="row" onsubmit={(e) => { e.preventDefault(); saveKey(); }}>
+        <span>
+          <span class="label">Spicy Lyrics API key</span>
+          <span class="muted small">
+            {#if lyricsSource === "settings"}A key is saved. Enter a new one to replace it.
+            {:else if lyricsSource === "environment"}Using the key from the SL_DEVKEY environment variable.
+            {:else}Create one at developers.spicylyrics.org. It stays on this computer.{/if}
+          </span>
+        </span>
+        <span class="key">
+          <input class="field" type="password" placeholder="sl_sk_…" autocomplete="off" bind:value={apiKey} />
+          {#if lyricsSource === "settings"}
+            <button class="btn quiet" type="button" onclick={() => session.saveSettings({ spicy_lyrics_key: "" })}>Remove</button>
+          {/if}
+        </span>
+      </form>
+    {/if}
   </section>
 
   <section>
@@ -179,6 +285,17 @@
     width: 18px;
     height: 18px;
     accent-color: var(--brass);
+  }
+  .login {
+    justify-content: flex-start;
+  }
+  .login .field {
+    width: 200px;
+  }
+  .key {
+    display: flex !important;
+    gap: 8px;
+    align-items: center;
   }
   .about p {
     max-width: 70ch;
