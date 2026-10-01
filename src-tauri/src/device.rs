@@ -75,6 +75,8 @@ enum LocalEvent {
     Paused { uri: String, position_ms: u32 },
     Loading { uri: String, position_ms: u32 },
     Seeked { uri: String, position_ms: u32 },
+    /// Periodic decoder position while playing (see `position_update_interval`).
+    Position { uri: String, position_ms: u32 },
     Stopped { uri: String },
     EndOfTrack { uri: String },
     Unavailable { uri: String },
@@ -258,6 +260,8 @@ impl ConnectDevice {
                 _ => Bitrate::Bitrate320,
             },
             normalisation: config.normalisation,
+            // Periodic positions let the UI keep its clock locked to the audio.
+            position_update_interval: Some(Duration::from_millis(1000)),
             ..PlayerConfig::default()
         };
         let connect_config = ConnectConfig {
@@ -353,9 +357,12 @@ fn to_local_event(event: PlayerEvent) -> Option<LocalEvent> {
         PlayerEvent::Loading { track_id, position_ms, .. } => {
             LocalEvent::Loading { uri: track_id.to_uri(), position_ms }
         }
-        PlayerEvent::Seeked { track_id, position_ms, .. }
-        | PlayerEvent::PositionCorrection { track_id, position_ms, .. } => {
+        PlayerEvent::Seeked { track_id, position_ms, .. } => {
             LocalEvent::Seeked { uri: track_id.to_uri(), position_ms }
+        }
+        PlayerEvent::PositionCorrection { track_id, position_ms, .. }
+        | PlayerEvent::PositionChanged { track_id, position_ms, .. } => {
+            LocalEvent::Position { uri: track_id.to_uri(), position_ms }
         }
         PlayerEvent::Stopped { track_id, .. } => LocalEvent::Stopped { uri: track_id.to_uri() },
         PlayerEvent::EndOfTrack { track_id, .. } => LocalEvent::EndOfTrack { uri: track_id.to_uri() },
