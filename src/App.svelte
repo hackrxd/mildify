@@ -10,6 +10,7 @@
   import { router } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { toasts } from "./lib/toasts.svelte";
+  import { updater } from "./lib/updater.svelte";
   import Album from "./views/Album.svelte";
   import Albums from "./views/Albums.svelte";
   import Artist from "./views/Artist.svelte";
@@ -29,6 +30,7 @@
   let playerStarted = false;
 
   session.init().catch((e) => toasts.error(e));
+  updater.start();
 
   // Start polling playback once the Web API is usable.
   $effect(() => {
@@ -112,6 +114,15 @@
           <p>Sign in once more so this computer can play your music.</p>
           <button class="btn primary" onclick={() => session.signIn()} disabled={session.signingIn}>
             {session.signingIn ? "Waiting for your browser…" : "Sign in for playback"}
+          </button>
+        </div>
+      {/if}
+
+      {#if updater.state === "ready" || updater.state === "installing"}
+        <div class="banner">
+          <p>Version {updater.available} is ready. Restart to finish updating.</p>
+          <button class="btn primary" onclick={() => updater.restart()} disabled={updater.state === "installing"}>
+            {updater.state === "installing" ? "Installing…" : "Restart now"}
           </button>
         </div>
       {/if}
