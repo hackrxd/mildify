@@ -7,6 +7,7 @@
     kind,
     title,
     round = false,
+    art,
     meta,
     actions,
   }: {
@@ -14,6 +15,8 @@
     kind: string;
     title: string;
     round?: boolean;
+    /** Replaces the cover image (e.g. for Liked Songs). */
+    art?: Snippet;
     meta?: Snippet;
     actions?: Snippet;
   } = $props();
@@ -33,7 +36,7 @@
 
 <header class="hero" style:--ambient={ambient ?? "var(--raised)"}>
   <div class="art" class:round>
-    {#if image}<img src={image} alt="" />{/if}
+    {#if art}{@render art()}{:else if image}<img src={image} alt="" />{/if}
   </div>
   <div class="text">
     <p class="kind">{kind}</p>
