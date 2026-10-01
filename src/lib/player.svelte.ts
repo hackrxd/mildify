@@ -20,6 +20,8 @@ export interface NowPlaying {
   artists: { name: string; uri: string }[];
   album: { name: string; uri: string | null };
   cover: string | null;
+  /** Largest available art (for full-size displays such as the lyrics view). */
+  coverLarge: string | null;
   durationMs: number;
   explicit: boolean;
 }
@@ -34,6 +36,7 @@ function fromWebTrack(t: Track): NowPlaying {
     artists: (t.artists ?? []).map((a) => ({ name: a.name, uri: a.uri })),
     album: { name: t.album?.name ?? "", uri: t.album?.uri ?? null },
     cover: pickImage(images, 300),
+    coverLarge: pickImage(images, 640),
     durationMs: t.duration_ms,
     explicit: t.explicit,
   };
@@ -181,6 +184,8 @@ class Player {
           artists: ev.artists,
           album: { name: ev.album, uri: sameTrack ? this.track!.album.uri : null },
           cover: ev.cover ?? (sameTrack ? this.track!.cover : null),
+          // librespot reports the largest cover it has.
+          coverLarge: ev.cover ?? (sameTrack ? this.track!.coverLarge : null),
           durationMs: ev.duration_ms,
           explicit: ev.explicit,
         };
