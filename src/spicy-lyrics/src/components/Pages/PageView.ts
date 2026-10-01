@@ -5,6 +5,8 @@
 // handling, card/PiP modes, Tippy view controls). View controls are rendered by the
 // host; the NowBar keeps upstream's markup with a simplified updater.
 
+// Imported first so the binding exists before the import cycle below evaluates.
+import { PageContainer, SetPageContainer } from "./PageState.ts";
 import fetchLyrics from "../../utils/Lyrics/fetchLyrics.ts";
 import { SkeletonMarkup } from "../../utils/Lyrics/LyricsSkeleton.ts";
 import "../../css/Loaders/DotLoader.css";
@@ -37,7 +39,7 @@ const pageLogger = new Logger("Page View");
 
 export const Tooltips: Record<string, { destroy: () => void } | null> = {};
 
-export let PageContainer: HTMLElement | null = null;
+export { PageContainer };
 export const IsCardMode = false;
 export let LyricsApplied = false;
 
@@ -99,7 +101,7 @@ async function OpenPage(AppendTo: HTMLElement | undefined = undefined) {
         </div>
     `;
 
-  PageContainer = elem;
+  SetPageContainer(elem);
 
   if (!$skipSpicyFont.get()) elem.classList.add("UseSpicyFont");
   if ($simpleLyricsMode.get()) elem.classList.add("SimpleLyricsMode");
@@ -150,7 +152,7 @@ async function DestroyPage() {
   removeLinesEvListener();
   ClearScrollSimplebar();
   Global.Event.evoke("page:destroy", null);
-  PageContainer = null;
+  SetPageContainer(null);
   PageHost = null;
 }
 
