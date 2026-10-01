@@ -110,6 +110,15 @@
         <Icon name="speaker" size={14} />{player.deviceName}
       </span>
     {/if}
+    <button
+      class="icon-btn"
+      class:on={router.current.name === "lyrics"}
+      onclick={() => (router.current.name === "lyrics" ? router.back() : router.go({ name: "lyrics" }))}
+      title="Lyrics"
+      aria-pressed={router.current.name === "lyrics"}
+    >
+      <Icon name="lyrics" size={18} />
+    </button>
     <button class="icon-btn" class:on={queueOpen} onclick={ontogglequeue} title="Queue" aria-pressed={queueOpen}>
       <Icon name="queue" size={18} />
     </button>
