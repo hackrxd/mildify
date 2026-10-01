@@ -67,6 +67,25 @@ Tauri can't build for another operating system, so the GitHub Actions workflow i
 artifacts, and pushing a `v*` tag drafts a release with them attached. The macOS builds aren't
 signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
 
+## Updates
+
+Installed copies check this repo's latest GitHub release on launch and every 6 hours, download a
+newer version in the background, and install it when you click **Restart now** (or under
+Settings → Updates). Windows, macOS and the Linux AppImage update themselves; `.deb` and `.rpm`
+installs don't, so reinstall those by hand.
+
+Updates are signed, and the app only installs bundles signed with the key matching the `pubkey` in
+[tauri.conf.json](src-tauri/tauri.conf.json). The private key lives outside the repo
+(`~/.tauri/nativespotify.key`, with its password in `nativespotify.key.password`). CI reads them from
+the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository secrets. If the key
+is lost, existing installs can't update anymore, and everyone has to reinstall a build with a new key.
+
+To ship a release:
+
+1. Bump `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+3. When the workflow finishes, publish the draft release. Installed apps pick it up from then on.
+
 ## Lyrics
 
 The lyrics view (the lines button in the player bar) runs the renderer from
