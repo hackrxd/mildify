@@ -120,6 +120,32 @@
         <button class="btn quiet" onclick={() => lyrics.refreshServer()}><Icon name="refresh" size={16} /> Check again</button>
       {/if}
     </div>
+    <label class="row">
+      <span>
+        <span class="label">Lyrics timing</span>
+        <span class="muted small">
+          {#if lyrics.offsetMs === 0}In step with the audio. Nudge it if your headphones add delay.
+          {:else}{Math.abs(lyrics.offsetMs)} ms {lyrics.offsetMs > 0 ? "later" : "earlier"} than the audio clock.{/if}
+        </span>
+      </span>
+      <span class="timing">
+        <span class="muted small">Earlier</span>
+        <input
+          type="range"
+          min="-1000"
+          max="1000"
+          step="25"
+          value={lyrics.offsetMs}
+          oninput={(e) => lyrics.setOffset(Number(e.currentTarget.value))}
+          aria-label="Lyrics timing offset in milliseconds"
+        />
+        <span class="muted small">Later</span>
+        {#if lyrics.offsetMs !== 0}
+          <button class="btn quiet" type="button" onclick={() => lyrics.setOffset(0)}>Reset</button>
+        {/if}
+      </span>
+    </label>
+
     {#if server?.reachable && server.auth_required && !server.username}
       <form class="row login" onsubmit={lyricsSignIn}>
         <input class="field" placeholder="Username" autocomplete="username" bind:value={lyricsUser} required />
@@ -230,6 +256,15 @@
   .switch {
     width: 18px;
     height: 18px;
+    accent-color: var(--brass);
+  }
+  .timing {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+  }
+  .timing input {
+    width: 200px;
     accent-color: var(--brass);
   }
   .login {
