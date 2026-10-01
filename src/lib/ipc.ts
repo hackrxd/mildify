@@ -27,7 +27,7 @@ export function errorMessage(e: unknown): string {
   return String(e);
 }
 
-export type DeviceState = "offline" | "needs_login" | "connecting" | "ready" | "error";
+export type DeviceState = "offline" | "needs_login" | "connecting" | "ready" | "premium_required" | "error";
 
 export interface DeviceStatus {
   state: DeviceState;
