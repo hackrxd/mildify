@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [svelte()],
   resolve: {
     alias: {
-      // The vendored Spicy Lyrics renderer; typed for the app by src/spicy-lyrics/api.d.ts.
+      // The vendored Spicy Lyrics renderer; typed for the app by src/types/spicy-lyrics-renderer.d.ts.
       "spicy-lyrics-renderer": fileURLToPath(new URL("./src/spicy-lyrics/index.ts", import.meta.url)),
     },
   },
