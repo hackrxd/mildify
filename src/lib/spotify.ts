@@ -25,8 +25,14 @@ import type {
 const get = <T>(path: string, query?: Record<string, string | number | boolean | undefined>) =>
   api<T>("GET", path, { query });
 
-/** Follows a paging `next` link (an absolute api.spotify.com URL). */
-export const nextPage = <T>(next: string) => api<Paging<T>>("GET", next);
+/**
+ * Follows a paging `next` link (an absolute api.spotify.com URL). Some endpoints
+ * (e.g. /me/following) wrap the page as `{ artists: {...} }`; unwrap those.
+ */
+export async function nextPage<T>(next: string): Promise<Paging<T>> {
+  const r = await api<Paging<T> | Record<string, Paging<T>>>("GET", next);
+  return "items" in r ? (r as Paging<T>) : Object.values(r)[0];
+}
 
 export const me = () => get<User>("/me");
 
