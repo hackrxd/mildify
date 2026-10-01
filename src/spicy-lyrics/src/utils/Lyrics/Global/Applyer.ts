@@ -110,7 +110,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       return;
     }
     case "lyrics-not-found": {
-      noticeContent = `We don't have any lyrics for this song`
+      noticeContent = `hehe... we don't have that one (yet ;))`
       break;
     }
     case "dj": {
@@ -118,7 +118,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       break;
     }
     case "unknown-track": {
-      noticeContent = `We could not access the info for this song`
+      noticeContent = `this song literally does not exist.`
       break;
     }
     case "unknown-error": {
@@ -126,21 +126,21 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       break;
     }
     case "offline": {
-      noticeContent = `Please go online to enjoy your lyrics experience!`
+      noticeContent = `i need internet`
       break;
     }
     case "service-unavailable": {
       // The circuit breaker is holding requests back. Nothing is broken and the
       // user needn't do anything — it retries on its own.
-      noticeContent = `Lyrics are temporarily unavailable — we'll keep trying`
+      noticeContent = `lyrics service is sleeping. try again in a few seconds.. we aren't broken, trust me bro`
       break;
     }
     case "rate-limited": {
-      noticeContent = `You're going a little fast for us — give it a moment and try again`
+      noticeContent = `woh... too fast.`
       break;
     }
     case "status-not-200": {
-      noticeContent = `A server error occurred`
+      noticeContent = `we panicked at your request and dropped your lyrics.. sorry!`
       break;
     }
     case "video-track": {
