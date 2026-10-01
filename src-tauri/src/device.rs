@@ -15,10 +15,13 @@ use librespot_core::config::{DeviceType, SessionConfig};
 use librespot_core::session::Session;
 use librespot_core::error::ErrorKind;
 use librespot_core::Error as LibrespotError;
-use librespot_playback::audio_backend;
+use librespot_playback::audio_backend::{self, Sink, SinkResult};
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
+use librespot_playback::convert::Converter;
+use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::{self, MixerConfig};
 use librespot_playback::player::{Player, PlayerEvent};
+use librespot_playback::SAMPLES_PER_SECOND;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
@@ -67,7 +70,8 @@ pub enum DeviceCommand {
     Repeat { mode: String },
 }
 
-/// Local player events forwarded to the UI as `local-player`.
+/// Local player events forwarded to the UI as `local-player`. Positions are what's
+/// audible right now, not where the decoder is (see [`OutputClock`]).
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum LocalEvent {
@@ -75,7 +79,7 @@ enum LocalEvent {
     Paused { uri: String, position_ms: u32 },
     Loading { uri: String, position_ms: u32 },
     Seeked { uri: String, position_ms: u32 },
-    /// Periodic decoder position while playing (see `position_update_interval`).
+    /// Periodic position while playing (see `position_update_interval`).
     Position { uri: String, position_ms: u32 },
     Stopped { uri: String },
     EndOfTrack { uri: String },
@@ -278,12 +282,15 @@ impl ConnectDevice {
 
         let session = Session::new(session_config, Some(cache));
         let mixer = mixer_builder(MixerConfig::default())?;
+        let clock = OutputClock::default();
+        let sink_clock = clock.clone();
         let player = Player::new(player_config, session.clone(), mixer.get_soft_volume(), move || {
-            sink_builder(None, AudioFormat::default())
+            Box::new(ClockedSink { inner: sink_builder(None, AudioFormat::default()), clock: sink_clock })
+                as Box<dyn Sink>
         });
 
         let events = player.get_player_event_channel();
-        tauri::async_runtime::spawn(forward_events(app.clone(), events));
+        tauri::async_runtime::spawn(forward_events(app.clone(), events, clock));
 
         let (spirc, task) = Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;
 
@@ -337,32 +344,114 @@ impl ConnectDevice {
     }
 }
 
-async fn forward_events(app: AppHandle, mut events: librespot_playback::player::PlayerEventChannel) {
+/// Tracks how far the speakers run behind the decoder.
+///
+/// librespot reports decoder positions, but the rodio output keeps ~27 packets
+/// queued ahead of the speakers. Packet sizes vary, so that's anywhere from under
+/// 100 ms to over half a second of audio. Seeks and track changes don't flush the
+/// queue; pausing plays it out first. Knowing when everything written so far will
+/// have finished playing turns a decoder position into the audible one.
+#[derive(Clone, Default)]
+struct OutputClock(Arc<Mutex<ClockState>>);
+
+#[derive(Default)]
+struct ClockState {
+    /// When everything written so far will have been played.
+    until: Option<Instant>,
+    /// When writing last started into an empty queue.
+    refill_from: Option<Instant>,
+}
+
+/// After starting from an empty queue the player decodes a full queue's worth in a
+/// burst. Events reported just before that burst can reach us after it, so within
+/// this long of a refill they're taken to describe the empty queue.
+const REFILL_WINDOW: Duration = Duration::from_millis(200);
+
+impl OutputClock {
+    fn queued(&self, audio: Duration) {
+        let now = Instant::now();
+        let mut s = self.0.lock().unwrap();
+        let until = match s.until {
+            Some(u) if u > now => u,
+            _ => {
+                s.refill_from = Some(now);
+                now
+            }
+        };
+        s.until = Some(until + audio);
+    }
+
+    fn drained(&self) {
+        self.0.lock().unwrap().until = None;
+    }
+
+    fn heard(&self, decoder_ms: u32) -> u32 {
+        let now = Instant::now();
+        let s = self.0.lock().unwrap();
+        if let Some(from) = s.refill_from.filter(|f| now.duration_since(*f) < REFILL_WINDOW) {
+            return decoder_ms + now.duration_since(from).as_millis() as u32;
+        }
+        let ahead = s.until.map_or(Duration::ZERO, |u| u.saturating_duration_since(now));
+        decoder_ms.saturating_sub(ahead.as_millis() as u32)
+    }
+}
+
+/// Passes audio through to the real output while keeping an [`OutputClock`].
+struct ClockedSink {
+    inner: Box<dyn Sink>,
+    clock: OutputClock,
+}
+
+impl Sink for ClockedSink {
+    fn start(&mut self) -> SinkResult<()> {
+        self.inner.start()
+    }
+
+    fn stop(&mut self) -> SinkResult<()> {
+        // The rodio sink plays out everything queued before it pauses.
+        let r = self.inner.stop();
+        self.clock.drained();
+        r
+    }
+
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        if let Ok(samples) = packet.samples() {
+            self.clock.queued(Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLES_PER_SECOND)));
+        }
+        self.inner.write(packet, converter)
+    }
+}
+
+async fn forward_events(
+    app: AppHandle,
+    mut events: librespot_playback::player::PlayerEventChannel,
+    clock: OutputClock,
+) {
     while let Some(event) = events.recv().await {
-        if let Some(ev) = to_local_event(event) {
+        if let Some(ev) = to_local_event(event, &clock) {
             let _ = app.emit("local-player", ev);
         }
     }
 }
 
-fn to_local_event(event: PlayerEvent) -> Option<LocalEvent> {
+fn to_local_event(event: PlayerEvent, clock: &OutputClock) -> Option<LocalEvent> {
     use librespot_metadata::audio::UniqueFields;
     Some(match event {
         PlayerEvent::Playing { track_id, position_ms, .. } => {
-            LocalEvent::Playing { uri: track_id.to_uri(), position_ms }
+            LocalEvent::Playing { uri: track_id.to_uri(), position_ms: clock.heard(position_ms) }
         }
         PlayerEvent::Paused { track_id, position_ms, .. } => {
-            LocalEvent::Paused { uri: track_id.to_uri(), position_ms }
+            LocalEvent::Paused { uri: track_id.to_uri(), position_ms: clock.heard(position_ms) }
         }
         PlayerEvent::Loading { track_id, position_ms, .. } => {
-            LocalEvent::Loading { uri: track_id.to_uri(), position_ms }
+            LocalEvent::Loading { uri: track_id.to_uri(), position_ms: clock.heard(position_ms) }
         }
         PlayerEvent::Seeked { track_id, position_ms, .. } => {
-            LocalEvent::Seeked { uri: track_id.to_uri(), position_ms }
+            LocalEvent::Seeked { uri: track_id.to_uri(), position_ms: clock.heard(position_ms) }
         }
         PlayerEvent::PositionCorrection { track_id, position_ms, .. }
         | PlayerEvent::PositionChanged { track_id, position_ms, .. } => {
-            LocalEvent::Position { uri: track_id.to_uri(), position_ms }
+            LocalEvent::Position { uri: track_id.to_uri(), position_ms: clock.heard(position_ms) }
         }
         PlayerEvent::Stopped { track_id, .. } => LocalEvent::Stopped { uri: track_id.to_uri() },
         PlayerEvent::EndOfTrack { track_id, .. } => LocalEvent::EndOfTrack { uri: track_id.to_uri() },
