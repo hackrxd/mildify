@@ -64,5 +64,8 @@ handwritten sample sync, so the port can be checked in a browser without Tauri o
 
 - Romanization: upstream downloads and executes JavaScript packages (kuroshiro dictionaries,
   pinyin, aromanize) from a CDN at runtime. That isn't enabled here.
-- The settings panel, lyrics manager, TTML uploader, NowBar, Now Playing View card and popup
-  lyrics: they're React/Spotify UI and the app has its own equivalents.
+- The settings panel, lyrics manager, TTML uploader, Now Playing View card and popup lyrics:
+  they're React/Spotify UI and the app has its own equivalents.
+- The NowBar's playback controls, timeline and artist/album hover cards. The NowBar itself
+  (cover art, title, artists, left/right placement) is kept with a simplified updater; playback is
+  controlled from the app's own player bar.
