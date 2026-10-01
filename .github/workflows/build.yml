@@ -18,17 +18,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  create-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  prepare:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
       release_id: ${{ steps.release.outputs.result }}
+      skip: ${{ steps.tagged.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
 
+      # `git push origin main v1.2.3` starts a branch run and a tag run for the same commit. The tag
+      # run builds the release, so the branch run stands down instead of building everything twice.
+      - id: tagged
+        if: github.ref_type == 'branch'
+        run: |
+          if git ls-remote --tags origin 'refs/tags/v*' | grep -q "^${GITHUB_SHA}"; then
+            echo "::notice::${GITHUB_SHA} has a version tag; its tag run builds it"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Tag matches the app version
+        if: github.ref_type == 'tag'
         run: |
           version=$(jq -r .version src-tauri/tauri.conf.json)
           if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
@@ -37,6 +48,7 @@ jobs:
           fi
 
       - id: release
+        if: github.ref_type == 'tag'
         uses: actions/github-script@v7
         with:
           script: |
@@ -51,9 +63,8 @@ jobs:
             return data.id;
 
   build:
-    needs: create-release
-    # Branch and PR builds skip create-release and still build.
-    if: ${{ !cancelled() && needs.create-release.result != 'failure' }}
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -101,7 +112,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -116,14 +127,15 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [create-release, build]
+    needs: [prepare, build]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/github-script@v7
         env:
-          release_id: ${{ needs.create-release.outputs.release_id }}
+          release_id: ${{ needs.prepare.outputs.release_id }}
         with:
           script: |
             await github.rest.repos.updateRelease({
