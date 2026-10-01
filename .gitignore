@@ -6,3 +6,7 @@ src-tauri/gen/schemas/
 .DS_Store
 .vscode/
 .idea/
+
+# local secrets (Spicy Lyrics API key, etc.)
+.env
+.env.*
