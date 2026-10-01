@@ -75,7 +75,7 @@ export type RepeatMode = "off" | "context" | "track";
 
 /** Events the embedded librespot player emits as `local-player`. */
 export type LocalEvent =
-  | { type: "playing" | "paused" | "loading" | "seeked"; uri: string; position_ms: number }
+  | { type: "playing" | "paused" | "loading" | "seeked" | "position"; uri: string; position_ms: number }
   | { type: "stopped" | "end_of_track" | "unavailable"; uri: string }
   | {
       type: "track";
