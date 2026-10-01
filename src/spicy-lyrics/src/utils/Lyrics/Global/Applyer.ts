@@ -1,6 +1,6 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: added the "lyrics-signin" and "lyrics-not-configured"
-// notices, and removed the notice footer that pointed to upstream's Discord.
+// Modified for Native Spotify: added the "lyrics-signin" notice, and removed the
+// notice footer that pointed to upstream's Discord.
 
 // deno-lint-ignore-file no-explicit-any
 
@@ -160,11 +160,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       break;
     }
     case "lyrics-signin": {
-      noticeContent = `Sign in to your lyrics server in Settings to see lyrics`
-      break;
-    }
-    case "lyrics-not-configured": {
-      noticeContent = `Add a lyrics server or a Spicy Lyrics API key in Settings to see lyrics`
+      noticeContent = `Sign in to the lyrics service in Settings to see lyrics`
       break;
     }
     default:
