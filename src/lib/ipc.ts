@@ -43,14 +43,11 @@ export interface Config {
   bitrate: number;
   initial_volume: number;
   normalisation: boolean;
-  /** Always null here: the key never leaves the backend. */
-  spicy_lyrics_key: null;
-  lyrics_server_url: string | null;
 }
 
-export type LyricsSource = "server" | "settings" | "environment";
-
+/** The Nativify lyrics service (fixed URL, set in the backend). */
 export interface LyricsServerStatus {
+  url: string;
   reachable: boolean;
   auth_required: boolean;
   version: string | null;
@@ -58,18 +55,13 @@ export interface LyricsServerStatus {
   error: string | null;
 }
 
-type SettingsInput = Partial<
-  Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation" | "lyrics_server_url"> & {
-    spicy_lyrics_key: string;
-  }
->;
+type SettingsInput = Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation">>;
 
 export interface AppStatus {
   config: Config;
   redirect_uri: string;
   signed_in: boolean;
   device: DeviceStatus;
-  lyrics_source: LyricsSource | null;
 }
 
 export type DeviceCommand =
@@ -112,10 +104,10 @@ export const backend = {
   device: (command: DeviceCommand) => invoke<void>("device_command", { command }),
   /** Spicy Lyrics v1 response for a track, or null when there are no lyrics. */
   lyrics: (trackId: string) => invoke<unknown | null>("spicy_lyrics", { trackId }),
-  lyricsServerStatus: () => invoke<LyricsServerStatus | null>("lyrics_server_status"),
+  lyricsServerStatus: () => invoke<LyricsServerStatus>("lyrics_server_status"),
   lyricsServerLogin: (username: string, password: string) =>
     invoke<LyricsServerStatus>("lyrics_server_login", { username, password }),
-  lyricsServerLogout: () => invoke<LyricsServerStatus | null>("lyrics_server_logout"),
+  lyricsServerLogout: () => invoke<LyricsServerStatus>("lyrics_server_logout"),
 };
 
 let authLost: (() => void) | null = null;
