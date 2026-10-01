@@ -135,7 +135,15 @@ class Player {
     // Local events are fresher than a poll that may have been in flight.
     const localFresh = this.isLocal && performance.now() - this.#lastLocalEvent < 2500;
     if (s.device.volume_percent !== null && !localFresh) this.volume = s.device.volume_percent;
-    if (s.item) this.track = fromWebTrack(s.item);
+    if (s.item) {
+      // Keep the same object while nothing visible changed, so views keyed on the
+      // track don't re-render on every poll.
+      const next = fromWebTrack(s.item);
+      const cur = this.track;
+      if (!cur || cur.uri !== next.uri || cur.album.uri !== next.album.uri || cur.cover !== next.cover) {
+        this.track = next;
+      }
+    }
     if (!localFresh) {
       this.isPlaying = s.is_playing;
       this.#setPosition(s.progress_ms ?? 0);
