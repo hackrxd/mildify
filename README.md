@@ -64,7 +64,7 @@ To build an installer for the computer you're on: `npm run tauri build`. It land
 Tauri can't build for another operating system, so the GitHub Actions workflow in
 [.github/workflows/build.yml](.github/workflows/build.yml) builds all of them: Windows, macOS
 (Apple silicon and Intel) and Linux. Every push to `main` uploads the installers as workflow
-artifacts, and pushing a `v*` tag drafts a release with them attached. The macOS builds aren't
+artifacts, and pushing a `v*` tag publishes a release with them attached. The macOS builds aren't
 signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
 
 ## Updates
@@ -84,7 +84,10 @@ To ship a release:
 
 1. Bump `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
 2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
-3. When the workflow finishes, publish the draft release. Installed apps pick it up from then on.
+3. The workflow builds into a draft release and publishes it once all four builds succeed.
+   Installed apps pick it up from then on. If a build fails, the draft stays unpublished: fix it,
+   delete the draft and the tag, and tag again. A tag that doesn't match the version in
+   `tauri.conf.json` fails before anything builds.
 
 ## Lyrics
 
