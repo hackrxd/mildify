@@ -55,8 +55,9 @@ export const removeFromLibrary = (uris: string[]) =>
 // Catalog
 export const album = (id: string) => get<Album>(`/albums/${id}`);
 export const artist = (id: string) => get<Artist>(`/artists/${id}`);
+/** Capped at 10 per page for development-mode apps; anything higher is a 400 "Invalid limit". */
 export const artistAlbums = (id: string, offset = 0) =>
-  get<Paging<SimpleAlbum>>(`/artists/${id}/albums`, { include_groups: "album,single,compilation", limit: 50, offset });
+  get<Paging<SimpleAlbum>>(`/artists/${id}/albums`, { include_groups: "album,single,compilation", limit: 10, offset });
 export const playlist = (id: string) => get<Playlist>(`/playlists/${id}`);
 export const playlistItems = (id: string, offset = 0) =>
   get<Paging<PlaylistItem>>(`/playlists/${id}/items`, { limit: 100, offset });
