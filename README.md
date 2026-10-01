@@ -55,6 +55,23 @@ Tokens and librespot credentials are cached in the app's data directory, so you 
 
 To build an installer: `npm run tauri build`.
 
+## Lyrics server (optional)
+
+Synced lyrics come from the [Spicy Lyrics API](https://developers.spicylyrics.org/docs), which needs a
+secret key. You can give the app your own key, or point it at a **lyrics server** that holds the key
+for you and everyone you share it with:
+
+- **Your own key**: paste it in Settings, or set `SL_DEVKEY` in a `.env` file when developing.
+- **A lyrics server**: [native-spotify-backend](../native-spotify-backend) is a small Rust server
+  that proxies the API, caches responses and can require a username and password. Install it on an
+  Ubuntu server with one command:
+
+  ```bash
+  sudo ./deploy/install.sh --domain lyrics.example.com
+  ```
+
+  Then paste the URL it prints into Settings and log in with the account it created.
+
 ## Limitations (Spotify's, not ours)
 
 Spotify's February 2026 changes restrict development-mode apps:
