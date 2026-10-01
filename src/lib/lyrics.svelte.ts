@@ -87,7 +87,8 @@ class Lyrics {
           type: kind === "track" ? "track" : kind === "episode" ? "episode" : kind === "local" ? "local" : "unknown",
         };
       },
-      seek: (ms) => player.seek(ms),
+      // Lyric times are on the offset clock; map back to the audio's.
+      seek: (ms) => player.seek(Math.max(0, ms + this.offsetMs)),
       fetchLyrics: (trackId) => this.#fetch(trackId),
       openUrl: (url) => {
         openUrl(url).catch((e) => toasts.error(e));
