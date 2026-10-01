@@ -8,6 +8,7 @@
     title,
     round = false,
     art,
+    tint,
     meta,
     actions,
   }: {
@@ -17,6 +18,8 @@
     round?: boolean;
     /** Replaces the cover image (e.g. for Liked Songs). */
     art?: Snippet;
+    /** Wash colour to use when there's no image to sample. */
+    tint?: string;
     meta?: Snippet;
     actions?: Snippet;
   } = $props();
@@ -34,7 +37,7 @@
   const size = $derived(title.length > 48 ? "s" : title.length > 22 ? "m" : "l");
 </script>
 
-<header class="hero" style:--ambient={ambient ?? "var(--raised)"}>
+<header class="hero" style:--ambient={ambient ?? tint ?? "var(--raised)"}>
   <div class="art" class:round>
     {#if art}{@render art()}{:else if image}<img src={image} alt="" />{/if}
   </div>
@@ -45,7 +48,7 @@
   </div>
 </header>
 {#if actions}
-  <div class="actions" style:--ambient={ambient ?? "var(--raised)"}>{@render actions()}</div>
+  <div class="actions" style:--ambient={ambient ?? tint ?? "var(--raised)"}>{@render actions()}</div>
 {/if}
 
 <style>
