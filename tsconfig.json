@@ -14,7 +14,7 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "src/spicy-lyrics/api.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.svelte"],
   // The vendored renderer is non-strict upstream code with its own tsconfig.
   "exclude": ["src/spicy-lyrics/**/*.ts", "src/spicy-lyrics/**/*.tsx"]
 }
