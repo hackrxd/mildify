@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { backend, isAppError, onAuthLost, type AppStatus, type Config, type DeviceStatus } from "./ipc";
+import { backend, isAppError, onAuthLost, type AppStatus, type DeviceStatus } from "./ipc";
 import { allPages, me, myPlaylists } from "./spotify";
 import { toasts } from "./toasts.svelte";
 import type { SimplePlaylist, User } from "./types";
@@ -63,7 +63,7 @@ class Session {
     this.playlists = [];
   }
 
-  async saveSettings(settings: Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation">>) {
+  async saveSettings(settings: Parameters<typeof backend.saveSettings>[0]) {
     try {
       this.status = await backend.saveSettings(settings);
     } catch (e) {
