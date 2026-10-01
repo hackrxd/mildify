@@ -1,0 +1,86 @@
+<script lang="ts">
+  import { tick } from "svelte";
+  import { menu } from "../lib/menu.svelte";
+
+  let el: HTMLUListElement | undefined = $state();
+  let pos = $state({ x: 0, y: 0 });
+
+  // Keep the menu on screen, then focus the first item for keyboard use.
+  $effect(() => {
+    if (!menu.open) return;
+    pos = { x: menu.x, y: menu.y };
+    tick().then(() => {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      pos = {
+        x: Math.min(menu.x, window.innerWidth - r.width - 8),
+        y: Math.min(menu.y, window.innerHeight - r.height - 8),
+      };
+      el.querySelector("button")?.focus();
+    });
+  });
+
+  function onKey(e: KeyboardEvent) {
+    if (!menu.open) return;
+    if (e.key === "Escape") menu.close();
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const buttons = [...(el?.querySelectorAll("button:not(:disabled)") ?? [])] as HTMLButtonElement[];
+      const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === "ArrowDown" ? (i + 1) % buttons.length : (i - 1 + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    }
+  }
+</script>
+
+<svelte:window
+  onkeydown={onKey}
+  onpointerdown={(e) => menu.open && el && !el.contains(e.target as Node) && menu.close()}
+  onblur={() => menu.close()}
+  onresize={() => menu.close()}
+/>
+
+{#if menu.open}
+  <ul class="menu" role="menu" bind:this={el} style:left="{pos.x}px" style:top="{pos.y}px">
+    {#each menu.items as item (item.label)}
+      <li role="none">
+        <button
+          role="menuitem"
+          disabled={item.disabled}
+          onclick={() => {
+            menu.close();
+            item.action();
+          }}
+        >
+          {item.label}
+        </button>
+      </li>
+    {/each}
+  </ul>
+{/if}
+
+<style>
+  .menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 200px;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    border-radius: 8px;
+    background: var(--raised);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+  }
+  button {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 4px;
+    text-align: left;
+    font-size: var(--t-md);
+  }
+  button:hover:not(:disabled),
+  button:focus-visible {
+    background: color-mix(in srgb, var(--paper) 8%, transparent);
+    outline: none;
+  }
+</style>
