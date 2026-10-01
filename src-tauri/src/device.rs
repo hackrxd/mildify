@@ -41,6 +41,8 @@ pub enum DeviceState {
     NeedsLogin,
     Connecting,
     Ready,
+    /// The account isn't Premium, which librespot requires. Stopped until restarted.
+    PremiumRequired,
     /// Failed; the supervisor keeps retrying in the background.
     Error,
 }
@@ -216,7 +218,12 @@ impl ConnectDevice {
             let started = Instant::now();
 
             match self.run_once(&app, &config, cache.clone(), credentials.clone(), generation).await {
-                Ok(()) => {}
+                Ok(Ended::Normally) => {}
+                Ok(Ended::NotPremium(account_type)) => {
+                    log::warn!("Spotify account type is {account_type:?}; playback needs Premium");
+                    self.set_status(&app, DeviceState::PremiumRequired, None);
+                    return;
+                }
                 Err(e) if e.kind == ErrorKind::PermissionDenied => {
                     log::warn!("librespot rejected credentials: {e}");
                     self.forget_credentials();
@@ -252,7 +259,7 @@ impl ConnectDevice {
         cache: Cache,
         credentials: Credentials,
         generation: u64,
-    ) -> std::result::Result<(), LibrespotError> {
+    ) -> std::result::Result<Ended, LibrespotError> {
         let session_config = SessionConfig {
             device_id: config.device_id.clone(),
             ..SessionConfig::default()
@@ -292,11 +299,18 @@ impl ConnectDevice {
         let events = player.get_player_event_channel();
         tauri::async_runtime::spawn(forward_events(app.clone(), events, clock));
 
-        let (spirc, task) = Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;
+        let started = Spirc::new(connect_config, session.clone(), credentials, player, mixer).await;
+        if let Some(account_type) = non_premium(&session) {
+            if let Ok((spirc, _)) = started {
+                let _ = spirc.shutdown();
+            }
+            return Ok(Ended::NotPremium(account_type));
+        }
+        let (spirc, task) = started?;
 
         if self.generation.load(Ordering::SeqCst) != generation {
             let _ = spirc.shutdown();
-            return Ok(());
+            return Ok(Ended::Normally);
         }
         *self.spirc.lock().unwrap() = Some(spirc);
         {
@@ -305,10 +319,21 @@ impl ConnectDevice {
         }
         self.set_status(app, DeviceState::Ready, None);
 
-        task.await;
+        // Spotify reports the account type shortly after login, possibly after Spirc is up.
+        tokio::pin!(task);
+        let ended = tokio::select! {
+            _ = &mut task => Ended::Normally,
+            account_type = wait_for_non_premium(&session) => {
+                if let Some(spirc) = self.spirc.lock().unwrap().take() {
+                    let _ = spirc.shutdown();
+                }
+                task.await;
+                Ended::NotPremium(account_type)
+            }
+        };
 
         self.spirc.lock().unwrap().take();
-        Ok(())
+        Ok(ended)
     }
 
     pub fn stop(&self) {
@@ -341,6 +366,29 @@ impl ConnectDevice {
             },
         };
         r.map_err(|e| AppError::Device(e.to_string()))
+    }
+}
+
+/// How a device run ended without a librespot error.
+enum Ended {
+    /// Stopped, or the connection dropped; the supervisor reconnects if still current.
+    Normally,
+    /// Spotify reported this account type (e.g. "free"); librespot can't play for it.
+    NotPremium(String),
+}
+
+/// The account type, if Spotify has reported one other than Premium. Our patched
+/// librespot-core stores it instead of exiting (see vendor/librespot-core/PATCHED.md).
+fn non_premium(session: &Session) -> Option<String> {
+    session.get_user_attribute("type").filter(|t| t != "premium")
+}
+
+async fn wait_for_non_premium(session: &Session) -> String {
+    loop {
+        if let Some(account_type) = non_premium(session) {
+            return account_type;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
