@@ -1,12 +1,12 @@
 [package]
 name = "librespot-core"
 version = "0.8.0"
-rust-version.workspace = true
+rust-version = "1.85"
 authors = ["Paul Lietar <paul@lietar.net>"]
-license.workspace = true
+license = "MIT"
 description = "The core functionality provided by librespot"
-repository.workspace = true
-edition.workspace = true
+repository = "https://github.com/librespot-org/librespot"
+edition = "2024"
 build = "build.rs"
 
 [features]
@@ -40,8 +40,8 @@ rustls-tls-webpki-roots = [
 __rustls = []
 
 [dependencies]
-librespot-oauth = { version = "0.8.0", path = "../oauth", default-features = false }
-librespot-protocol = { version = "0.8.0", path = "../protocol", default-features = false }
+librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061", default-features = false }
+librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061", default-features = false }
 
 aes = "0.8"
 base64 = "0.22"
@@ -121,5 +121,6 @@ vergen = "=9.0.6"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
 
-[lints]
-workspace = true
+
+[lints.clippy]
+redundant_closure_for_method_calls = "warn"
