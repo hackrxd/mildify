@@ -55,6 +55,19 @@ Tokens and librespot credentials are cached in the app's data directory, so you 
 
 To build an installer: `npm run tauri build`.
 
+## Lyrics
+
+The lyrics view (the lines button in the player bar) runs the renderer from
+[Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics): syllable-by-syllable highlighting,
+background vocals, line-synced and static fallbacks, the animated cover-art background and the
+cover panel. It's ported from the Spicetify extension with only its Spotify-client plumbing
+replaced; see [src/spicy-lyrics/README.md](src/spicy-lyrics/README.md) for exactly what changed.
+Lyrics come from the public Spicy Lyrics API, and the view always credits the provider (and the
+community members who made a sync), as the API's terms require.
+
+Romanization isn't included yet: upstream downloads and runs romanization packages from a CDN
+at runtime. Lyrics that ship their own romanization still get the toggle.
+
 ## Lyrics server (optional)
 
 Synced lyrics come from the [Spicy Lyrics API](https://developers.spicylyrics.org/docs), which needs a
@@ -96,16 +109,23 @@ until librespot catches up.
 | Ctrl + L or Ctrl + K | Search |
 | Alt + ← / → | Back / forward |
 
+## License
+
+GNU AGPL-3.0, because the lyrics renderer is derived from Spicy Lyrics (AGPL-3.0). See
+[LICENSE](LICENSE).
+
 ## Project layout
 
 ```
 src/                Svelte frontend
   lib/              stores (player, session, router), Web API wrappers
   components/       shell pieces: sidebar, now-playing deck, track list…
-  views/            pages: home, search, album, artist, playlist, liked…
+  views/            pages: home, search, album, artist, playlist, liked, lyrics…
+  spicy-lyrics/     the vendored Spicy Lyrics renderer and its compatibility layer
 src-tauri/src/
   auth.rs           PKCE browser sign-in with a loopback redirect
   webapi.rs         Web API client with token refresh and rate-limit handling
   device.rs         librespot Connect device and its supervisor
+  lyrics.rs         Spicy Lyrics API / lyrics server client
   lib.rs            Tauri commands and app state
 ```
