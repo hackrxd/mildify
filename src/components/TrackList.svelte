@@ -1,16 +1,19 @@
-<script lang="ts">
-  import { liked } from "../lib/liked.svelte";
-  import { menu } from "../lib/menu.svelte";
-  import { player } from "../lib/player.svelte";
-  import { router } from "../lib/router.svelte";
+<script lang="ts" module>
   import type { SimpleTrack, Track } from "../lib/types";
-  import { formatDuration, pickImage } from "../lib/util";
-  import Icon from "./Icon.svelte";
 
   export interface Row {
     track: SimpleTrack | Track;
     addedAt?: string | null;
   }
+</script>
+
+<script lang="ts">
+  import { liked } from "../lib/liked.svelte";
+  import { menu } from "../lib/menu.svelte";
+  import { player } from "../lib/player.svelte";
+  import { router } from "../lib/router.svelte";
+  import { formatDuration, pickImage } from "../lib/util";
+  import Icon from "./Icon.svelte";
 
   let {
     rows,
