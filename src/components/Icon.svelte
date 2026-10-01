@@ -29,6 +29,11 @@
     check: "M5 12.5l4.5 4.5L19 7.5",
     refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6",
     signOut: "M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10",
+    lyrics: "M5 5.5h14M5 10h10M5 14.5h12M5 19h7",
+    cover: "M4 4h16v16H4zM4 15.5l4.5-4.5 4 4 2.5-2.5L20 17.5M15.5 8.5h.01",
+    romanize: "M3.5 18 8 6l4.5 12M5.2 13.5h5.6M15 10.5c.6-.7 1.5-1 2.5-1 1.7 0 2.5 1 2.5 2.6V18M20 13.8c-3.5 0-5.3.7-5.3 2.3 0 1.1.8 1.9 2.1 1.9 1.6 0 3.2-1.2 3.2-3",
+    expand: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+    collapse: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
   } as const;
 
   const FILLED = new Set(["play", "pause", "next", "prev"]);
