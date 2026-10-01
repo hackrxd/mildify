@@ -27,7 +27,7 @@ rewritten (same path and exports, new implementation) to run on Native Spotify's
 | `src/components/Global/SpotifyPlayer.ts` | Backed by Native Spotify's player store |
 | `src/components/Pages/PageView.ts` | Builds the same page DOM inside the app's Lyrics view |
 | `src/components/Utils/{Fullscreen,CompactMode,PopupLyrics}.ts` | Minimal state only; the app has no PiP/NPV card |
-| `src/utils/Lyrics/fetchLyrics.ts` | Uses the public Spicy Lyrics API (`api.spicylyrics.org/v1`) through the Rust backend |
+| `src/utils/Lyrics/fetchLyrics.ts` | Fetches through the Rust backend from the Nativify lyrics service, which proxies the public Spicy Lyrics v1 API |
 | `src/utils/Lyrics/ProcessLyrics.ts` | Empty-line pruning only (see below) |
 | `src/utils/audioAnalysis.ts`, `src/components/DynamicBG/ArtistVisuals/Main.ts` | Disabled (relied on private Spotify endpoints) |
 
@@ -35,7 +35,7 @@ Small edits to otherwise verbatim files:
 
 | File | Change |
 | --- | --- |
-| `src/utils/Lyrics/Global/Applyer.ts` | Notices for "sign in to the lyrics server" and "lyrics aren't set up"; the footer linking upstream's Discord is removed (it's upstream's support channel, not this port's) |
+| `src/utils/Lyrics/Global/Applyer.ts` | A "sign in to the lyrics service" notice; the footer linking upstream's Discord is removed (it's upstream's support channel, not this port's) |
 | `src/utils/Lyrics/Applyer/Credits/ApplyIsByCommunity.tsx` | Uploader/maker links use the profile `url` from the public API, as its attribution terms require |
 
 Additions: `src/components/Pages/PageState.ts` holds the page element outside an import cycle.
@@ -58,7 +58,7 @@ under the same `SpicyLyrics` family name, and upstream's `LoadFonts()` isn't cal
 ## Trying it without the app
 
 `/lyrics-harness.html` (with `npm run dev`) mounts the renderer with a simulated clock and a
-handwritten sample sync, so the port can be checked in a browser without Tauri or an API key.
+handwritten sample sync, so the port can be checked in a browser without Tauri or the lyrics service.
 
 ## Not ported
 
