@@ -140,9 +140,14 @@
           aria-label="Lyrics timing offset in milliseconds"
         />
         <span class="muted small">Later</span>
-        {#if lyrics.offsetMs !== 0}
-          <button class="btn quiet" type="button" onclick={() => lyrics.setOffset(0)}>Reset</button>
-        {/if}
+        <!-- Always laid out: appearing mid-drag would shift the slider under the pointer. -->
+        <button
+          class="btn quiet"
+          class:hidden={lyrics.offsetMs === 0}
+          type="button"
+          disabled={lyrics.offsetMs === 0}
+          onclick={() => lyrics.setOffset(0)}>Reset</button
+        >
       </span>
     </label>
 
@@ -266,6 +271,9 @@
   .timing input {
     width: 200px;
     accent-color: var(--brass);
+  }
+  .timing .hidden {
+    visibility: hidden;
   }
   .login {
     justify-content: flex-start;
