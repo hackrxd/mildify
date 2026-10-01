@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod device;
 mod error;
+mod lyrics;
 mod webapi;
 
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use tokio::sync::oneshot;
 use config::{Config, Paths};
 use device::{ConnectDevice, DeviceCommand, DeviceState, DeviceStatus};
 use error::{AppError, Result};
+use lyrics::LyricsClient;
 use webapi::WebApi;
 
 struct AppState {
@@ -21,6 +23,7 @@ struct AppState {
     paths: Paths,
     webapi: WebApi,
     device: Arc<ConnectDevice>,
+    lyrics: LyricsClient,
     /// Cancels the browser sign-in currently waiting for its redirect, if any.
     sign_in_cancel: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -36,8 +39,23 @@ impl AppState {
         rx
     }
 
+    /// The Spicy Lyrics key from Settings, falling back to the environment.
+    fn lyrics_key(&self) -> Option<(String, &'static str)> {
+        self.config
+            .lock()
+            .unwrap()
+            .spicy_lyrics_key
+            .clone()
+            .filter(|k| !k.trim().is_empty())
+            .map(|k| (k, "settings"))
+            .or_else(|| LyricsClient::env_key().map(|k| (k, "environment")))
+    }
+
     async fn status(&self) -> AppStatus {
-        let config = self.config();
+        let mut config = self.config();
+        // The key is a secret: report only whether one is set and where it came from.
+        config.spicy_lyrics_key = None;
+        let lyrics_key = self.lyrics_key().map(|(_, source)| source);
         let signed_in = match &config.client_id {
             Some(id) => self.webapi.is_signed_in(id).await,
             None => false,
@@ -46,6 +64,7 @@ impl AppState {
             redirect_uri: auth::WEBAPI_REDIRECT.uri(),
             signed_in,
             device: self.device.status(),
+            lyrics_key,
             config,
         }
     }
@@ -58,6 +77,8 @@ struct AppStatus {
     redirect_uri: String,
     signed_in: bool,
     device: DeviceStatus,
+    /// Where the Spicy Lyrics key comes from ("settings" / "environment"), if any.
+    lyrics_key: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -66,6 +87,8 @@ struct SettingsInput {
     device_name: Option<String>,
     bitrate: Option<u16>,
     normalisation: Option<bool>,
+    /// Empty string clears it.
+    spicy_lyrics_key: Option<String>,
 }
 
 #[tauri::command]
@@ -98,12 +121,19 @@ async fn save_settings(
         if let Some(n) = settings.normalisation {
             cfg.normalisation = n;
         }
+        if let Some(key) = settings.spicy_lyrics_key {
+            let key = key.trim().to_owned();
+            cfg.spicy_lyrics_key = (!key.is_empty()).then_some(key);
+        }
         cfg.save(&state.paths.config_file)?;
         (old, cfg.clone())
     };
 
     if old.client_id != new.client_id {
         state.webapi.sign_out().await;
+    }
+    if old.spicy_lyrics_key != new.spicy_lyrics_key {
+        state.lyrics.clear_cache().await;
     }
     let device_changed = old.device_name != new.device_name
         || old.bitrate != new.bitrate
@@ -166,6 +196,16 @@ async fn api(
     state.webapi.request(&method, &path, query, body).await
 }
 
+/// Fetches lyrics for a Spotify track id from the Spicy Lyrics API.
+/// Returns `null` when the track has no lyrics.
+#[tauri::command]
+async fn spicy_lyrics(state: State<'_, AppState>, track_id: String) -> Result<Value> {
+    let (key, _) = state
+        .lyrics_key()
+        .ok_or_else(|| AppError::Auth("No Spicy Lyrics API key is set. Add one in Settings.".into()))?;
+    Ok(state.lyrics.get(&key, &track_id).await?.unwrap_or(Value::Null))
+}
+
 #[tauri::command]
 fn device_command(state: State<'_, AppState>, command: DeviceCommand) -> Result<()> {
     state.device.command(command)
@@ -179,6 +219,7 @@ fn restart_device(app: AppHandle, state: State<'_, AppState>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    LyricsClient::load_dev_env();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let app = tauri::Builder::default()
@@ -191,13 +232,15 @@ pub fn run() {
                 .user_agent(concat!("NativeSpotify/", env!("CARGO_PKG_VERSION")))
                 .build()?;
             let webapi = WebApi::new(http.clone(), paths.token_file.clone());
-            let device = Arc::new(ConnectDevice::new(paths.clone(), http, &config));
+            let device = Arc::new(ConnectDevice::new(paths.clone(), http.clone(), &config));
+            let lyrics = LyricsClient::new(http);
 
             app.manage(AppState {
                 config: Mutex::new(config),
                 paths,
                 webapi,
                 device,
+                lyrics,
                 sign_in_cancel: Mutex::new(None),
             });
 
@@ -221,6 +264,7 @@ pub fn run() {
             cancel_sign_in,
             sign_out,
             api,
+            spicy_lyrics,
             device_command,
             restart_device,
         ])
