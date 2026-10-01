@@ -64,6 +64,12 @@ class Player {
     return Math.max(0, Math.min(p, this.track?.durationMs ?? p));
   });
 
+  /** Position interpolated to this instant (for per-frame consumers like the lyrics renderer). */
+  positionNow(): number {
+    const p = this.isPlaying ? this.#positionMs + (performance.now() - this.#positionAt) : this.#positionMs;
+    return Math.max(0, Math.min(p, this.track?.durationMs ?? p));
+  }
+
   /** Our embedded device is the one currently playing. */
   isLocal = $derived.by(() => {
     const local = session.device;
