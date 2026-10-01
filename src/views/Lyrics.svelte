@@ -114,16 +114,10 @@
     </button>
   </div>
 
-  {#if !lyrics.configured}
-    <div class="panel">
-      <h2>Lyrics aren't set up</h2>
-      <p>Add a lyrics server, or your own Spicy Lyrics API key, in Settings.</p>
-      <button class="btn primary" onclick={() => router.go({ name: "settings" })}>Open Settings</button>
-    </div>
-  {:else if lyrics.needsSignIn}
+  {#if lyrics.needsSignIn}
     <form class="panel" onsubmit={signIn}>
-      <h2>Sign in to your lyrics server</h2>
-      <p>{lyrics.server?.version ? `Server ${lyrics.server.version} asks` : "Your lyrics server asks"} for an account.</p>
+      <h2>Sign in for lyrics</h2>
+      <p>The lyrics service needs your account.</p>
       <input class="field" placeholder="Username" autocomplete="username" bind:value={username} required />
       <input class="field" type="password" placeholder="Password" autocomplete="current-password" bind:value={password} required />
       <button class="btn primary" type="submit" disabled={signingIn}>{signingIn ? "Signing in…" : "Sign in"}</button>
