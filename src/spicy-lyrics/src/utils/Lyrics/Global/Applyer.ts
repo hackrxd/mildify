@@ -1,3 +1,7 @@
+// Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
+// Modified for Native Spotify: added the "lyrics-signin" and "lyrics-not-configured"
+// notices, and removed the notice footer that pointed to upstream's Discord.
+
 // deno-lint-ignore-file no-explicit-any
 
 import { $currentLyricsData, $currentLyricsType } from "../../stores.ts";
@@ -155,6 +159,14 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       noticeContent = `Lyrics aren't available for local files`
       break;
     }
+    case "lyrics-signin": {
+      noticeContent = `Sign in to your lyrics server in Settings to see lyrics`
+      break;
+    }
+    case "lyrics-not-configured": {
+      noticeContent = `Add a lyrics server or a Spicy Lyrics API key in Settings to see lyrics`
+      break;
+    }
     default:
       break;
   }
@@ -190,18 +202,10 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       PageContainer?.querySelector<HTMLElement>(".ContentBox")?.classList.add("LyricsHidden");
     }
 
-    currentNoticeElement.innerHTML = `
-      <p class="notice-descriptor">${noticeContent.trim()}</p>
-      <p class="notice-footer">Need more help? Join our <a>Discord</a>.</p>
-    `;
-
-    // Add click handler to log when the Discord link is clicked
-    const discordLink = currentNoticeElement.querySelector("a");
-    if (discordLink) {
-      discordLink.addEventListener("click", () => {
-        window.open("https://discord.com/invite/uqgXU5wh8j", "_blank");
-      }, { signal: currentAbortController.signal });
-    }
+    const descriptorElement = document.createElement("p");
+    descriptorElement.className = "notice-descriptor";
+    descriptorElement.textContent = noticeContent.trim();
+    currentNoticeElement.appendChild(descriptorElement);
 
     EmitApply("None", null)
     return;
