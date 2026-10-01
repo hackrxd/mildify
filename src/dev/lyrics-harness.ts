@@ -70,7 +70,8 @@ renderer.setHost({
     name: "Harbor Lights (sample)",
     album: "Harness",
     artists: [{ name: "Sample Artist", uri: "spotify:artist:0000000000000000000000" }],
-    cover: "https://i.scdn.co/image/ab67616d0000b2734ce8b4e42588bf18182a1ad2",
+    // Same-origin image so the dynamic background can fetch it without CORS.
+    cover: "/src-tauri/icons/icon.png",
     durationMs: 44000,
     type: "track",
   }),
