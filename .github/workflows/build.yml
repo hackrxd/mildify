@@ -1,8 +1,9 @@
 # Builds installers for Windows, macOS (Apple silicon and Intel) and Linux.
 # Tauri can't cross-compile between operating systems, so each target builds on its own runner.
-# Pushing a tag like v0.1.0 also drafts a GitHub release with every installer attached, plus the
-# signed update bundles and latest.json the in-app updater reads. Installed copies only see the
-# release once the draft is published.
+# Pushing a tag like v0.1.0 (matching the version in src-tauri/tauri.conf.json) builds a GitHub
+# release with every installer attached, plus the signed update bundles and latest.json the in-app
+# updater reads. The release stays a draft until all four builds succeed, then it's published as
+# the latest release, so installed copies never see a latest.json that's missing a platform.
 name: build
 
 on:
@@ -17,7 +18,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches the app version
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} doesn't match version ${version} in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+
+      - id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `Native Spotify ${context.ref.replace('refs/tags/', '')}`,
+              generate_release_notes: true,
+              draft: true,
+            });
+            return data.id;
+
   build:
+    needs: create-release
+    # Branch and PR builds skip create-release and still build.
+    if: ${{ !cancelled() && needs.create-release.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -65,9 +101,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: Native Spotify ${{ github.ref_name }}
-          releaseDraft: true
+          releaseId: ${{ needs.create-release.outputs.release_id }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -80,3 +114,22 @@ jobs:
             src-tauri/target/**/release/bundle/**/*.rpm
             src-tauri/target/**/release/bundle/**/*.AppImage
           if-no-files-found: error
+
+  publish-release:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.release_id),
+              draft: false,
+              make_latest: 'true',
+            });
