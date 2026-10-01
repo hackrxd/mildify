@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.spikerko.org; font-src 'self' data: https://fonts.spikerko.org; connect-src ipc: http://ipc.localhost https://*.scdn.co https://*.spotifycdn.com"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost https://*.scdn.co https://*.spotifycdn.com"
     }
   },
   "bundle": {
