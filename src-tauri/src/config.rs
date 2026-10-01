@@ -20,6 +20,8 @@ pub struct Config {
     pub initial_volume: u8,
     /// Apply ReplayGain-style volume normalisation.
     pub normalisation: bool,
+    /// Spicy Lyrics API key. Never sent to the UI (see `AppStatus`).
+    pub spicy_lyrics_key: Option<String>,
 }
 
 impl Default for Config {
@@ -31,6 +33,7 @@ impl Default for Config {
             bitrate: 320,
             initial_volume: 50,
             normalisation: false,
+            spicy_lyrics_key: None,
         }
     }
 }
