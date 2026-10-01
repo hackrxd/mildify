@@ -39,25 +39,8 @@ impl AppState {
         rx
     }
 
-    /// Where lyrics come from: the lyrics server if one is set, else a Spicy Lyrics
-    /// key from Settings, else one from the environment. Returns the server URL or key,
-    /// plus a label for the UI.
-    fn lyrics_source(&self) -> Option<(LyricsSource, &'static str)> {
-        let cfg = self.config.lock().unwrap();
-        if let Some(url) = cfg.lyrics_server_url.clone() {
-            return Some((LyricsSource::Server(url), "server"));
-        }
-        cfg.spicy_lyrics_key
-            .clone()
-            .map(|k| (LyricsSource::Key(k), "settings"))
-            .or_else(|| LyricsClient::env_key().map(|k| (LyricsSource::Key(k), "environment")))
-    }
-
     async fn status(&self) -> AppStatus {
-        let mut config = self.config();
-        // The key is a secret: report only where lyrics come from.
-        config.spicy_lyrics_key = None;
-        let lyrics_source = self.lyrics_source().map(|(_, label)| label);
+        let config = self.config();
         let signed_in = match &config.client_id {
             Some(id) => self.webapi.is_signed_in(id).await,
             None => false,
@@ -66,7 +49,6 @@ impl AppState {
             redirect_uri: auth::WEBAPI_REDIRECT.uri(),
             signed_in,
             device: self.device.status(),
-            lyrics_source,
             config,
         }
     }
@@ -79,13 +61,6 @@ struct AppStatus {
     redirect_uri: String,
     signed_in: bool,
     device: DeviceStatus,
-    /// Where lyrics come from: "server", "settings" (API key) or "environment" (API key).
-    lyrics_source: Option<&'static str>,
-}
-
-enum LyricsSource {
-    Server(String),
-    Key(String),
 }
 
 #[derive(Deserialize)]
@@ -94,10 +69,6 @@ struct SettingsInput {
     device_name: Option<String>,
     bitrate: Option<u16>,
     normalisation: Option<bool>,
-    /// Empty string clears it.
-    spicy_lyrics_key: Option<String>,
-    /// Empty string clears it.
-    lyrics_server_url: Option<String>,
 }
 
 #[tauri::command]
@@ -130,30 +101,12 @@ async fn save_settings(
         if let Some(n) = settings.normalisation {
             cfg.normalisation = n;
         }
-        if let Some(key) = settings.spicy_lyrics_key {
-            let key = key.trim().to_owned();
-            cfg.spicy_lyrics_key = (!key.is_empty()).then_some(key);
-        }
-        if let Some(url) = settings.lyrics_server_url {
-            let url = url.trim().trim_end_matches('/').to_owned();
-            if !url.is_empty() && !(url.starts_with("http://") || url.starts_with("https://")) {
-                return Err(AppError::Other("The lyrics server URL must start with http:// or https://".into()));
-            }
-            cfg.lyrics_server_url = (!url.is_empty()).then_some(url);
-        }
         cfg.save(&state.paths.config_file)?;
         (old, cfg.clone())
     };
 
     if old.client_id != new.client_id {
         state.webapi.sign_out().await;
-    }
-    if old.lyrics_server_url != new.lyrics_server_url {
-        // A token only belongs to the server that issued it.
-        state.lyrics.logout().await;
-    }
-    if old.spicy_lyrics_key != new.spicy_lyrics_key || old.lyrics_server_url != new.lyrics_server_url {
-        state.lyrics.clear_cache().await;
     }
     let device_changed = old.device_name != new.device_name
         || old.bitrate != new.bitrate
@@ -216,55 +169,34 @@ async fn api(
     state.webapi.request(&method, &path, query, body).await
 }
 
-/// Fetches lyrics (Spicy Lyrics v1 response) for a Spotify track id, from the lyrics
-/// server or the Spicy Lyrics API. Returns `null` when the track has no lyrics.
+/// Fetches lyrics (Spicy Lyrics v1 response) for a Spotify track id from the Nativify
+/// lyrics service. Returns `null` when the track has no lyrics.
 #[tauri::command]
 async fn spicy_lyrics(state: State<'_, AppState>, track_id: String) -> Result<Value> {
-    let (source, _) = state.lyrics_source().ok_or_else(|| {
-        AppError::Auth("Lyrics aren't set up. Add a lyrics server or a Spicy Lyrics API key in Settings.".into())
-    })?;
-    let source = match &source {
-        LyricsSource::Server(base) => lyrics::Source::Server { base },
-        LyricsSource::Key(key) => lyrics::Source::Direct { key },
-    };
-    Ok(state.lyrics.get(source, &track_id).await?.unwrap_or(Value::Null))
+    Ok(state.lyrics.get(&track_id).await?.unwrap_or(Value::Null))
 }
 
-fn lyrics_server_url(state: &AppState) -> Result<String> {
-    state
-        .config()
-        .lyrics_server_url
-        .ok_or_else(|| AppError::Other("No lyrics server is set".into()))
-}
-
-/// Health and sign-in state of the configured lyrics server (`null` if none is set).
+/// Health and sign-in state of the lyrics service.
 #[tauri::command]
-async fn lyrics_server_status(state: State<'_, AppState>) -> Result<Option<lyrics::ServerStatus>> {
-    match state.config().lyrics_server_url {
-        Some(url) => Ok(Some(state.lyrics.server_status(&url).await)),
-        None => Ok(None),
-    }
+async fn lyrics_server_status(state: State<'_, AppState>) -> Result<lyrics::ServerStatus> {
+    Ok(state.lyrics.status().await)
 }
 
-/// Signs in to the lyrics server. The password is forwarded once and never stored.
+/// Signs in to the lyrics service. The password is forwarded once and never stored.
 #[tauri::command]
 async fn lyrics_server_login(
     state: State<'_, AppState>,
     username: String,
     password: String,
 ) -> Result<lyrics::ServerStatus> {
-    let url = lyrics_server_url(&state)?;
-    state.lyrics.login(&url, username.trim(), &password).await?;
-    Ok(state.lyrics.server_status(&url).await)
+    state.lyrics.login(username.trim(), &password).await?;
+    Ok(state.lyrics.status().await)
 }
 
 #[tauri::command]
-async fn lyrics_server_logout(state: State<'_, AppState>) -> Result<Option<lyrics::ServerStatus>> {
+async fn lyrics_server_logout(state: State<'_, AppState>) -> Result<lyrics::ServerStatus> {
     state.lyrics.logout().await;
-    match state.config().lyrics_server_url {
-        Some(url) => Ok(Some(state.lyrics.server_status(&url).await)),
-        None => Ok(None),
-    }
+    Ok(state.lyrics.status().await)
 }
 
 #[tauri::command]
@@ -280,7 +212,6 @@ fn restart_device(app: AppHandle, state: State<'_, AppState>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    LyricsClient::load_dev_env();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let app = tauri::Builder::default()
