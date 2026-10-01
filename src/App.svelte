@@ -16,6 +16,8 @@
   import Artists from "./views/Artists.svelte";
   import Home from "./views/Home.svelte";
   import Liked from "./views/Liked.svelte";
+  import Lyrics from "./views/Lyrics.svelte";
+  import { lyrics } from "./lib/lyrics.svelte";
   import Playlist from "./views/Playlist.svelte";
   import Search from "./views/Search.svelte";
   import Settings from "./views/Settings.svelte";
@@ -43,6 +45,8 @@
   });
 
   const route = $derived(router.current);
+  const lyricsRoute = $derived(route.name === "lyrics");
+  const immersive = $derived(lyricsRoute && lyrics.immersive);
   // Search updates its route in place while typing; don't remount it per keystroke.
   const viewKey = $derived(route.name === "search" ? "search" : JSON.stringify(route));
 
@@ -93,13 +97,15 @@
 {:else if !session.ready}
   <Setup />
 {:else}
-  <div class="shell" class:queue-open={queueOpen}>
-    <Sidebar />
+  <div class="shell" class:queue-open={queueOpen} class:immersive>
+    {#if !immersive}<Sidebar />{/if}
 
-    <main bind:this={main} onscroll={() => (scrolled = (main?.scrollTop ?? 0) > 24)}>
-      <div class="bar" class:scrolled>
-        <TopBar bind:this={topbar} />
-      </div>
+    <main bind:this={main} class:fill={lyricsRoute} onscroll={() => (scrolled = (main?.scrollTop ?? 0) > 24)}>
+      {#if !immersive}
+        <div class="bar" class:scrolled={scrolled || lyricsRoute}>
+          <TopBar bind:this={topbar} />
+        </div>
+      {/if}
 
       {#if session.device?.state === "needs_login"}
         <div class="banner">
@@ -128,6 +134,8 @@
             <Artist id={route.id} />
           {:else if route.name === "playlist"}
             <Playlist id={route.id} />
+          {:else if route.name === "lyrics"}
+            <Lyrics />
           {:else if route.name === "settings"}
             <Settings />
           {/if}
@@ -162,6 +170,23 @@
   }
   .shell.queue-open {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 320px;
+  }
+  .shell.immersive {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shell.immersive.queue-open {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  /* The lyrics view fills the pane instead of scrolling with it. */
+  main.fill {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  main.fill .view {
+    flex: 1;
+    min-height: 0;
   }
 
   main {
