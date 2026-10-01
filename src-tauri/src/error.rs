@@ -7,7 +7,7 @@ pub type Result<T> = std::result::Result<T, AppError>;
 pub enum AppError {
     #[error("Spotify API error {status}: {message}")]
     Api { status: u16, message: String },
-    #[error("Rate limited by Spotify, retry in {retry_after}s")]
+    #[error("Rate limited, retry in {retry_after}s")]
     RateLimited { retry_after: u64 },
     #[error("Not signed in to Spotify")]
     NotSignedIn,
