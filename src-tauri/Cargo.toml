@@ -39,6 +39,10 @@ librespot-playback = { git = "https://github.com/librespot-org/librespot", rev =
 librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
 librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
 
+# Upstream librespot-core exits the process on free accounts; see vendor/librespot-core/PATCHED.md.
+[patch."https://github.com/librespot-org/librespot"]
+librespot-core = { path = "vendor/librespot-core" }
+
 [profile.release]
 codegen-units = 1
 lto = true
