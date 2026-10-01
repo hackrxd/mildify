@@ -71,7 +71,13 @@
         {/each}
       </ul>
       {#if session.device && session.device.state !== "ready"}
-        <p class="warn">The built-in player is {session.device.state.replace("_", " ")}.</p>
+        <p class="warn">
+          {#if session.device.state === "premium_required"}
+            The built-in player needs Spotify Premium.
+          {:else}
+            The built-in player is {session.device.state.replace("_", " ")}.
+          {/if}
+        </p>
       {/if}
     </div>
   {/if}
