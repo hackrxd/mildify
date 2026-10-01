@@ -22,6 +22,17 @@ export interface Attribution {
   uploader: Credit | null;
 }
 
+const OFFSET_KEY = "nativify:lyricsOffsetMs";
+
+function loadOffset(): number {
+  try {
+    const v = Number(localStorage.getItem(OFFSET_KEY));
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
 const PROVIDERS: Record<string, string> = {
   spicy_lyrics: "the Spicy Lyrics community",
   apple_music: "Apple Music",
@@ -42,13 +53,24 @@ class Lyrics {
   needsSignIn = $state(false);
   /** Lyrics fill the window (sidebar and top bar hidden). */
   immersive = $state(false);
+  /** User timing nudge in ms: positive shows lyrics later, negative earlier. */
+  offsetMs = $state(loadOffset());
+
+  setOffset(ms: number) {
+    this.offsetMs = Math.round(ms);
+    try {
+      localStorage.setItem(OFFSET_KEY, String(this.offsetMs));
+    } catch {
+      // Not persisted; still applies for this session.
+    }
+  }
   #installed = false;
 
   install() {
     if (this.#installed) return;
     this.#installed = true;
     setHost({
-      position: () => player.positionNow(),
+      position: () => Math.max(0, player.positionNow() - this.offsetMs),
       isPlaying: () => player.isPlaying,
       track: (): HostTrack | null => {
         const t = player.track;
