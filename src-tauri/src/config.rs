@@ -22,6 +22,8 @@ pub struct Config {
     pub normalisation: bool,
     /// Spicy Lyrics API key. Never sent to the UI (see `AppStatus`).
     pub spicy_lyrics_key: Option<String>,
+    /// A native-spotify-backend lyrics server; takes precedence over the key when set.
+    pub lyrics_server_url: Option<String>,
 }
 
 impl Default for Config {
@@ -34,6 +36,7 @@ impl Default for Config {
             initial_volume: 50,
             normalisation: false,
             spicy_lyrics_key: None,
+            lyrics_server_url: None,
         }
     }
 }
@@ -64,6 +67,8 @@ impl Config {
 pub struct Paths {
     pub config_file: PathBuf,
     pub token_file: PathBuf,
+    /// Lyrics server sign-in token (kept out of config.json).
+    pub lyrics_session_file: PathBuf,
     /// librespot credentials + volume cache.
     pub librespot_dir: PathBuf,
     /// librespot's (encrypted) audio file cache.
@@ -75,6 +80,7 @@ impl Paths {
         Self {
             config_file: config_dir.join("config.json"),
             token_file: data_dir.join("webapi_token.json"),
+            lyrics_session_file: data_dir.join("lyrics_server_session.json"),
             librespot_dir: data_dir.join("librespot"),
             audio_cache_dir: cache_dir.join("audio"),
         }
