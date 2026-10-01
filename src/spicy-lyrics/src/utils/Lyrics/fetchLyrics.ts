@@ -1,8 +1,8 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
 // Modified for Native Spotify: the transport is replaced. Upstream posts to the
 // extension's private /query endpoint and caches in IndexedDB; this asks the host
-// (Rust backend), which calls the public v1 API or a Native Spotify lyrics server
-// and caches there. AdaptApiLyrics maps the public response onto the renderer's
+// (Rust backend), which calls the Nativify lyrics service (a proxy for the public
+// v1 API) and caches there. AdaptApiLyrics maps the public response onto the renderer's
 // internal shape. The presentation/loader/staleness logic is upstream's.
 
 import { $currentLyricsData, $currentLyricsType, $currentlyFetching } from "../stores.ts";
@@ -170,7 +170,6 @@ async function runFetchLyrics(uri: string): Promise<[object | string, number] | 
 
     if (kind === "rate_limited" || status === 429) return ["rate-limited", 429];
     if (status === 401) return ["lyrics-signin", 401];
-    if (kind === "auth") return ["lyrics-not-configured", 0];
     if (kind === "network") return navigator.onLine ? ["service-unavailable", 0] : ["offline", 400];
     if (status !== null) return ["status-not-200", status];
     return ["unknown-error", 0];
