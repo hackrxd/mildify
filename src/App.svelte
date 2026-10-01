@@ -116,6 +116,11 @@
             {session.signingIn ? "Waiting for your browser…" : "Sign in for playback"}
           </button>
         </div>
+      {:else if session.device?.state === "premium_required"}
+        <div class="banner">
+          <p>Playing music needs Spotify Premium. You can still browse your library and playlists.</p>
+          <button class="btn primary" onclick={() => session.restartDevice()}>Check again</button>
+        </div>
       {/if}
 
       {#if updater.state === "ready" || updater.state === "installing"}
