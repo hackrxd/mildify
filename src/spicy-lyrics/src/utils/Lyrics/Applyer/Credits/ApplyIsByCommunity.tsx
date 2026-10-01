@@ -1,3 +1,8 @@
+// Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
+// Modified for Native Spotify: profile links use the `url` the public API returns
+// for the uploader and maker (required by its attribution terms), falling back to
+// the upstream profile URL.
+
 import { IsPIP } from "../../../../components/Utils/PopupLyrics.ts";
 
 let isByCommunityAbortController: AbortController | null = null;
@@ -17,9 +22,14 @@ export function CleanUpIsByCommunity() {
   madeTippys.clear();
 }
 
-function openProfile(userId: string | undefined) {
-  if (!userId) return;
-  const url = `https://spicylyrics.org/uid/${encodeURIComponent(userId)}`;
+function openProfile(user: { id?: string; url?: string } | undefined) {
+  const url =
+    user?.url && /^https?:\/\//i.test(user.url)
+      ? user.url
+      : user?.id
+        ? `https://spicylyrics.org/uid/${encodeURIComponent(user.id)}`
+        : null;
+  if (!url) return;
   globalThis.open?.(url, "_blank", "noopener,noreferrer");
 }
 
@@ -131,7 +141,7 @@ export function ApplyIsByCommunity(data: any, LyricsContainer: HTMLElement): voi
     uploaderSpan.addEventListener(
       "click",
       () => {
-        openProfile(data.TTMLUploadMetadata?.Uploader?.id);
+        openProfile(data.TTMLUploadMetadata?.Uploader);
         if (IsPIP) {
           globalThis.focus();
         }
@@ -153,7 +163,7 @@ export function ApplyIsByCommunity(data: any, LyricsContainer: HTMLElement): voi
     makerSpan.addEventListener(
       "click",
       () => {
-        openProfile(data.TTMLUploadMetadata?.Maker?.id);
+        openProfile(data.TTMLUploadMetadata?.Maker);
         if (IsPIP) {
           globalThis.focus();
         }
