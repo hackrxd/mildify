@@ -43,13 +43,33 @@ export interface Config {
   bitrate: number;
   initial_volume: number;
   normalisation: boolean;
+  /** Always null here: the key never leaves the backend. */
+  spicy_lyrics_key: null;
+  lyrics_server_url: string | null;
 }
+
+export type LyricsSource = "server" | "settings" | "environment";
+
+export interface LyricsServerStatus {
+  reachable: boolean;
+  auth_required: boolean;
+  version: string | null;
+  username: string | null;
+  error: string | null;
+}
+
+type SettingsInput = Partial<
+  Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation" | "lyrics_server_url"> & {
+    spicy_lyrics_key: string;
+  }
+>;
 
 export interface AppStatus {
   config: Config;
   redirect_uri: string;
   signed_in: boolean;
   device: DeviceStatus;
+  lyrics_source: LyricsSource | null;
 }
 
 export type DeviceCommand =
@@ -84,13 +104,18 @@ type Query = Record<string, string | number | boolean | undefined | null>;
 
 export const backend = {
   status: () => invoke<AppStatus>("app_status"),
-  saveSettings: (settings: Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation">>) =>
-    invoke<AppStatus>("save_settings", { settings }),
+  saveSettings: (settings: SettingsInput) => invoke<AppStatus>("save_settings", { settings }),
   signIn: () => invoke<AppStatus>("sign_in"),
   cancelSignIn: () => invoke<void>("cancel_sign_in"),
   signOut: () => invoke<AppStatus>("sign_out"),
   restartDevice: () => invoke<void>("restart_device"),
   device: (command: DeviceCommand) => invoke<void>("device_command", { command }),
+  /** Spicy Lyrics v1 response for a track, or null when there are no lyrics. */
+  lyrics: (trackId: string) => invoke<unknown | null>("spicy_lyrics", { trackId }),
+  lyricsServerStatus: () => invoke<LyricsServerStatus | null>("lyrics_server_status"),
+  lyricsServerLogin: (username: string, password: string) =>
+    invoke<LyricsServerStatus>("lyrics_server_login", { username, password }),
+  lyricsServerLogout: () => invoke<LyricsServerStatus | null>("lyrics_server_logout"),
 };
 
 let authLost: (() => void) | null = null;
