@@ -20,10 +20,6 @@ pub struct Config {
     pub initial_volume: u8,
     /// Apply ReplayGain-style volume normalisation.
     pub normalisation: bool,
-    /// Spicy Lyrics API key. Never sent to the UI (see `AppStatus`).
-    pub spicy_lyrics_key: Option<String>,
-    /// A native-spotify-backend lyrics server; takes precedence over the key when set.
-    pub lyrics_server_url: Option<String>,
 }
 
 impl Default for Config {
@@ -35,8 +31,6 @@ impl Default for Config {
             bitrate: 320,
             initial_volume: 50,
             normalisation: false,
-            spicy_lyrics_key: None,
-            lyrics_server_url: None,
         }
     }
 }
@@ -67,7 +61,7 @@ impl Config {
 pub struct Paths {
     pub config_file: PathBuf,
     pub token_file: PathBuf,
-    /// Lyrics server sign-in token (kept out of config.json).
+    /// Lyrics service sign-in token (kept out of config.json).
     pub lyrics_session_file: PathBuf,
     /// librespot credentials + volume cache.
     pub librespot_dir: PathBuf,
