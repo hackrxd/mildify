@@ -9,6 +9,7 @@ export type Route =
   | { name: "album"; id: string }
   | { name: "artist"; id: string }
   | { name: "playlist"; id: string }
+  | { name: "lyrics" }
   | { name: "settings" };
 
 class Router {
