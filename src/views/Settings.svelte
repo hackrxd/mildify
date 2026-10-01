@@ -2,6 +2,7 @@
   import Icon from "../components/Icon.svelte";
   import { lyrics } from "../lib/lyrics.svelte";
   import { session } from "../lib/session.svelte";
+  import { updater } from "../lib/updater.svelte";
 
   const config = $derived(session.status?.config);
   const device = $derived(session.device);
@@ -170,6 +171,37 @@
       <button class="btn quiet" onclick={() => session.signOut()}>
         <Icon name="signOut" size={16} /> Sign out
       </button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Updates</h2>
+    <div class="row">
+      <span>
+        <span class="label">Native Spotify {updater.current}</span>
+        <span class="muted small">
+          {#if import.meta.env.DEV}Development builds don't update themselves.
+          {:else if updater.state === "checking"}Checking for updates…
+          {:else if updater.state === "up_to_date"}You're on the latest version.
+          {:else if updater.state === "downloading"}Downloading {updater.available}{updater.progress === null ? "…" : ` (${Math.round(updater.progress * 100)}%)`}
+          {:else if updater.state === "ready" || updater.state === "installing"}Version {updater.available} is downloaded and ready.
+          {:else if updater.state === "error"}Couldn't check for updates: {updater.error}
+          {:else}Updates download in the background and install when you restart.{/if}
+        </span>
+      </span>
+      {#if updater.state === "ready" || updater.state === "installing"}
+        <button class="btn primary" onclick={() => updater.restart()} disabled={updater.state === "installing"}>
+          {updater.state === "installing" ? "Installing…" : "Restart now"}
+        </button>
+      {:else}
+        <button
+          class="btn quiet"
+          onclick={() => updater.check()}
+          disabled={import.meta.env.DEV || updater.state === "checking" || updater.state === "downloading"}
+        >
+          <Icon name="refresh" size={16} /> Check for updates
+        </button>
+      {/if}
     </div>
   </section>
 
