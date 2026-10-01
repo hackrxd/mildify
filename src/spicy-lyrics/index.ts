@@ -18,8 +18,9 @@ import "./src/css/Lyrics/Mixed.css";
 import "./src/css/Loaders/LoaderContainer.css";
 import "./src/css/Loaders/LyricsSkeleton.css";
 import "./src/css/font-pack/font-pack.css";
+import "./compat/fonts.css";
 
-import LoadFonts, { ApplyFontPixel } from "./src/components/Styling/Fonts.ts";
+import { ApplyFontPixel } from "./src/components/Styling/Fonts.ts";
 import PageView, { OnSongChange, PageContainer, SetNowBarOpen } from "./src/components/Pages/PageView.ts";
 import { SetFullscreenState } from "./src/components/Utils/Fullscreen.ts";
 import { DisableCompactMode, EnableCompactMode } from "./src/components/Utils/CompactMode.ts";
@@ -40,7 +41,8 @@ let started = false;
 function start() {
   if (started) return;
   started = true;
-  LoadFonts();
+  // Upstream's LoadFonts() pulls stylesheets from fonts.spikerko.org; the typeface
+  // comes from compat/fonts.css instead.
   ApplyFontPixel();
   new IntervalManager(ScrollingIntervalTime, () => {
     if (ScrollSimplebar) ScrollToActiveLine(ScrollSimplebar);
