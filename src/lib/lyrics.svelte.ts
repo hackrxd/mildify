@@ -74,9 +74,23 @@ class Lyrics {
     });
   }
 
+  /** Rate limits are usually brief (the API answers Retry-After: 10), so wait one out before giving up. */
+  async #lyricsWithRetry(trackId: string): Promise<unknown | null> {
+    try {
+      return await backend.lyrics(trackId);
+    } catch (e) {
+      const seconds = isAppError(e) && e.kind === "rate_limited" ? Number(e.message.match(/(\d+)s/)?.[1] ?? 0) : 0;
+      if (seconds > 0 && seconds <= 15 && player.track?.uri.endsWith(trackId)) {
+        await new Promise((r) => setTimeout(r, seconds * 1000));
+        return await backend.lyrics(trackId);
+      }
+      throw e;
+    }
+  }
+
   async #fetch(trackId: string): Promise<unknown | null> {
     try {
-      const response = await backend.lyrics(trackId);
+      const response = await this.#lyricsWithRetry(trackId);
       this.needsSignIn = false;
       const body = (response as { Body?: Record<string, unknown> } | null)?.Body;
       if (body) {
