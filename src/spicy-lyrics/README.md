@@ -31,11 +31,34 @@ rewritten (same path and exports, new implementation) to run on Native Spotify's
 | `src/utils/Lyrics/ProcessLyrics.ts` | Empty-line pruning only (see below) |
 | `src/utils/audioAnalysis.ts`, `src/components/DynamicBG/ArtistVisuals/Main.ts` | Disabled (relied on private Spotify endpoints) |
 
+Small edits to otherwise verbatim files:
+
+| File | Change |
+| --- | --- |
+| `src/utils/Lyrics/Global/Applyer.ts` | Notices for "sign in to the lyrics server" and "lyrics aren't set up"; the footer linking upstream's Discord is removed (it's upstream's support channel, not this port's) |
+| `src/utils/Lyrics/Applyer/Credits/ApplyIsByCommunity.tsx` | Uploader/maker links use the profile `url` from the public API, as its attribution terms require |
+
+Additions: `src/components/Pages/PageState.ts` holds the page element outside an import cycle.
+Upstream's esbuild bundle rewrites top-level `let` to `var`, which hides a temporal-dead-zone
+read; native ES modules (Vite) don't, so the binding lives in a module with no imports.
+
 Every modified upstream file carries a `Modified for Native Spotify` note at the top describing
 the change, as AGPL section 5(a) requires.
 
 `compat/` holds a minimal `Spicetify` object (local storage, tooltips, link opening) so the
-verbatim files that still touch it keep working.
+verbatim files that still touch it keep working, the host bridge the app implements, and
+`fonts.css`.
+
+## Fonts
+
+Upstream loads its typeface from `fonts.spikerko.org`, which only allows Spotify's origin. Rather
+than work around that, `compat/fonts.css` registers [Inter](https://rsms.me/inter/) (SIL OFL 1.1)
+under the same `SpicyLyrics` family name, and upstream's `LoadFonts()` isn't called.
+
+## Trying it without the app
+
+`/lyrics-harness.html` (with `npm run dev`) mounts the renderer with a simulated clock and a
+handwritten sample sync, so the port can be checked in a browser without Tauri or an API key.
 
 ## Not ported
 
