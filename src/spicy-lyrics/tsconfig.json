@@ -20,6 +20,5 @@
     "noImplicitOverride": true,
     "strictNullChecks": false
   },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"],
-  "exclude": ["api.d.ts"]
+  "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"]
 }
