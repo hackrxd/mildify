@@ -111,7 +111,12 @@ async fn save_settings(
     let device_changed = old.device_name != new.device_name
         || old.bitrate != new.bitrate
         || old.normalisation != new.normalisation;
-    if device_changed && !matches!(state.device.status().state, DeviceState::Offline | DeviceState::NeedsLogin) {
+    if device_changed
+        && !matches!(
+            state.device.status().state,
+            DeviceState::Offline | DeviceState::NeedsLogin | DeviceState::PremiumRequired
+        )
+    {
         state.device.start(app, new, None);
     }
     Ok(state.status().await)
