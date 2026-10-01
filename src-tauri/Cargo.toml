@@ -36,6 +36,7 @@ librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = 
 librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061", features = ["rodio-backend"] }
 librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
 librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
+dotenvy = "0.15"
 
 [profile.release]
 codegen-units = 1
