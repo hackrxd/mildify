@@ -62,28 +62,19 @@ The lyrics view (the lines button in the player bar) runs the renderer from
 background vocals, line-synced and static fallbacks, the animated cover-art background and the
 cover panel. It's ported from the Spicetify extension with only its Spotify-client plumbing
 replaced; see [src/spicy-lyrics/README.md](src/spicy-lyrics/README.md) for exactly what changed.
-Lyrics come from the public Spicy Lyrics API, and the view always credits the provider (and the
-community members who made a sync), as the API's terms require.
+Lyrics come from the Spicy Lyrics API through the Nativify lyrics service (below), and the view
+always credits the provider (and the community members who made a sync), as the API's terms
+require.
 
 Romanization isn't included yet: upstream downloads and runs romanization packages from a CDN
 at runtime. Lyrics that ship their own romanization still get the toggle.
 
-## Lyrics server (optional)
+## Lyrics service
 
-Synced lyrics come from the [Spicy Lyrics API](https://developers.spicylyrics.org/docs), which needs a
-secret key. You can give the app your own key, or point it at a **lyrics server** that holds the key
-for you and everyone you share it with:
-
-- **Your own key**: paste it in Settings, or set `SL_DEVKEY` in a `.env` file when developing.
-- **A lyrics server**: [native-spotify-backend](../native-spotify-backend) is a small Rust server
-  that proxies the API, caches responses and can require a username and password. Install it on an
-  Ubuntu server with one command:
-
-  ```bash
-  sudo ./deploy/install.sh --domain lyrics.example.com
-  ```
-
-  Then paste the URL it prints into Settings and log in with the account it created.
+Lyrics are fetched only from the Nativify lyrics service at `https://nativify.hackrvt.xyz`
+([native-spotify-backend](../native-spotify-backend)). It holds the Spicy Lyrics API key, caches
+responses and may require an account. If it does, sign in under Settings → Lyrics (or from the
+lyrics view when it asks). The address is built into the app and can't be changed in Settings.
 
 ## Limitations (Spotify's, not ours)
 
@@ -126,6 +117,6 @@ src-tauri/src/
   auth.rs           PKCE browser sign-in with a loopback redirect
   webapi.rs         Web API client with token refresh and rate-limit handling
   device.rs         librespot Connect device and its supervisor
-  lyrics.rs         Spicy Lyrics API / lyrics server client
+  lyrics.rs         Nativify lyrics service client and sign-in
   lib.rs            Tauri commands and app state
 ```
