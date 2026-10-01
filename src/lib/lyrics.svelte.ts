@@ -5,7 +5,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { setHost, type HostTrack } from "spicy-lyrics-renderer";
 import { backend, isAppError, type LyricsServerStatus } from "./ipc";
 import { player } from "./player.svelte";
-import { session } from "./session.svelte";
 import { toasts } from "./toasts.svelte";
 
 export interface Credit {
@@ -39,7 +38,7 @@ class Lyrics {
   /** Attribution for the most recently fetched track's lyrics. */
   attribution = $state<Attribution | null>(null);
   server = $state<LyricsServerStatus | null>(null);
-  /** The lyrics server rejected our token; the view offers sign-in. */
+  /** The lyrics service rejected our token; the view offers sign-in. */
   needsSignIn = $state(false);
   /** Lyrics fill the window (sidebar and top bar hidden). */
   immersive = $state(false);
@@ -148,9 +147,6 @@ class Lyrics {
       toasts.error(e);
     }
   }
-
-  /** Whether lyrics can be fetched at all with the current settings. */
-  configured = $derived(!!session.status?.lyrics_source);
 }
 
 export const lyrics = new Lyrics();
