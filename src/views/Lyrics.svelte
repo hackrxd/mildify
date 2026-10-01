@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import * as renderer from "spicy-lyrics-renderer";
   import Icon from "../components/Icon.svelte";
   import { lyrics } from "../lib/lyrics.svelte";
@@ -16,17 +17,23 @@
   let password = $state("");
   let signingIn = $state(false);
 
+  // Mount once per host element. Everything inside is untracked: the renderer reads
+  // the player while mounting, and tracking that would remount it on every poll.
   $effect(() => {
-    if (!host) return;
-    lyrics.install();
-    lastUri = player.track?.uri;
-    const off = renderer.onLyricsApplied(() => {
-      romanAvailable = renderer.romanizationAvailable();
+    const el = host;
+    if (!el) return;
+    const { off, ro } = untrack(() => {
+      lyrics.install();
+      lastUri = player.track?.uri;
+      const off = renderer.onLyricsApplied(() => {
+        romanAvailable = renderer.romanizationAvailable();
+      });
+      // Narrow panes pin the active line to the top, like upstream's compact mode.
+      const ro = new ResizeObserver(([entry]) => renderer.setCompact(entry.contentRect.width < 720));
+      ro.observe(el);
+      renderer.mount(el).then(() => (mounted = true));
+      return { off, ro };
     });
-    // Narrow panes pin the active line to the top, like upstream's compact mode.
-    const ro = new ResizeObserver(([entry]) => renderer.setCompact(entry.contentRect.width < 720));
-    ro.observe(host);
-    renderer.mount(host).then(() => (mounted = true));
     return () => {
       off();
       ro.disconnect();
@@ -36,18 +43,21 @@
     };
   });
 
-  // Re-run the renderer's song-change pipeline when the track changes.
+  // Re-run the renderer's song-change pipeline when the track (by URI) changes.
   $effect(() => {
     const uri = player.track?.uri;
     if (!mounted || !uri || uri === lastUri) return;
     lastUri = uri;
-    romanAvailable = false;
-    renderer.songChanged();
+    untrack(() => {
+      romanAvailable = false;
+      renderer.songChanged();
+    });
   });
 
   // Keep the renderer's fullscreen layout in step with immersive mode.
   $effect(() => {
-    if (mounted) renderer.setFullscreen(lyrics.immersive);
+    const immersive = lyrics.immersive;
+    if (mounted) untrack(() => renderer.setFullscreen(immersive));
   });
 
   function toggleNowBar() {
