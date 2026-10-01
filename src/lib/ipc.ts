@@ -93,6 +93,13 @@ export const backend = {
   device: (command: DeviceCommand) => invoke<void>("device_command", { command }),
 };
 
+let authLost: (() => void) | null = null;
+
+/** Registers a handler for when the Web API session is gone (refresh token revoked). */
+export function onAuthLost(fn: () => void) {
+  authLost = fn;
+}
+
 /** Calls the Spotify Web API through the backend, which owns the token. */
 export function api<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<T> {
   const query = opts.query
@@ -100,5 +107,8 @@ export function api<T>(method: string, path: string, opts: { query?: Query; body
         .filter(([, v]) => v !== undefined && v !== null)
         .map(([k, v]) => [k, String(v)] as [string, string])
     : undefined;
-  return invoke<T>("api", { method, path, query, body: opts.body });
+  return invoke<T>("api", { method, path, query, body: opts.body }).catch((e) => {
+    if (isAppError(e) && e.kind === "not_signed_in") authLost?.();
+    throw e;
+  });
 }
