@@ -14,6 +14,7 @@
     needs_login: "Needs you to sign in",
     connecting: "Connecting to Spotify…",
     ready: "Ready. It shows up in every Spotify app as a speaker.",
+    premium_required: "Playing music here needs Spotify Premium. You can still browse your library.",
     error: "Couldn't connect. Retrying automatically.",
   };
 
@@ -264,7 +265,8 @@
     box-shadow: 0 0 10px var(--brass);
   }
   .dot.state-error,
-  .dot.state-needs_login {
+  .dot.state-needs_login,
+  .dot.state-premium_required {
     background: var(--danger);
   }
   .row {
