@@ -32,7 +32,11 @@ Built with Tauri 2 (Rust) and Svelte 5.
 
 - **Spotify Premium** (librespot playback and Web API playback control both need it).
 - A **Spotify developer app** of your own (free).
-- Windows: Visual Studio Build Tools with the C++ workload, and the Windows 11 SDK.
+- Platform build tools:
+  - Windows: Visual Studio Build Tools with the C++ workload, and the Windows 11 SDK.
+  - macOS: Xcode Command Line Tools (`xcode-select --install`).
+  - Linux (Debian/Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential`.
+    Other distros need the same WebKitGTK 4.1 and ALSA development packages.
 - [Rust](https://rustup.rs) (stable) and Node.js 20+.
 
 ## Setup
@@ -53,7 +57,15 @@ Built with Tauri 2 (Rust) and Svelte 5.
 
 Tokens and librespot credentials are cached in the app's data directory, so you only sign in once.
 
-To build an installer: `npm run tauri build`.
+To build an installer for the computer you're on: `npm run tauri build`. It lands in
+`src-tauri/target/release/bundle/` (`.msi`/`.exe` on Windows, `.dmg`/`.app` on macOS,
+`.deb`/`.rpm`/`.AppImage` on Linux).
+
+Tauri can't build for another operating system, so the GitHub Actions workflow in
+[.github/workflows/build.yml](.github/workflows/build.yml) builds all of them: Windows, macOS
+(Apple silicon and Intel) and Linux. Every push to `main` uploads the installers as workflow
+artifacts, and pushing a `v*` tag drafts a release with them attached. The macOS builds aren't
+signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
 
 ## Lyrics
 
