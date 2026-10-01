@@ -1,0 +1,42 @@
+[package]
+name = "nativespotify"
+version = "0.1.0"
+description = "A custom native Spotify client: Web API for browsing, librespot (Spotify Connect) for playback"
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "nativespotify_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+url = "2"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+futures-util = "0.3"
+
+# librespot is pinned to a dev-branch commit: the 0.8.0 release predates the
+# 2026 CDN fallback fix (#1722) that keeps playback working against current servers.
+librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
+librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
+librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061", features = ["rodio-backend"] }
+librespot-metadata = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
+librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
