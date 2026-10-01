@@ -28,6 +28,15 @@ export interface NowPlaying {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * librespot reports the decoder's position, but its rodio output keeps up to ~26
+ * packets (~0.6 s) queued ahead of the speakers, so local positions lead what you
+ * hear by about this much. Seeks flush that queue, so they're taken as-is.
+ */
+const LOCAL_OUTPUT_LATENCY_MS = 600;
+/** Periodic position reports closer than this to our running clock are just jitter. */
+const LOCAL_RESYNC_THRESHOLD_MS = 80;
+
 function fromWebTrack(t: Track): NowPlaying {
   const images = t.album?.images ?? (t as unknown as { images?: [] }).images;
   return {
@@ -59,6 +68,8 @@ class Player {
   #positionAt = $state(0);
   #now = $state(performance.now());
   #lastLocalEvent = 0;
+  /** When the local output queue was last emptied (seek or load). */
+  #lastFlushAt = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #backoffUntil = 0;
 
@@ -95,6 +106,11 @@ class Player {
     this.#positionMs = ms;
     this.#positionAt = performance.now();
     this.#now = this.#positionAt;
+  }
+
+  /** Audible position for a decoder position reported by the local device. */
+  #heard(decoderMs: number): number {
+    return Math.max(0, decoderMs - LOCAL_OUTPUT_LATENCY_MS);
   }
 
   refreshSoon(ms = 600) {
@@ -144,10 +160,10 @@ class Player {
         this.track = next;
       }
     }
-    if (!localFresh) {
-      this.isPlaying = s.is_playing;
-      this.#setPosition(s.progress_ms ?? 0);
-    }
+    if (!localFresh) this.isPlaying = s.is_playing;
+    // Our own device reports its position directly; the Web API's figure is the
+    // server extrapolating those same reports, plus request latency.
+    if (!this.isLocal) this.#setPosition(s.progress_ms ?? 0);
   }
 
   #onLocal(ev: LocalEvent) {
@@ -157,7 +173,10 @@ class Player {
       case "playing":
         this.isPlaying = true;
         this.isLoading = false;
-        this.#setPosition(ev.position_ms);
+        // Straight after a seek/load the queue is empty, so nothing is buffered yet.
+        this.#setPosition(
+          performance.now() - this.#lastFlushAt < 1500 ? ev.position_ms : this.#heard(ev.position_ms),
+        );
         if (local) {
           this.deviceId = local.device_id;
           this.deviceName = local.name;
@@ -166,15 +185,22 @@ class Player {
       case "paused":
         this.isPlaying = false;
         this.isLoading = false;
-        this.#setPosition(ev.position_ms);
+        this.#setPosition(this.#heard(ev.position_ms));
         break;
       case "loading":
         this.isLoading = true;
+        this.#lastFlushAt = performance.now();
         this.#setPosition(ev.position_ms);
         break;
       case "seeked":
+        this.#lastFlushAt = performance.now();
         this.#setPosition(ev.position_ms);
         break;
+      case "position": {
+        const heard = this.#heard(ev.position_ms);
+        if (Math.abs(this.positionNow() - heard) > LOCAL_RESYNC_THRESHOLD_MS) this.#setPosition(heard);
+        break;
+      }
       case "stopped":
         // Usually means playback was transferred away from us.
         this.isPlaying = false;
