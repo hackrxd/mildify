@@ -41,6 +41,8 @@ class Lyrics {
   server = $state<LyricsServerStatus | null>(null);
   /** The lyrics server rejected our token; the view offers sign-in. */
   needsSignIn = $state(false);
+  /** Lyrics fill the window (sidebar and top bar hidden). */
+  immersive = $state(false);
   #installed = false;
 
   install() {
