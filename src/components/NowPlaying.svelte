@@ -152,17 +152,19 @@
     height: var(--deck-h);
     padding: 0 20px 0 14px;
     background:
-      linear-gradient(90deg, color-mix(in srgb, var(--deck-ambient) 55%, transparent), transparent 55%),
-      var(--panel);
+      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) 50%, transparent), transparent 60%),
+      var(--frame);
     transition: background 600ms;
   }
   /* The one glowing edge: the colour of what's playing, bleeding into the room. */
   .deck::before {
     content: "";
     position: absolute;
-    inset: -1px 0 auto 0;
+    inset: 0 auto auto var(--seam);
+    width: 60%;
     height: 1px;
-    background: linear-gradient(90deg, var(--deck-ambient), transparent 70%);
+    background: linear-gradient(90deg, var(--deck-ambient), transparent);
+    opacity: 0.8;
   }
 
   .info {
@@ -175,9 +177,14 @@
     flex: none;
     width: 60px;
     height: 60px;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     background: var(--raised);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+    transition: transform 140ms;
+  }
+  .cover:hover {
+    transform: scale(1.04);
   }
   .cover img {
     width: 100%;
@@ -218,7 +225,7 @@
   .buttons {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
   }
   .play {
     display: grid;
@@ -228,11 +235,34 @@
     border-radius: 50%;
     background: var(--paper);
     color: var(--graphite);
-    transition: transform 100ms;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+    transition: transform 100ms, background 120ms;
   }
   .play:hover {
     transform: scale(1.06);
+    background: #fff;
   }
+  .play:active {
+    transform: scale(0.96);
+  }
+  /* Toggles that are on get a lit dot underneath, like a switched-on channel. */
+  .buttons :global(.icon-btn.on),
+  .extras :global(.icon-btn.on) {
+    position: relative;
+  }
+  .buttons :global(.icon-btn.on)::after,
+  .extras :global(.icon-btn.on)::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--brass);
+    transform: translateX(-50%);
+  }
+
   .progress {
     display: grid;
     grid-template-columns: 44px 1fr 44px;
