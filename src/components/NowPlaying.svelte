@@ -4,6 +4,7 @@
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import { formatDuration } from "../lib/util";
+  import DeckLyric from "./DeckLyric.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
   import Slider from "./Slider.svelte";
@@ -61,6 +62,7 @@
           <Icon name="heart" filled={saved} />
         </button>
       {/if}
+      <DeckLyric />
     {:else}
       <p class="idle muted">Pick something to play.</p>
     {/if}
