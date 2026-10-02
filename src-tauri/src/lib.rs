@@ -183,6 +183,19 @@ async fn spicy_lyrics(state: State<'_, AppState>, track_id: String) -> Result<Va
     Ok(state.lyrics.get(&track_id).await?.unwrap_or(Value::Null))
 }
 
+/// Fetches lyrics for upcoming tracks into the backend's cache, without returning them.
+#[tauri::command]
+async fn warm_lyrics(state: State<'_, AppState>, track_ids: Vec<String>) -> Result<usize> {
+    Ok(state.lyrics.warm(&track_ids).await)
+}
+
+/// Drops a played track's cached lyrics, so its next play gets the latest version.
+#[tauri::command]
+async fn forget_lyrics(state: State<'_, AppState>, track_id: String) -> Result<()> {
+    state.lyrics.forget(&track_id).await;
+    Ok(())
+}
+
 /// Health and sign-in state of the lyrics service.
 #[tauri::command]
 async fn lyrics_server_status(state: State<'_, AppState>) -> Result<lyrics::ServerStatus> {
@@ -268,6 +281,8 @@ pub fn run() {
             sign_out,
             api,
             spicy_lyrics,
+            warm_lyrics,
+            forget_lyrics,
             lyrics_server_status,
             lyrics_server_login,
             lyrics_server_logout,
