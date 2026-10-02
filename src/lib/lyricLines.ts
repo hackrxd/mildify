@@ -124,3 +124,64 @@ export function nextChange(lines: LyricLine[], ms: number): number {
   if (i >= 0) return shownUntil(lines, i);
   return lines.find((l) => l.start > ms)?.start ?? Infinity;
 }
+
+/** A pause at least this long between synced lines starts a new verse in `lyricsText`. */
+export const VERSE_GAP_MS = 4000;
+
+/** Like the renderer's PickDisplayText: the romanization when asked for and present. */
+function display(entry: { Text?: unknown; TransliteratedText?: unknown } | null | undefined, romanized: boolean): string {
+  const roman = clean(entry?.TransliteratedText);
+  if (romanized && roman) return roman;
+  return clean(entry?.Text) || roman;
+}
+
+function groupText(group: { Syllables?: unknown } | null | undefined, romanized: boolean): string {
+  if (!Array.isArray(group?.Syllables)) return "";
+  const syls = group.Syllables as { Text?: unknown; TransliteratedText?: unknown; IsPartOfWord?: unknown }[];
+  return clean(syls.map((s) => display(s, romanized) + (s?.IsPartOfWord ? "" : " ")).join(""));
+}
+
+/**
+ * The lyrics of a Spicy Lyrics v1 response as plain text, one line per row and a blank row
+ * between verses. Background vocals follow their line in parentheses. Empty for unknown shapes.
+ */
+export function lyricsText(response: unknown, romanized = false): string {
+  const r = response as { Body?: unknown } | null | undefined;
+  const body = (r?.Body ?? r) as { Type?: unknown; Content?: unknown; Lines?: unknown } | null | undefined;
+  const rows: string[] = [];
+  const verse = () => rows.length && rows[rows.length - 1] !== "" && rows.push("");
+
+  if (body?.Type === "Static" && Array.isArray(body.Lines)) {
+    // Static lyrics mark verses with empty lines.
+    for (const line of body.Lines as { Text?: unknown; TransliteratedText?: unknown }[]) {
+      const text = display(line, romanized);
+      if (text) rows.push(text);
+      else verse();
+    }
+  } else if ((body?.Type === "Line" || body?.Type === "Syllable") && Array.isArray(body.Content)) {
+    const lines: { start: number; end: number; text: string }[] = [];
+    for (const item of body.Content as Record<string, any>[]) {
+      const timed = body.Type === "Syllable" ? item?.Lead : item;
+      let text = body.Type === "Syllable" ? groupText(item?.Lead, romanized) : display(item, romanized);
+      if (body.Type === "Syllable" && Array.isArray(item?.Background)) {
+        const bg = (item.Background as unknown[])
+          .map((g) => groupText(g as { Syllables?: unknown }, romanized))
+          .filter(Boolean)
+          .join(" ");
+        if (bg) text = text ? `${text} (${bg})` : `(${bg})`;
+      }
+      if (!text || typeof timed?.StartTime !== "number") continue;
+      const start = timed.StartTime * 1000;
+      const end = typeof timed.EndTime === "number" ? Math.max(timed.StartTime, timed.EndTime) * 1000 : start;
+      lines.push({ start, end, text });
+    }
+    lines.sort((a, b) => a.start - b.start);
+    lines.forEach((line, i) => {
+      if (i > 0 && line.start - lines[i - 1].end >= VERSE_GAP_MS) verse();
+      rows.push(line.text);
+    });
+  }
+
+  if (rows[rows.length - 1] === "") rows.pop();
+  return rows.join("\n");
+}
