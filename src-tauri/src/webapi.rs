@@ -222,3 +222,114 @@ fn error_message(text: String) -> String {
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn url(path: &str) -> Url {
+        api_url(path, None).unwrap()
+    }
+
+    #[test]
+    fn resolves_paths_under_v1() {
+        assert_eq!(url("/me/player").as_str(), "https://api.spotify.com/v1/me/player");
+    }
+
+    #[test]
+    fn follows_absolute_paging_links() {
+        let next = "https://api.spotify.com/v1/me/tracks?offset=50&limit=50";
+        assert_eq!(url(next).as_str(), next);
+    }
+
+    #[test]
+    fn appends_and_encodes_the_query() {
+        let u = api_url(
+            "/search",
+            Some(vec![("q".into(), "AC/DC & co".into()), ("limit".into(), "10".into())]),
+        )
+        .unwrap();
+        assert_eq!(u.as_str(), "https://api.spotify.com/v1/search?q=AC%2FDC+%26+co&limit=10");
+        let u = api_url("https://api.spotify.com/v1/me/tracks?offset=50", Some(vec![("limit".into(), "50".into())])).unwrap();
+        assert_eq!(u.query(), Some("offset=50&limit=50"));
+    }
+
+    #[test]
+    fn never_sends_the_token_to_another_host() {
+        for path in [
+            "https://evil.example/v1/me",
+            "https://api.spotify.com.evil.example/v1/me",
+            "https://accounts.spotify.com/api/token",
+        ] {
+            assert!(matches!(api_url(path, None), Err(AppError::Other(_))), "{path}");
+        }
+        // Paths that try to smuggle in another host stay on api.spotify.com.
+        for path in ["@evil.example/me", ".evil.example/me", "https://api.spotify.com/v1@evil.example/", "/../../x"] {
+            if let Ok(u) = api_url(path, None) {
+                assert_eq!(u.host_str(), Some("api.spotify.com"), "{path} → {u}");
+            }
+        }
+    }
+
+    #[test]
+    fn reads_spotify_error_messages() {
+        let body = json!({ "error": { "status": 400, "message": "Invalid limit" } }).to_string();
+        assert_eq!(error_message(body), "Invalid limit");
+        assert_eq!(error_message("upstream connect error".into()), "upstream connect error");
+        assert_eq!(error_message(r#"{"error":"invalid_client"}"#.into()), r#"{"error":"invalid_client"}"#);
+    }
+
+    // ---- token -----------------------------------------------------------------
+
+    fn scratch() -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("nativespotify-test-{}", crate::config::random_hex(8)))
+            .join("webapi_token.json")
+    }
+
+    fn with_token(client_id: &str) -> (WebApi, PathBuf) {
+        let file = scratch();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let token = json!({
+            "client_id": client_id,
+            "access_token": "a",
+            "refresh_token": "r",
+            "expires_at": now() + 3600,
+        });
+        std::fs::write(&file, token.to_string()).unwrap();
+        (WebApi::new(reqwest::Client::new(), file.clone()), file)
+    }
+
+    #[tokio::test]
+    async fn a_token_belongs_to_the_client_id_it_was_issued_for() {
+        let (api, file) = with_token("mine");
+        assert!(api.is_signed_in("mine").await);
+        assert!(!api.is_signed_in("someone-elses").await);
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn signing_out_forgets_the_token_on_disk() {
+        let (api, file) = with_token("mine");
+        api.sign_out().await;
+        assert!(!api.is_signed_in("mine").await);
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn requests_without_a_token_fail_before_any_network() {
+        let api = WebApi::new(reqwest::Client::new(), scratch());
+        assert!(matches!(api.request("GET", "/me", None, None).await, Err(AppError::NotSignedIn)));
+    }
+
+    #[tokio::test]
+    async fn rejects_foreign_hosts_and_bad_methods_before_any_network() {
+        let (api, file) = with_token("mine");
+        assert!(matches!(api.request("GET", "https://evil.example/v1/me", None, None).await, Err(AppError::Other(_))));
+        assert!(matches!(api.request("NOT A METHOD", "/me", None, None).await, Err(AppError::Other(_))));
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+}
