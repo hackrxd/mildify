@@ -118,9 +118,9 @@ Lyrics are fetched only from the Nativify lyrics service at `https://nativify.ha
 responses and may require an account. If it does, sign in under Settings → Lyrics (or from the
 lyrics view when it asks). The address is built into the app and can't be changed in Settings.
 
-The app fetches lyrics for the next few songs in your queue ahead of time (Settings → Lyrics →
-Load lyrics ahead: 3 songs by default, up to 20, 0 turns it off). It keeps a song's lyrics only
-until that song has played, so each play gets the latest sync.
+The app fetches lyrics for the songs coming up in your queue ahead of time (Settings → Lyrics →
+Load lyrics ahead: 20 songs by default, the most Spotify lists; 0 turns it off). It keeps a
+song's lyrics only until that song has played, so each play gets the latest sync.
 
 ## Limitations (Spotify's, not ours)
 
