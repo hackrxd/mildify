@@ -20,7 +20,9 @@
   import Liked from "./views/Liked.svelte";
   import Lyrics from "./views/Lyrics.svelte";
   import { lyrics } from "./lib/lyrics.svelte";
+  import { mods } from "./lib/mods.svelte";
   import Playlist from "./views/Playlist.svelte";
+  import ExtensionPage from "./views/ExtensionPage.svelte";
   import Search from "./views/Search.svelte";
   import Settings from "./views/Settings.svelte";
 
@@ -32,6 +34,7 @@
 
   session.init().catch((e) => toasts.error(e));
   updater.start();
+  mods.init();
 
   // Start polling playback once the Web API is usable.
   $effect(() => {
@@ -39,6 +42,11 @@
       playerStarted = true;
       player.start();
     }
+  });
+
+  // Extensions can add pages and menu items, so they wait for the app shell.
+  $effect(() => {
+    if (session.ready) untrack(() => mods.startExtensions());
   });
 
   // Drop played songs' lyrics from the cache and fetch the upcoming ones.
@@ -161,6 +169,8 @@
             <Lyrics />
           {:else if route.name === "settings"}
             <Settings />
+          {:else if route.name === "extension"}
+            <ExtensionPage id={route.id} />
           {/if}
         </div>
       {/key}
