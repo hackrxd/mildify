@@ -137,18 +137,7 @@ impl WebApi {
         query: Option<Vec<(String, String)>>,
         body: Option<Value>,
     ) -> Result<Value> {
-        let mut url = if path.starts_with("https://") {
-            if !path.starts_with(API_BASE) {
-                return Err(AppError::Other(format!("Refusing to send credentials to {path}")));
-            }
-            Url::parse(path)
-        } else {
-            Url::parse(&format!("{API_BASE}{path}"))
-        }
-        .map_err(|e| AppError::Other(format!("Bad API path {path}: {e}")))?;
-        if let Some(q) = query {
-            url.query_pairs_mut().extend_pairs(q);
-        }
+        let url = api_url(path, query)?;
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
             .map_err(|_| AppError::Other(format!("Bad HTTP method {method}")))?;
 
@@ -200,13 +189,34 @@ impl WebApi {
                 }
                 return Ok(serde_json::from_str(&text).unwrap_or(Value::String(text)));
             }
-            let message = serde_json::from_str::<Value>(&text)
-                .ok()
-                .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
-                .unwrap_or(text);
-            return Err(AppError::Api { status, message });
+            return Err(AppError::Api { status, message: error_message(text) });
         }
     }
+}
+
+/// Resolves a path relative to `/v1`, or an absolute URL that must be under it.
+fn api_url(path: &str, query: Option<Vec<(String, String)>>) -> Result<Url> {
+    let mut url = if path.starts_with("https://") {
+        if !path.starts_with(API_BASE) {
+            return Err(AppError::Other(format!("Refusing to send credentials to {path}")));
+        }
+        Url::parse(path)
+    } else {
+        Url::parse(&format!("{API_BASE}{path}"))
+    }
+    .map_err(|e| AppError::Other(format!("Bad API path {path}: {e}")))?;
+    if let Some(q) = query {
+        url.query_pairs_mut().extend_pairs(q);
+    }
+    Ok(url)
+}
+
+/// Spotify's `{"error":{"status","message"}}` message, or the raw body.
+fn error_message(text: String) -> String {
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
+        .unwrap_or(text)
 }
 
 fn now() -> u64 {
