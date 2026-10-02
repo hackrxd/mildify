@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -8,6 +9,8 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [svelte()],
   resolve: {
+    // Svelte's default export condition is its server build, where runes don't react.
+    conditions: process.env.VITEST ? ["browser"] : undefined,
     alias: {
       // The vendored Spicy Lyrics renderer; typed for the app by src/types/spicy-lyrics-renderer.d.ts.
       "spicy-lyrics-renderer": fileURLToPath(new URL("./src/spicy-lyrics/index.ts", import.meta.url)),
@@ -20,6 +23,11 @@ export default defineConfig({
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
+  },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.ts"],
+    restoreMocks: true,
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
