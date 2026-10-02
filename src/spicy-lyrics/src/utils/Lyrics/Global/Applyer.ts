@@ -110,7 +110,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       return;
     }
     case "lyrics-not-found": {
-      noticeContent = `hehe... we don't have that one (yet ;))`
+      noticeContent = `We don't have lyrics for this one.`
       break;
     }
     case "dj": {
@@ -126,7 +126,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       break;
     }
     case "offline": {
-      noticeContent = `i need internet`
+      noticeContent = `Please go online to enjoy our Spicy Lyrics integration`
       break;
     }
     case "service-unavailable": {
@@ -136,7 +136,7 @@ export default async function ApplyLyrics(lyricsContent: FetchLyricsResult): Pro
       break;
     }
     case "rate-limited": {
-      noticeContent = `woh... too fast.`
+      noticeContent = `You're going too fast for us! Try again in a few seconds.`
       break;
     }
     case "status-not-200": {
