@@ -128,8 +128,9 @@
     e.preventDefault();
   }
 
+  // The path, not contains(): a button that removes itself (Reset) is detached by the time this runs.
   function onWindowClick(e: MouseEvent) {
-    if (optionsOpen && optionsEl && !optionsEl.contains(e.target as Node)) optionsOpen = false;
+    if (optionsOpen && optionsEl && !e.composedPath().includes(optionsEl)) optionsOpen = false;
   }
 
   function toggleNowBar() {
