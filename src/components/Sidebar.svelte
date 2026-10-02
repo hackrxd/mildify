@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
   import { router, type Route } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
@@ -27,6 +28,18 @@
         <button class="nav-item" class:active={isActive(item.route)} onclick={() => router.go(item.route)}>
           <Icon name={item.icon} filled={item.icon === "heart" && isActive(item.route)} />
           <span>{item.label}</span>
+        </button>
+      </li>
+    {/each}
+    {#each mods.pages as page (page.key)}
+      <li>
+        <button
+          class="nav-item"
+          class:active={current.name === "extension" && current.id === page.key}
+          onclick={() => router.go({ name: "extension", id: page.key })}
+        >
+          <Icon name={page.icon ?? "puzzle"} />
+          <span>{page.label}</span>
         </button>
       </li>
     {/each}
