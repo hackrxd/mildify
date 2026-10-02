@@ -168,6 +168,23 @@
       </span>
       <input type="checkbox" class="switch" checked={lyrics.inDeck} onchange={(e) => lyrics.setInDeck(e.currentTarget.checked)} />
     </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Load lyrics ahead</span>
+        <span class="muted small">
+          Fetch lyrics for the songs coming up in the queue, so they show up right away. Each song's lyrics are
+          fetched fresh every time it plays.
+        </span>
+      </span>
+      <select class="field" value={lyrics.warmup} onchange={(e) => lyrics.setWarmup(Number(e.currentTarget.value))}>
+        <option value={0}>Off</option>
+        <option value={1}>Next song</option>
+        <option value={3}>Next 3 songs</option>
+        <option value={5}>Next 5 songs</option>
+        <option value={10}>Next 10 songs</option>
+      </select>
+    </label>
   </section>
 
   <section>
