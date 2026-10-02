@@ -557,3 +557,218 @@ fn to_local_event(event: PlayerEvent, clock: &OutputClock) -> Option<LocalEvent>
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use librespot_core::SpotifyUri;
+    use serde_json::{json, Value};
+
+    use super::*;
+
+    const TRACK: &str = "spotify:track:4uLU6hMCjMI75M1A2tKUQC";
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    // ---- volume ----------------------------------------------------------------
+
+    #[test]
+    fn volume_covers_the_full_mixer_range() {
+        assert_eq!(volume_from_percent(0), 0);
+        assert_eq!(volume_from_percent(100), u16::MAX);
+        assert_eq!(volume_from_percent(255), u16::MAX);
+        assert_eq!(percent_from_volume(0), 0);
+        assert_eq!(percent_from_volume(u16::MAX), 100);
+    }
+
+    #[test]
+    fn volume_survives_a_round_trip_through_librespot() {
+        for p in 0..=100 {
+            assert_eq!(percent_from_volume(volume_from_percent(p)), p, "{p}%");
+        }
+    }
+
+    #[test]
+    fn volume_rounds_to_the_nearest_percent() {
+        // Half a percent of the mixer range is 327.675.
+        assert_eq!(percent_from_volume(327), 0);
+        assert_eq!(percent_from_volume(328), 1);
+        assert_eq!(percent_from_volume(u16::MAX / 2), 50);
+    }
+
+    // ---- output clock ----------------------------------------------------------
+
+    #[test]
+    fn nothing_queued_means_the_decoder_is_audible() {
+        assert_eq!(OutputClock::default().heard(1000), 1000);
+    }
+
+    #[test]
+    fn audio_still_queued_hasnt_been_heard_yet() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        clock.queued_at(t0, ms(500));
+        // Past the refill window, 200 ms of the 500 queued is still ahead of the speakers.
+        assert_eq!(clock.heard_at(t0 + ms(300), 10_000), 9_800);
+        assert_eq!(clock.heard_at(t0 + ms(450), 10_000), 9_950);
+        assert_eq!(clock.heard_at(t0 + ms(600), 10_000), 10_000);
+    }
+
+    #[test]
+    fn packets_queue_behind_each_other() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        clock.queued_at(t0, ms(300));
+        clock.queued_at(t0 + ms(100), ms(300));
+        clock.queued_at(t0 + ms(150), ms(300));
+        assert_eq!(clock.heard_at(t0 + ms(400), 5_000), 4_500);
+    }
+
+    #[test]
+    fn events_just_after_a_refill_describe_the_empty_queue() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        // Starting from silence the player decodes a burst, but the event that started it
+        // was reported against the empty queue: playback has only advanced by the time since.
+        clock.queued_at(t0, ms(100));
+        clock.queued_at(t0 + ms(5), ms(400));
+        assert_eq!(clock.heard_at(t0 + ms(50), 2_000), 2_050);
+        assert_eq!(clock.heard_at(t0 + ms(199), 2_000), 2_199);
+        // After the window, the queue counts.
+        assert_eq!(clock.heard_at(t0 + ms(200), 2_000), 1_700);
+    }
+
+    #[test]
+    fn a_queue_that_ran_dry_starts_a_new_refill() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        clock.queued_at(t0, ms(100));
+        // Underrun: nothing written until well after the queue emptied.
+        clock.queued_at(t0 + ms(1_000), ms(300));
+        assert_eq!(clock.heard_at(t0 + ms(1_100), 7_000), 7_100);
+        assert_eq!(clock.heard_at(t0 + ms(1_250), 7_000), 6_950);
+    }
+
+    #[test]
+    fn a_drained_queue_is_all_heard() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        clock.queued_at(t0, ms(800));
+        clock.drained();
+        assert_eq!(clock.heard_at(t0 + ms(300), 4_000), 4_000);
+    }
+
+    #[test]
+    fn never_reports_a_negative_position() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        clock.queued_at(t0, ms(600));
+        assert_eq!(clock.heard_at(t0 + ms(250), 100), 0);
+    }
+
+    // ---- IPC contract (ipc.ts) -------------------------------------------------
+
+    fn command(v: Value) -> DeviceCommand {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn reads_every_command_the_ui_sends() {
+        assert!(matches!(command(json!({ "action": "play" })), DeviceCommand::Play));
+        assert!(matches!(command(json!({ "action": "pause" })), DeviceCommand::Pause));
+        assert!(matches!(command(json!({ "action": "play_pause" })), DeviceCommand::PlayPause));
+        assert!(matches!(command(json!({ "action": "next" })), DeviceCommand::Next));
+        assert!(matches!(command(json!({ "action": "prev" })), DeviceCommand::Prev));
+        assert!(matches!(
+            command(json!({ "action": "seek", "position_ms": 1234 })),
+            DeviceCommand::Seek { position_ms: 1234 }
+        ));
+        assert!(matches!(command(json!({ "action": "volume", "percent": 43 })), DeviceCommand::Volume { percent: 43 }));
+        assert!(matches!(command(json!({ "action": "shuffle", "on": true })), DeviceCommand::Shuffle { on: true }));
+        assert!(matches!(
+            command(json!({ "action": "repeat", "mode": "context" })),
+            DeviceCommand::Repeat { mode } if mode == "context"
+        ));
+    }
+
+    #[test]
+    fn rejects_malformed_commands() {
+        for v in [
+            json!({ "action": "rewind" }),
+            json!({ "action": "seek" }),
+            json!({ "action": "seek", "position_ms": -1 }),
+            json!({ "action": "volume", "percent": 300 }),
+            json!({ "percent": 30 }),
+        ] {
+            assert!(serde_json::from_value::<DeviceCommand>(v.clone()).is_err(), "{v}");
+        }
+    }
+
+    #[test]
+    fn device_states_match_the_ui() {
+        let states = [
+            (DeviceState::Offline, "offline"),
+            (DeviceState::NeedsLogin, "needs_login"),
+            (DeviceState::Connecting, "connecting"),
+            (DeviceState::Ready, "ready"),
+            (DeviceState::PremiumRequired, "premium_required"),
+            (DeviceState::Error, "error"),
+        ];
+        for (state, name) in states {
+            assert_eq!(serde_json::to_value(state).unwrap(), name);
+        }
+    }
+
+    fn uri() -> SpotifyUri {
+        SpotifyUri::from_uri(TRACK).unwrap()
+    }
+
+    fn local(event: PlayerEvent) -> Value {
+        serde_json::to_value(to_local_event(event, &OutputClock::default()).expect("forwarded")).unwrap()
+    }
+
+    #[test]
+    fn forwards_player_events_in_the_shape_the_ui_reads() {
+        assert_eq!(
+            local(PlayerEvent::Playing { play_request_id: 1, track_id: uri(), position_ms: 1500 }),
+            json!({ "type": "playing", "uri": TRACK, "position_ms": 1500 })
+        );
+        assert_eq!(
+            local(PlayerEvent::PositionChanged { play_request_id: 1, track_id: uri(), position_ms: 9 }),
+            json!({ "type": "position", "uri": TRACK, "position_ms": 9 })
+        );
+        assert_eq!(
+            local(PlayerEvent::PositionCorrection { play_request_id: 1, track_id: uri(), position_ms: 9 }),
+            json!({ "type": "position", "uri": TRACK, "position_ms": 9 })
+        );
+        assert_eq!(
+            local(PlayerEvent::EndOfTrack { play_request_id: 1, track_id: uri() }),
+            json!({ "type": "end_of_track", "uri": TRACK })
+        );
+        assert_eq!(local(PlayerEvent::VolumeChanged { volume: u16::MAX }), json!({ "type": "volume", "percent": 100 }));
+        assert_eq!(
+            local(PlayerEvent::RepeatChanged { context: true, track: false }),
+            json!({ "type": "repeat", "context": true, "track": false })
+        );
+        assert_eq!(local(PlayerEvent::ShuffleChanged { shuffle: true }), json!({ "type": "shuffle", "on": true }));
+    }
+
+    #[test]
+    fn reports_positions_as_heard() {
+        let clock = OutputClock::default();
+        clock.queued_at(Instant::now() - ms(1_000), ms(10_000));
+        let event = PlayerEvent::Seeked { play_request_id: 1, track_id: uri(), position_ms: 30_000 };
+        let Some(LocalEvent::Seeked { position_ms, .. }) = to_local_event(event, &clock) else {
+            panic!("expected a seek");
+        };
+        // At most 9 s of audio is still queued ahead of the speakers (less as the test runs).
+        assert!((21_000..21_500).contains(&position_ms), "{position_ms}");
+    }
+
+    #[test]
+    fn drops_events_the_ui_has_no_use_for() {
+        let event = PlayerEvent::TimeToPreloadNextTrack { play_request_id: 1, track_id: uri() };
+        assert!(to_local_event(event, &OutputClock::default()).is_none());
+    }
+}
