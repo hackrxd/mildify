@@ -1,5 +1,16 @@
-// Plain synced lines from a lyrics service response, for the one-line lyric in the
-// player bar. The full renderer has its own pipeline; this only needs text and times.
+// Synced lines (and syllables, when the sync has them) from a lyrics service response, for
+// the one-line lyric in the player bar. The full renderer has its own pipeline; this only
+// needs text and times.
+
+export interface Syllable {
+  /** ms */
+  start: number;
+  /** ms */
+  end: number;
+  text: string;
+  /** Joined to the next syllable without a space. */
+  partOfWord: boolean;
+}
 
 export interface LyricLine {
   /** ms */
@@ -7,24 +18,37 @@ export interface LyricLine {
   /** ms */
   end: number;
   text: string;
+  /** Present when the lyrics are synced per syllable. */
+  syllables?: Syllable[];
 }
 
 /** A gap between lines shorter than this keeps the previous line up, rather than blinking out. */
 export const HOLD_GAP_MS = 3000;
 
-const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 
 function clean(text: unknown): string {
   return typeof text === "string" ? text.replace(ZERO_WIDTH, "").replace(/\s+/g, " ").trim() : "";
 }
 
-function syllableText(syllables: unknown): string {
-  if (!Array.isArray(syllables)) return "";
-  let out = "";
-  for (const s of syllables as { Text?: unknown; IsPartOfWord?: unknown }[]) {
-    out += (typeof s?.Text === "string" ? s.Text : "") + (s?.IsPartOfWord ? "" : " ");
+function syllables(raw: unknown): Syllable[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Syllable[] = [];
+  for (const s of raw as { Text?: unknown; StartTime?: unknown; EndTime?: unknown; IsPartOfWord?: unknown }[]) {
+    const text = clean(s?.Text);
+    if (!text || typeof s?.StartTime !== "number" || typeof s?.EndTime !== "number") continue;
+    out.push({
+      start: s.StartTime * 1000,
+      end: Math.max(s.StartTime, s.EndTime) * 1000,
+      text,
+      partOfWord: !!s.IsPartOfWord,
+    });
   }
-  return clean(out);
+  return out;
+}
+
+function joined(syllables: Syllable[]): string {
+  return clean(syllables.map((s) => s.text + (s.partOfWord ? "" : " ")).join(""));
 }
 
 /**
@@ -38,10 +62,12 @@ export function lyricLines(response: unknown): LyricLine[] {
   const lines: LyricLine[] = [];
   for (const item of body.Content as Record<string, any>[]) {
     let start: unknown, end: unknown, text: string;
+    let syls: Syllable[] | undefined;
     if (body.Type === "Syllable") {
       start = item?.Lead?.StartTime;
       end = item?.Lead?.EndTime;
-      text = syllableText(item?.Lead?.Syllables);
+      syls = syllables(item?.Lead?.Syllables);
+      text = joined(syls);
     } else if (body.Type === "Line") {
       start = item?.StartTime;
       end = item?.EndTime;
@@ -50,7 +76,9 @@ export function lyricLines(response: unknown): LyricLine[] {
       return [];
     }
     if (!text || typeof start !== "number" || typeof end !== "number") continue;
-    lines.push({ start: start * 1000, end: Math.max(start, end) * 1000, text });
+    const line: LyricLine = { start: start * 1000, end: Math.max(start, end) * 1000, text };
+    if (syls?.length) line.syllables = syls;
+    lines.push(line);
   }
   return lines.sort((a, b) => a.start - b.start);
 }
@@ -81,6 +109,13 @@ export function shownUntil(lines: LyricLine[], i: number): number {
   const { end } = lines[i];
   const next = lines[i + 1]?.start;
   return next !== undefined && next - end < HOLD_GAP_MS ? Math.max(end, next) : end;
+}
+
+/** How much of a syllable has been sung at `ms`, from 0 to 1. */
+export function sung(s: Syllable, ms: number): number {
+  if (ms >= s.end) return 1;
+  if (ms <= s.start) return 0;
+  return (ms - s.start) / (s.end - s.start);
 }
 
 /** The next time at or after `ms` when `lineAt` can change, or Infinity after the last line. */
