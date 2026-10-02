@@ -60,3 +60,22 @@ export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: numb
     t = setTimeout(() => fn(...args), ms);
   };
 }
+
+/** Puts text on the clipboard, falling back to a hidden textarea where the async API is refused. */
+export async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Older WebKitGTK builds reject the async clipboard; execCommand still works there.
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  if (!ok) throw new Error("Couldn't copy to the clipboard");
+}
