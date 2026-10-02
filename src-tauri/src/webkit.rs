@@ -1,6 +1,7 @@
 //! WebKitGTK workarounds that have to be in the environment before GTK starts.
 
 use std::env;
+use std::ffi::OsStr;
 use std::path::Path;
 
 /// Re-enables hardware-accelerated rendering on NVIDIA's proprietary driver under Wayland.
@@ -27,9 +28,15 @@ pub fn configure() {
 
 /// Whether GDK will pick its Wayland backend (it tries Wayland first unless `GDK_BACKEND` says otherwise).
 fn uses_wayland() -> bool {
-    if env::var_os("WAYLAND_DISPLAY").is_none_or(|d| d.is_empty()) {
+    picks_wayland(
+        env::var_os("WAYLAND_DISPLAY").as_deref(),
+        &env::var("GDK_BACKEND").unwrap_or_default(),
+    )
+}
+
+fn picks_wayland(wayland_display: Option<&OsStr>, gdk_backend: &str) -> bool {
+    if wayland_display.is_none_or(|d| d.is_empty()) {
         return false;
     }
-    let backend = env::var("GDK_BACKEND").unwrap_or_default();
-    matches!(backend.split(',').next().map(str::trim), None | Some("" | "*" | "wayland"))
+    matches!(gdk_backend.split(',').next().map(str::trim), None | Some("" | "*" | "wayland"))
 }
