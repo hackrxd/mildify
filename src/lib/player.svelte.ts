@@ -61,7 +61,7 @@ class Player {
   #positionMs = $state(0);
   #positionAt = $state(0);
   #now = $state(performance.now());
-  #lastLocalEvent = 0;
+  #lastLocalEvent = -Infinity;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #backoffUntil = 0;
 
