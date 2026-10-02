@@ -86,8 +86,11 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
 2. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 3. `.github/workflows/build.yml` fails early if the tag doesn't match `tauri.conf.json`. It builds Windows, macOS
    (arm64 and x64) and Linux (on ubuntu-22.04) into a draft release, then publishes it once all four builds
-   pass. Installed apps update from that release's `latest.json`. Update bundles are signed with
-   `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
+   and the test job pass. Installed apps update from that release's `latest.json`. Update bundles are signed
+   with `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
+
+Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
+starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
 
 ## Commit conventions
 
