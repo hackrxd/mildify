@@ -285,3 +285,162 @@ fn error_message(text: &str) -> String {
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    const ID: &str = "4uLU6hMCjMI75M1A2tKUQC";
+
+    // ---- cache -----------------------------------------------------------------
+
+    #[test]
+    fn hits_are_kept_for_a_day() {
+        let t0 = Instant::now();
+        let mut cache = Cache::new();
+        remember(&mut cache, ID, Some(json!({ "Type": "Line" })), t0);
+        assert_eq!(cached(&cache, ID, t0), Some(Some(json!({ "Type": "Line" }))));
+        assert!(cached(&cache, ID, t0 + HIT_TTL - Duration::from_secs(1)).is_some());
+        assert_eq!(cached(&cache, ID, t0 + HIT_TTL), None);
+    }
+
+    #[test]
+    fn misses_are_kept_for_an_hour() {
+        let t0 = Instant::now();
+        let mut cache = Cache::new();
+        remember(&mut cache, ID, None, t0);
+        assert_eq!(cached(&cache, ID, t0 + MISS_TTL - Duration::from_secs(1)), Some(None));
+        assert_eq!(cached(&cache, ID, t0 + MISS_TTL), None);
+    }
+
+    #[test]
+    fn unknown_tracks_arent_cached() {
+        assert_eq!(cached(&Cache::new(), ID, Instant::now()), None);
+    }
+
+    #[test]
+    fn a_full_cache_drops_its_oldest_entry() {
+        let t0 = Instant::now();
+        let mut cache = Cache::new();
+        for i in 0..MAX_ENTRIES {
+            remember(&mut cache, &format!("track{i}"), None, t0 + Duration::from_secs(i as u64));
+        }
+        assert_eq!(cache.len(), MAX_ENTRIES);
+        remember(&mut cache, ID, None, t0 + Duration::from_secs(1_000));
+        assert_eq!(cache.len(), MAX_ENTRIES);
+        assert!(!cache.contains_key("track0"));
+        assert!(cache.contains_key("track1"));
+        assert!(cache.contains_key(ID));
+    }
+
+    #[test]
+    fn track_ids_are_22_base62_characters() {
+        assert!(is_track_id(ID));
+        for bad in ["", "4uLU6hMCjMI75M1A2tKUQ", "4uLU6hMCjMI75M1A2tKUQCC", "4uLU6hMCjMI75M1A2tKU/C", "../../v1/auth/logout00"] {
+            assert!(!is_track_id(bad), "{bad}");
+        }
+    }
+
+    // ---- errors ----------------------------------------------------------------
+
+    #[test]
+    fn reads_error_messages_in_every_shape_the_service_uses() {
+        assert_eq!(error_message(r#"{"error":{"code":"x","message":"Slow down"}}"#), "Slow down");
+        assert_eq!(error_message(r#"{"error":"Bad token"}"#), "Bad token");
+        assert_eq!(error_message(r#"{"message":"Nope"}"#), "Nope");
+    }
+
+    #[test]
+    fn falls_back_to_the_start_of_the_body() {
+        assert_eq!(error_message("Bad Gateway"), "Bad Gateway");
+        assert_eq!(error_message(r#"{"error":{"code":"x"}}"#), r#"{"error":{"code":"x"}}"#);
+        let html = "é".repeat(500);
+        assert_eq!(error_message(&html).chars().count(), 200);
+    }
+
+    // ---- client ----------------------------------------------------------------
+
+    fn scratch() -> PathBuf {
+        std::env::temp_dir()
+            .join(format!("nativespotify-test-{}", crate::config::random_hex(8)))
+            .join("lyrics_server_session.json")
+    }
+
+    fn client_with(session: Option<Value>) -> (LyricsClient, PathBuf) {
+        let file = scratch();
+        if let Some(s) = session {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, s.to_string()).unwrap();
+        }
+        (LyricsClient::new(reqwest::Client::new(), file.clone()), file)
+    }
+
+    fn session(base_url: &str, expires_at: u64) -> Value {
+        json!({ "base_url": base_url, "token": "t", "username": "me", "expires_at": expires_at })
+    }
+
+    fn cleanup(file: &std::path::Path) {
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn restores_a_saved_session() {
+        let (client, file) = client_with(Some(session(LYRICS_SERVER, now() + 3600)));
+        assert_eq!(client.session().await.map(|s| s.username).as_deref(), Some("me"));
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn ignores_an_expired_session() {
+        let (client, file) = client_with(Some(session(LYRICS_SERVER, now() - 1)));
+        assert!(client.session().await.is_none());
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn ignores_a_session_from_another_server() {
+        let (client, file) = client_with(Some(session("https://example.com", now() + 3600)));
+        assert!(client.session().await.is_none());
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn ignores_a_corrupt_session_file() {
+        let (client, file) = client_with(Some(json!("not a session")));
+        assert!(client.session().await.is_none());
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn dropping_the_session_forgets_it_on_disk() {
+        let (client, file) = client_with(Some(session(LYRICS_SERVER, now() + 3600)));
+        client.drop_session().await;
+        assert!(client.session().await.is_none());
+        assert!(!file.exists());
+        // And again with nothing left to delete.
+        client.drop_session().await;
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn rejects_bad_track_ids_before_any_request() {
+        let (client, file) = client_with(None);
+        match client.get("../auth/logout").await {
+            Err(AppError::Other(msg)) => assert!(msg.contains("Not a Spotify track id"), "{msg}"),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn serves_cached_lyrics_without_a_request() {
+        let (client, file) = client_with(None);
+        remember(&mut *client.cache.lock().await, ID, Some(json!({ "Type": "Static" })), Instant::now());
+        assert_eq!(client.get(ID).await.unwrap(), Some(json!({ "Type": "Static" })));
+        client.clear_cache().await;
+        assert!(client.cache.lock().await.is_empty());
+        cleanup(&file);
+    }
+}
