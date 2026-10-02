@@ -86,3 +86,87 @@ pub fn random_hex(bytes: usize) -> String {
     rand::thread_rng().fill_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch file path, unique per test, under the system temp dir.
+    fn scratch(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("nativespotify-test-{}", random_hex(8))).join(name)
+    }
+
+    #[test]
+    fn random_hex_is_lowercase_hex_of_twice_the_length() {
+        let h = random_hex(20);
+        assert_eq!(h.len(), 40);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_ne!(random_hex(20), h);
+        assert_eq!(random_hex(0), "");
+    }
+
+    #[test]
+    fn defaults() {
+        let c = Config::default();
+        assert_eq!(c.client_id, None);
+        assert_eq!(c.device_name, "Native Spotify");
+        assert_eq!(c.device_id.len(), 40);
+        assert_eq!(c.bitrate, 320);
+        assert_eq!(c.initial_volume, 50);
+        assert!(!c.normalisation);
+    }
+
+    #[test]
+    fn older_configs_keep_their_fields_and_gain_new_ones() {
+        let c: Config = serde_json::from_str(r#"{ "client_id": "abc", "device_name": "Desk", "unknown": 1 }"#).unwrap();
+        assert_eq!(c.client_id.as_deref(), Some("abc"));
+        assert_eq!(c.device_name, "Desk");
+        assert_eq!(c.bitrate, 320);
+        assert_eq!(c.device_id.len(), 40);
+    }
+
+    #[test]
+    fn load_persists_the_generated_device_id() {
+        let path = scratch("config.json");
+        let first = Config::load(&path);
+        assert!(path.exists(), "load writes the config back");
+        let second = Config::load(&path);
+        assert_eq!(first.device_id, second.device_id);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn load_falls_back_to_defaults_for_a_corrupt_file() {
+        let path = scratch("config.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+        let c = Config::load(&path);
+        assert_eq!(c.device_name, "Native Spotify");
+        let reread: Config = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(reread.device_id, c.device_id);
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn save_round_trips() {
+        let path = scratch("nested/config.json");
+        let c = Config { client_id: Some("id".into()), bitrate: 160, normalisation: true, ..Config::default() };
+        c.save(&path).unwrap();
+        let back: Config = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(back.client_id.as_deref(), Some("id"));
+        assert_eq!(back.bitrate, 160);
+        assert!(back.normalisation);
+        assert_eq!(back.device_id, c.device_id);
+        std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn paths_keep_secrets_out_of_the_config_dir() {
+        let p = Paths::new("/cfg".into(), "/data".into(), "/cache".into());
+        assert_eq!(p.config_file, Path::new("/cfg/config.json"));
+        assert!(p.token_file.starts_with("/data"));
+        assert!(p.lyrics_session_file.starts_with("/data"));
+        assert!(p.librespot_dir.starts_with("/data"));
+        assert!(p.audio_cache_dir.starts_with("/cache"));
+    }
+}
