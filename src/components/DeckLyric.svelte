@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import { lineAt, lyricLines, nextChange, type LyricLine } from "../lib/lyricLines";
+  import { lineAt, lyricLines, nextChange, sung, type LyricLine } from "../lib/lyricLines";
   import { lyrics } from "../lib/lyrics.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
@@ -10,6 +10,7 @@
   const MIN_WIDTH = 200;
 
   let width = $state(0);
+  let lineEl: HTMLElement | undefined = $state();
   let loaded = $state.raw<{ id: string; user: string | null | undefined; lines: LyricLine[] } | null>(null);
   let shown = $state.raw<{ lines: LyricLine[]; index: number } | null>(null);
 
@@ -55,14 +56,47 @@
     return () => clearTimeout(timer);
   });
 
+  // Syllable syncs fill each syllable as it's sung. Per frame, but only while such a line
+  // is up and playing; styles are written directly so Svelte doesn't re-render each frame.
+  $effect(() => {
+    const el = lineEl;
+    const syllables = line?.syllables;
+    if (!el || !syllables) return;
+    void [player.position, player.isPlaying, lyrics.offsetMs];
+    const spans = el.querySelectorAll<HTMLElement>(".syllable");
+    const painted: number[] = [];
+    let frame = 0;
+    const paint = () => {
+      const now = Math.max(0, player.positionNow() - lyrics.offsetMs);
+      syllables.forEach((s, i) => {
+        const part = sung(s, now);
+        if (painted[i] !== part) spans[i]?.style.setProperty("--sung", String((painted[i] = part)));
+      });
+      if (player.isPlaying) frame = requestAnimationFrame(paint);
+    };
+    untrack(paint);
+    return () => cancelAnimationFrame(frame);
+  });
+
   const credit = $derived(lyrics.current ? `Lyrics from ${lyrics.current.provider}. Click for all lyrics.` : "Show lyrics");
 </script>
 
 <div class="deck-lyric" bind:clientWidth={width}>
   {#if line}
     {#key line}
-      <button class="line" in:fade={{ duration: 160 }} onclick={() => router.go({ name: "lyrics" })} title={credit}>
-        {line.text}
+      <button
+        class="line"
+        class:synced={!!line.syllables}
+        bind:this={lineEl}
+        in:fade={{ duration: 160 }}
+        onclick={() => router.go({ name: "lyrics" })}
+        title={credit}
+      >
+        {#if line.syllables}
+          {#each line.syllables as s, i (i)}<span class="syllable">{s.text}</span>{s.partOfWord ? "" : " "}{/each}
+        {:else}
+          {line.text}
+        {/if}
       </button>
     {/key}
   {/if}
@@ -90,5 +124,21 @@
   }
   .line:hover {
     opacity: 1;
+  }
+  .synced {
+    opacity: 1;
+  }
+  /* Sung text is full brightness, the rest dimmed; a soft edge sweeps across each syllable. */
+  .syllable {
+    --sung: 0;
+    --edge: 0.35em;
+    color: transparent;
+    background: linear-gradient(
+      90deg,
+      var(--paper) calc(var(--sung) * (100% + var(--edge)) - var(--edge)),
+      color-mix(in srgb, var(--paper) 45%, transparent) calc(var(--sung) * (100% + var(--edge)))
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
   }
 </style>
