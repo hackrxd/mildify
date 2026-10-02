@@ -4,6 +4,8 @@ mod device;
 mod error;
 mod lyrics;
 mod webapi;
+#[cfg(target_os = "linux")]
+mod webkit;
 
 use std::sync::{Arc, Mutex};
 
@@ -218,6 +220,8 @@ fn restart_device(app: AppHandle, state: State<'_, AppState>) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    #[cfg(target_os = "linux")]
+    webkit::configure();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
