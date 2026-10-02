@@ -56,7 +56,7 @@ pub struct ServerStatus {
 
 pub struct LyricsClient {
     http: reqwest::Client,
-    cache: Mutex<HashMap<String, (Instant, Option<Value>)>>,
+    cache: Mutex<Cache>,
     session: Mutex<Option<ServerSession>>,
     session_file: PathBuf,
 }
@@ -184,18 +184,12 @@ impl LyricsClient {
 
     /// Returns the v1 response for a track, or `None` when there are no lyrics.
     pub async fn get(&self, track_id: &str) -> Result<Option<Value>> {
-        if track_id.len() != 22 || !track_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        if !is_track_id(track_id) {
             return Err(AppError::Other(format!("Not a Spotify track id: {track_id}")));
         }
 
-        {
-            let cache = self.cache.lock().await;
-            if let Some((at, value)) = cache.get(track_id) {
-                let ttl = if value.is_some() { HIT_TTL } else { MISS_TTL };
-                if at.elapsed() < ttl {
-                    return Ok(value.clone());
-                }
-            }
+        if let Some(value) = cached(&*self.cache.lock().await, track_id, Instant::now()) {
+            return Ok(value);
         }
 
         let mut request = self.http.get(format!("{LYRICS_SERVER}/v1/lyrics/{track_id}"));
@@ -222,20 +216,36 @@ impl LyricsClient {
             }
         };
 
-        let mut cache = self.cache.lock().await;
-        if cache.len() >= MAX_ENTRIES {
-            // Drop the oldest entry; the cache is small enough that a scan is fine.
-            if let Some(oldest) = cache.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
-                cache.remove(&oldest);
-            }
-        }
-        cache.insert(track_id.to_owned(), (Instant::now(), value.clone()));
+        remember(&mut *self.cache.lock().await, track_id, value.clone(), Instant::now());
         Ok(value)
     }
 
     pub async fn clear_cache(&self) {
         self.cache.lock().await.clear();
     }
+}
+
+type Cache = HashMap<String, (Instant, Option<Value>)>;
+
+fn is_track_id(id: &str) -> bool {
+    id.len() == 22 && id.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// A cached result still within its TTL: `Some(None)` is a remembered "no lyrics".
+fn cached(cache: &Cache, track_id: &str, now: Instant) -> Option<Option<Value>> {
+    let (at, value) = cache.get(track_id)?;
+    let ttl = if value.is_some() { HIT_TTL } else { MISS_TTL };
+    (now.duration_since(*at) < ttl).then(|| value.clone())
+}
+
+fn remember(cache: &mut Cache, track_id: &str, value: Option<Value>, now: Instant) {
+    if cache.len() >= MAX_ENTRIES {
+        // Drop the oldest entry; the cache is small enough that a scan is fine.
+        if let Some(oldest) = cache.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+            cache.remove(&oldest);
+        }
+    }
+    cache.insert(track_id.to_owned(), (now, value));
 }
 
 /// Passes a success response through; turns anything else into an `AppError`,
@@ -254,7 +264,13 @@ async fn check(resp: Response) -> Result<Response> {
         return Err(AppError::RateLimited { retry_after: retry_after.unwrap_or(30) });
     }
     let text = resp.text().await.unwrap_or_default();
-    let message = serde_json::from_str::<Value>(&text)
+    Err(AppError::Api { status, message: error_message(&text) })
+}
+
+/// The message in an error body: `{"error":{"message"}}`, `{"error":"..."}`, `{"message"}`,
+/// or else the start of the raw text.
+fn error_message(text: &str) -> String {
+    serde_json::from_str::<Value>(text)
         .ok()
         .and_then(|v| {
             let e = v.get("error").unwrap_or(&v);
@@ -263,8 +279,7 @@ async fn check(resp: Response) -> Result<Response> {
                 .or_else(|| e.as_str())
                 .map(str::to_owned)
         })
-        .unwrap_or_else(|| text.chars().take(200).collect());
-    Err(AppError::Api { status, message })
+        .unwrap_or_else(|| text.chars().take(200).collect())
 }
 
 fn now() -> u64 {
