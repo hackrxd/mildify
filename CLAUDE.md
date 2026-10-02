@@ -13,10 +13,19 @@ npm run tauri dev        # run the app (Vite on :1420 + debug Rust build)
 npm run check            # svelte-check: type-checks the whole frontend, including the vendored renderer
 npm run build            # frontend only, into dist/ (tauri build runs this itself)
 npm run tauri build      # installers for the current OS, into src-tauri/target/release/bundle/
+npm test                 # Vitest (jsdom): src/**/*.test.ts
+cd src-tauri && cargo test --lib
 cd src-tauri && cargo clippy
 ```
 
-There is no test suite. To check the lyrics renderer without Tauri or the lyrics service, run `npm run dev` and
+Frontend tests sit next to the module they test (`src/lib/*.test.ts`); tests for the vendored renderer live in
+`src/spicy-lyrics/tests/` so the upstream tree stays diffable. Rust tests are `#[cfg(test)] mod tests` at the
+bottom of each file and never touch the network: logic that depends on the clock or environment takes them as
+parameters (`OutputClock::heard_at`, `webkit::picks_wayland`, `lyrics::cached`), and the sign-in redirect is
+tested over a real loopback socket. Rune modules are tested with `vi.resetModules()` and a dynamic import per
+test, so each test gets a fresh singleton.
+
+To check the lyrics renderer without Tauri or the lyrics service, run `npm run dev` and
 open `http://localhost:1420/lyrics-harness.html` (`src/dev/lyrics-harness.ts`: fake host, simulated clock,
 sample syllable sync).
 
