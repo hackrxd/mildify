@@ -355,9 +355,7 @@ impl ConnectDevice {
             DeviceCommand::Next => spirc.next(),
             DeviceCommand::Prev => spirc.prev(),
             DeviceCommand::Seek { position_ms } => spirc.set_position_ms(position_ms),
-            DeviceCommand::Volume { percent } => {
-                spirc.set_volume((u32::from(percent.min(100)) * u32::from(u16::MAX) / 100) as u16)
-            }
+            DeviceCommand::Volume { percent } => spirc.set_volume(volume_from_percent(percent)),
             DeviceCommand::Shuffle { on } => spirc.shuffle(on),
             DeviceCommand::Repeat { mode } => match mode.as_str() {
                 "track" => spirc.repeat(true).and_then(|_| spirc.repeat_track(true)),
@@ -367,6 +365,16 @@ impl ConnectDevice {
         };
         r.map_err(|e| AppError::Device(e.to_string()))
     }
+}
+
+/// librespot's mixer volume (0-65535) for a UI percentage, clamped to 100.
+fn volume_from_percent(percent: u8) -> u16 {
+    (u32::from(percent.min(100)) * u32::from(u16::MAX) / 100) as u16
+}
+
+/// The UI percentage for a mixer volume, rounded to the nearest.
+fn percent_from_volume(volume: u16) -> u8 {
+    ((u32::from(volume) * 100 + u32::from(u16::MAX) / 2) / u32::from(u16::MAX)) as u8
 }
 
 /// How a device run ended without a librespot error.
@@ -534,7 +542,7 @@ fn to_local_event(event: PlayerEvent, clock: &OutputClock) -> Option<LocalEvent>
             }
         }
         PlayerEvent::VolumeChanged { volume } => LocalEvent::Volume {
-            percent: ((u32::from(volume) * 100 + u32::from(u16::MAX) / 2) / u32::from(u16::MAX)) as u8,
+            percent: percent_from_volume(volume),
         },
         PlayerEvent::ShuffleChanged { shuffle } => LocalEvent::Shuffle { on: shuffle },
         PlayerEvent::RepeatChanged { context, track } => LocalEvent::Repeat { context, track },
