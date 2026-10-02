@@ -28,6 +28,8 @@ const OFFSET_KEY = "nativify:lyricsOffsetMs";
 const IN_DECK_KEY = "nativify:lyricsInDeck";
 const WARMUP_KEY = "nativify:lyricsWarmup";
 export const WARMUP_DEFAULT = 3;
+/** Spotify's queue endpoint only lists the next 20 songs. */
+export const WARMUP_MAX = 20;
 /** Wait for the queue to settle after a track change (and for skipping through to stop). */
 const WARMUP_DELAY_MS = 2000;
 
@@ -44,7 +46,7 @@ function loadWarmup(): number {
   try {
     const v = localStorage.getItem(WARMUP_KEY);
     const n = v === null ? WARMUP_DEFAULT : Number(v);
-    return Number.isInteger(n) && n >= 0 ? n : WARMUP_DEFAULT;
+    return Number.isInteger(n) && n >= 0 ? Math.min(n, WARMUP_MAX) : WARMUP_DEFAULT;
   } catch {
     return WARMUP_DEFAULT;
   }
@@ -106,7 +108,7 @@ class Lyrics {
   }
 
   setWarmup(count: number) {
-    this.warmup = Math.max(0, Math.round(count));
+    this.warmup = Math.min(WARMUP_MAX, Math.max(0, Math.round(count)));
     try {
       localStorage.setItem(WARMUP_KEY, String(this.warmup));
     } catch {
