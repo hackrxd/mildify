@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
-  import { lyrics } from "../lib/lyrics.svelte";
+  import { lyrics, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
 
@@ -31,6 +31,14 @@
     if (await lyrics.signIn(lyricsUser, lyricsPassword)) lyricsUser = "";
     lyricsPassword = "";
     lyricsBusy = false;
+  }
+
+  function saveWarmup(e: Event & { currentTarget: HTMLInputElement }) {
+    const input = e.currentTarget;
+    const n = Number(input.value);
+    if (input.value.trim() !== "" && Number.isFinite(n)) lyrics.setWarmup(n);
+    // Show what was kept: clamped, rounded, or the old value for nonsense.
+    input.value = String(lyrics.warmup);
   }
 
   function saveName() {
@@ -173,17 +181,24 @@
       <span>
         <span class="label">Load lyrics ahead</span>
         <span class="muted small">
-          Fetch lyrics for the songs coming up in the queue, so they show up right away. Each song's lyrics are
-          fetched fresh every time it plays.
+          How many songs coming up in the queue to fetch lyrics for, so they show up right away. 0 turns it off;
+          up to {WARMUP_MAX}. Each song's lyrics are fetched fresh every time it plays.
         </span>
       </span>
-      <select class="field" value={lyrics.warmup} onchange={(e) => lyrics.setWarmup(Number(e.currentTarget.value))}>
-        <option value={0}>Off</option>
-        <option value={1}>Next song</option>
-        <option value={3}>Next 3 songs</option>
-        <option value={5}>Next 5 songs</option>
-        <option value={10}>Next 10 songs</option>
-      </select>
+      <span class="count">
+        <input
+          class="field"
+          type="number"
+          min="0"
+          max={WARMUP_MAX}
+          step="1"
+          inputmode="numeric"
+          value={lyrics.warmup}
+          onchange={saveWarmup}
+          onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+        <span class="muted small">songs</span>
+      </span>
     </label>
   </section>
 
@@ -313,6 +328,14 @@
   .row .field {
     width: 260px;
     flex: none;
+  }
+  .count {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+  }
+  .row .count .field {
+    width: 80px;
   }
   select.field {
     appearance: auto;
