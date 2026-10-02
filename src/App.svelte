@@ -185,11 +185,15 @@
     background: var(--graphite);
   }
 
+  /* Sidebar, main pane and queue float as rounded panels on a darker frame; the deck sits on the frame. */
   .shell {
     display: grid;
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) var(--deck-h);
+    gap: 0 var(--seam);
     height: 100%;
+    padding: var(--seam) var(--seam) 0;
+    background: var(--frame);
   }
   .shell.queue-open {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 320px;
@@ -217,6 +221,8 @@
     overflow-y: auto;
     overflow-x: hidden;
     min-width: 0;
+    border-radius: var(--panel-radius);
+    background: var(--graphite);
   }
 
   /* Sticky top bar; transparent over headers, solid once content scrolls under it. */
@@ -249,5 +255,6 @@
 
   .deck-slot {
     grid-column: 1 / -1;
+    margin: 0 calc(-1 * var(--seam));
   }
 </style>
