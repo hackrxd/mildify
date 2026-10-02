@@ -66,9 +66,10 @@ backend's. Neither needs a Spotify account or network access.
 
 Tauri can't build for another operating system, so the GitHub Actions workflow in
 [.github/workflows/build.yml](.github/workflows/build.yml) builds all of them: Windows, macOS
-(Apple silicon and Intel) and Linux. It runs the tests alongside. Every push to `main` uploads the
-installers as workflow artifacts, and pushing a `v*` tag publishes a release with them attached
-once the tests and all four builds pass. The macOS builds aren't
+(Apple silicon and Intel) and Linux. Pushes to `main` and pull requests only run the tests.
+Pushing a `v*` tag builds the installers and publishes a release with them attached once the tests
+and all four builds pass; starting the workflow by hand (Actions → build → Run workflow) builds
+them for any branch as workflow artifacts. The macOS builds aren't
 signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
 
 ## Updates
