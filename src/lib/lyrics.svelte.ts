@@ -23,6 +23,7 @@ export interface Attribution {
 }
 
 const OFFSET_KEY = "nativify:lyricsOffsetMs";
+const IN_DECK_KEY = "nativify:lyricsInDeck";
 
 function loadOffset(): number {
   try {
@@ -30,6 +31,14 @@ function loadOffset(): number {
     return Number.isFinite(v) ? v : 0;
   } catch {
     return 0;
+  }
+}
+
+function loadInDeck(): boolean {
+  try {
+    return localStorage.getItem(IN_DECK_KEY) !== "false";
+  } catch {
+    return true;
   }
 }
 
@@ -55,6 +64,8 @@ class Lyrics {
   immersive = $state(false);
   /** User timing nudge in ms: positive shows lyrics later, negative earlier. */
   offsetMs = $state(loadOffset());
+  /** Show the current line in the player bar. */
+  inDeck = $state(loadInDeck());
 
   setOffset(ms: number) {
     this.offsetMs = Math.round(ms);
@@ -64,6 +75,25 @@ class Lyrics {
       // Not persisted; still applies for this session.
     }
   }
+
+  setInDeck(on: boolean) {
+    this.inDeck = on;
+    try {
+      localStorage.setItem(IN_DECK_KEY, String(on));
+    } catch {
+      // Not persisted; still applies for this session.
+    }
+  }
+
+  /** Lyrics for the player bar's line: null instead of an error, which the lyrics view reports. */
+  async fetchQuietly(trackId: string): Promise<unknown | null> {
+    try {
+      return await this.#fetch(trackId);
+    } catch {
+      return null;
+    }
+  }
+
   #installed = false;
 
   install() {
