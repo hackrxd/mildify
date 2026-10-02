@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import NowPlaying from "./components/NowPlaying.svelte";
   import QueuePanel from "./components/QueuePanel.svelte";
@@ -38,6 +39,12 @@
       playerStarted = true;
       player.start();
     }
+  });
+
+  // Drop played songs' lyrics from the cache and fetch the upcoming ones.
+  $effect(() => {
+    const uri = player.track?.uri;
+    untrack(() => lyrics.trackChanged(uri));
   });
 
   // New page, new scroll position.
