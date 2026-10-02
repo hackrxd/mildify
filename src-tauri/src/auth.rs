@@ -59,7 +59,7 @@ pub async fn authorize(
     cancel: oneshot::Receiver<()>,
 ) -> Result<TokenResponse> {
     let verifier = URL_SAFE_NO_PAD.encode(random_hex(48));
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let challenge = code_challenge(&verifier);
     let state = random_hex(16);
     let redirect_uri = redirect.uri();
 
@@ -107,6 +107,11 @@ pub async fn authorize(
         ],
     )
     .await
+}
+
+/// The PKCE S256 challenge for a code verifier (RFC 7636 §4.2).
+fn code_challenge(verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
 /// Exchanges a refresh token. A revoked/invalid grant maps to [`AppError::NotSignedIn`].
