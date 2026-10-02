@@ -61,10 +61,14 @@ To build an installer for the computer you're on: `npm run tauri build`. It land
 `src-tauri/target/release/bundle/` (`.msi`/`.exe` on Windows, `.dmg`/`.app` on macOS,
 `.deb`/`.rpm`/`.AppImage` on Linux).
 
+Tests: `npm test` runs the frontend's (Vitest), and `cargo test --lib` in `src-tauri/` runs the
+backend's. Neither needs a Spotify account or network access.
+
 Tauri can't build for another operating system, so the GitHub Actions workflow in
 [.github/workflows/build.yml](.github/workflows/build.yml) builds all of them: Windows, macOS
-(Apple silicon and Intel) and Linux. Every push to `main` uploads the installers as workflow
-artifacts, and pushing a `v*` tag publishes a release with them attached. The macOS builds aren't
+(Apple silicon and Intel) and Linux. It runs the tests alongside. Every push to `main` uploads the
+installers as workflow artifacts, and pushing a `v*` tag publishes a release with them attached
+once the tests and all four builds pass. The macOS builds aren't
 signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
 
 ## Updates
