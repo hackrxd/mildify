@@ -87,3 +87,4 @@ Areas seen in history: `rust(...)`, `ts(...)`, `svelte(...)`, `config(...)`, `do
 Examples: `ts(api): artist albums 10 per page, the development-mode cap`, `svelte(views): artist page with
 discography`. A version bump is three commits: `config(tauri): version X`, `config: rust crate version X`,
 `config: npm package version X`.
+If needed, check previous commits in the repository.
