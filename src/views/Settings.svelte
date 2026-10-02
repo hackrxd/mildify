@@ -1,8 +1,9 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
-  import { lyrics, WARMUP_MAX } from "../lib/lyrics.svelte";
+  import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
+  import { plural } from "../lib/util";
 
   const config = $derived(session.status?.config);
   const device = $derived(session.device);
@@ -40,6 +41,11 @@
     // Show what was kept: clamped, rounded, or the old value for nonsense.
     input.value = String(lyrics.warmup);
   }
+
+  const scales = Array.from(
+    { length: Math.round((TEXT_SCALE_MAX - TEXT_SCALE_MIN) / TEXT_SCALE_STEP) + 1 },
+    (_, i) => Math.round((TEXT_SCALE_MIN + i * TEXT_SCALE_STEP) * 100) / 100,
+  );
 
   function saveName() {
     const name = deviceName.trim();
@@ -200,6 +206,33 @@
         <span class="muted small">songs</span>
       </span>
     </label>
+
+    <div class="row">
+      <span>
+        <span class="label">Per-song timing</span>
+        <span class="muted small">
+          {#if lyrics.songOffsetCount === 0}None yet. If one song's sync is off, nudge it from the lyrics view with
+            the options button or the [ and ] keys.
+          {:else}{plural(lyrics.songOffsetCount, "song")} {lyrics.songOffsetCount === 1 ? "has its" : "have their"} own
+            timing, on top of Lyrics timing.{/if}
+        </span>
+      </span>
+      <button class="btn quiet" type="button" disabled={lyrics.songOffsetCount === 0} onclick={() => lyrics.forgetSongOffsets()}>
+        Reset all
+      </button>
+    </div>
+
+    <label class="row">
+      <span>
+        <span class="label">Lyrics text size</span>
+        <span class="muted small">How big the lyrics view writes them. Ctrl + and Ctrl − change it there too.</span>
+      </span>
+      <select class="field narrow" value={lyrics.textScale} onchange={(e) => lyrics.setTextScale(Number(e.currentTarget.value))}>
+        {#each scales as scale (scale)}
+          <option value={scale}>{Math.round(scale * 100)}%{scale === 1 ? " (default)" : ""}</option>
+        {/each}
+      </select>
+    </label>
   </section>
 
   <section>
@@ -339,6 +372,9 @@
   }
   select.field {
     appearance: auto;
+  }
+  .row .field.narrow {
+    width: 160px;
   }
   .switch {
     width: 18px;
