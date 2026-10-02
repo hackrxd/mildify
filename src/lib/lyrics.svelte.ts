@@ -27,11 +27,11 @@ export interface Attribution {
 const OFFSET_KEY = "nativify:lyricsOffsetMs";
 const IN_DECK_KEY = "nativify:lyricsInDeck";
 const WARMUP_KEY = "nativify:lyricsWarmup";
-export const WARMUP_DEFAULT = 3;
+export const WARMUP_DEFAULT = 20;
 /** Spotify's queue endpoint only lists the next 20 songs. */
 export const WARMUP_MAX = 20;
 /** Wait for the queue to settle after a track change (and for skipping through to stop). */
-const WARMUP_DELAY_MS = 2000;
+const WARMUP_DELAY_MS = 200;
 
 function loadOffset(): number {
   try {
