@@ -67,6 +67,9 @@ pub struct Paths {
     pub librespot_dir: PathBuf,
     /// librespot's (encrypted) audio file cache.
     pub audio_cache_dir: PathBuf,
+    /// User CSS themes and JS extensions (see mods.rs).
+    pub themes_dir: PathBuf,
+    pub extensions_dir: PathBuf,
 }
 
 impl Paths {
@@ -77,6 +80,8 @@ impl Paths {
             lyrics_session_file: data_dir.join("lyrics_server_session.json"),
             librespot_dir: data_dir.join("librespot"),
             audio_cache_dir: cache_dir.join("audio"),
+            themes_dir: config_dir.join("themes"),
+            extensions_dir: config_dir.join("extensions"),
         }
     }
 }
@@ -168,5 +173,7 @@ mod tests {
         assert!(p.lyrics_session_file.starts_with("/data"));
         assert!(p.librespot_dir.starts_with("/data"));
         assert!(p.audio_cache_dir.starts_with("/cache"));
+        assert_eq!(p.themes_dir, Path::new("/cfg/themes"));
+        assert_eq!(p.extensions_dir, Path::new("/cfg/extensions"));
     }
 }
