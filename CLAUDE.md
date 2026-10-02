@@ -58,6 +58,13 @@ diffed against upstream. Any upstream file you modify needs a `Modified for Nati
 (AGPL §5(a)) and an entry in `src/spicy-lyrics/README.md`. Lyrics are fetched only from the Nativify lyrics
 service (`lyrics.rs`; the URL is fixed in the backend), which may require its own account login.
 
+**Themes and extensions.** `mods.rs` lists `themes/` and `extensions/` in the app config dir and serves them
+over the `nsmod` URI scheme (`nsmod://localhost/…`, `http://nsmod.localhost/…` on Windows; allowed in the CSP),
+refusing paths that leave those folders. `src/lib/mods.svelte.ts` links the active theme and Quick CSS at the end
+of `<body>`, imports enabled extensions as ES modules once the session is ready, and hands each the
+`ExtensionApi`. Everything an extension registers through it is undone when it's turned off; window focus
+re-reads the folders, so edits apply live. `--safe-mode` loads none of it. User-facing guide: `docs/mods.md`.
+
 **Vendored librespot-core.** librespot is pinned to a dev-branch commit (`Cargo.toml`), and `librespot-core` is
 patched from `src-tauri/vendor/librespot-core` so free accounts log an error instead of exiting the process. That
 error is surfaced as the `premium_required` device state. See `vendor/librespot-core/PATCHED.md`.

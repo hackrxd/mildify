@@ -122,6 +122,17 @@ The app fetches lyrics for the songs coming up in your queue ahead of time (Sett
 Load lyrics ahead: 20 songs by default, the most Spotify lists; 0 turns it off). It keeps a
 song's lyrics only until that song has played, so each play gets the latest sync.
 
+## Themes and extensions
+
+Drop CSS themes and JavaScript extensions into the `themes` and `extensions` folders in the app's
+config directory (Settings → Themes and extensions opens them). Pick a theme, type small tweaks
+into Quick CSS, and turn extensions on, all in Settings. Themes restyle the app through its colour
+variables; extensions get playback, navigation, the Web API, sidebar pages and track menu entries
+through a small API. Edits apply when you switch back to the app. If one breaks the app, start it
+with `--safe-mode`.
+
+See [docs/mods.md](docs/mods.md) for the details and [docs/mods](docs/mods) for examples.
+
 ## Limitations (Spotify's, not ours)
 
 Spotify's February 2026 changes restrict development-mode apps:
@@ -159,10 +170,12 @@ src/                Svelte frontend
   components/       shell pieces: sidebar, now-playing deck, track list…
   views/            pages: home, search, album, artist, playlist, liked, lyrics…
   spicy-lyrics/     the vendored Spicy Lyrics renderer and its compatibility layer
+docs/mods.md        how to write themes and extensions; examples in docs/mods/
 src-tauri/src/
   auth.rs           PKCE browser sign-in with a loopback redirect
   webapi.rs         Web API client with token refresh and rate-limit handling
   device.rs         librespot Connect device and its supervisor
   lyrics.rs         Nativify lyrics service client and sign-in
+  mods.rs           themes and extensions: folder scan and the nsmod:// scheme
   lib.rs            Tauri commands and app state
 ```
