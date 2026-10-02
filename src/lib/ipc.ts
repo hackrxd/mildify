@@ -55,6 +55,33 @@ export interface LyricsServerStatus {
   error: string | null;
 }
 
+/** A theme or extension in the mods folders (mods.rs). */
+export interface ModInfo {
+  /** File or folder name. */
+  id: string;
+  /** Entry file relative to the kind's folder, `/`-separated. */
+  entry: string;
+  name: string;
+  description: string | null;
+  author: string | null;
+  version: string | null;
+  /** Entry file's mtime in ms; changes on every edit. */
+  modified: number;
+}
+
+export interface ModList {
+  themes_dir: string;
+  extensions_dir: string;
+  /** Where `themes/<entry>` and `extensions/<entry>` are served from. */
+  base_url: string;
+  /** Started with `--safe-mode`: load no theme or extension. */
+  safe_mode: boolean;
+  themes: ModInfo[];
+  extensions: ModInfo[];
+}
+
+export type ModKind = "themes" | "extensions";
+
 type SettingsInput = Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation">>;
 
 export interface AppStatus {
@@ -112,6 +139,8 @@ export const backend = {
   lyricsServerLogin: (username: string, password: string) =>
     invoke<LyricsServerStatus>("lyrics_server_login", { username, password }),
   lyricsServerLogout: () => invoke<LyricsServerStatus>("lyrics_server_logout"),
+  listMods: () => invoke<ModList>("list_mods"),
+  openModsFolder: (kind: ModKind) => invoke<void>("open_mods_folder", { kind }),
 };
 
 let authLost: (() => void) | null = null;
