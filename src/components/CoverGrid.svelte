@@ -46,8 +46,10 @@
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
-    gap: 28px 22px;
+    grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+    gap: 6px;
+    /* Cards carry their own padding; pull the grid out so the art still lines up with the headings. */
+    margin: 0 -10px;
   }
   .grid.one-row {
     grid-auto-rows: 0;
@@ -58,20 +60,28 @@
 
   .item {
     min-width: 0;
+    padding: 10px 10px 14px;
+    border-radius: 10px;
+    transition: background 160ms;
+  }
+  .item:hover,
+  .item:focus-within {
+    background: color-mix(in srgb, var(--paper) 5%, transparent);
   }
 
   .art {
     position: relative;
     aspect-ratio: 1;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
   .open {
     display: block;
     width: 100%;
     height: 100%;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     background: var(--raised);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
   }
   .round .open {
     border-radius: 50%;
@@ -95,18 +105,21 @@
 
   .play-fab {
     position: absolute;
-    right: 10px;
-    bottom: 10px;
+    right: 8px;
+    bottom: 8px;
     width: 46px;
     height: 46px;
     opacity: 0;
-    transform: translateY(6px);
-    transition: opacity 140ms, transform 140ms;
+    transform: translateY(8px);
+    transition: opacity 160ms, transform 160ms, background 120ms;
   }
   .item:hover .play-fab,
   .play-fab:focus-visible {
     opacity: 1;
     transform: none;
+  }
+  .item:hover .play-fab:hover {
+    transform: scale(1.06);
   }
 
   .title {
