@@ -425,7 +425,10 @@ const REFILL_WINDOW: Duration = Duration::from_millis(200);
 
 impl OutputClock {
     fn queued(&self, audio: Duration) {
-        let now = Instant::now();
+        self.queued_at(Instant::now(), audio);
+    }
+
+    fn queued_at(&self, now: Instant, audio: Duration) {
         let mut s = self.0.lock().unwrap();
         let until = match s.until {
             Some(u) if u > now => u,
@@ -442,7 +445,10 @@ impl OutputClock {
     }
 
     fn heard(&self, decoder_ms: u32) -> u32 {
-        let now = Instant::now();
+        self.heard_at(Instant::now(), decoder_ms)
+    }
+
+    fn heard_at(&self, now: Instant, decoder_ms: u32) -> u32 {
         let s = self.0.lock().unwrap();
         if let Some(from) = s.refill_from.filter(|f| now.duration_since(*f) < REFILL_WINDOW) {
             return decoder_ms + now.duration_since(from).as_millis() as u32;
