@@ -104,6 +104,10 @@ export const backend = {
   device: (command: DeviceCommand) => invoke<void>("device_command", { command }),
   /** Spicy Lyrics v1 response for a track, or null when there are no lyrics. */
   lyrics: (trackId: string) => invoke<unknown | null>("spicy_lyrics", { trackId }),
+  /** Fetches lyrics for upcoming tracks into the backend's cache. Resolves to how many it fetched. */
+  warmLyrics: (trackIds: string[]) => invoke<number>("warm_lyrics", { trackIds }),
+  /** Drops a played track's cached lyrics. */
+  forgetLyrics: (trackId: string) => invoke<void>("forget_lyrics", { trackId }),
   lyricsServerStatus: () => invoke<LyricsServerStatus>("lyrics_server_status"),
   lyricsServerLogin: (username: string, password: string) =>
     invoke<LyricsServerStatus>("lyrics_server_login", { username, password }),
