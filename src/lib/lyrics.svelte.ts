@@ -5,7 +5,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { setHost, type HostTrack } from "spicy-lyrics-renderer";
 import { backend, isAppError, type LyricsServerStatus } from "./ipc";
 import { player } from "./player.svelte";
+import * as sp from "./spotify";
 import { toasts } from "./toasts.svelte";
+import { debounce, upcomingTrackIds } from "./util";
 
 export interface Credit {
   username: string;
@@ -24,6 +26,10 @@ export interface Attribution {
 
 const OFFSET_KEY = "nativify:lyricsOffsetMs";
 const IN_DECK_KEY = "nativify:lyricsInDeck";
+const WARMUP_KEY = "nativify:lyricsWarmup";
+export const WARMUP_DEFAULT = 3;
+/** Wait for the queue to settle after a track change (and for skipping through to stop). */
+const WARMUP_DELAY_MS = 2000;
 
 function loadOffset(): number {
   try {
@@ -31,6 +37,16 @@ function loadOffset(): number {
     return Number.isFinite(v) ? v : 0;
   } catch {
     return 0;
+  }
+}
+
+function loadWarmup(): number {
+  try {
+    const v = localStorage.getItem(WARMUP_KEY);
+    const n = v === null ? WARMUP_DEFAULT : Number(v);
+    return Number.isInteger(n) && n >= 0 ? n : WARMUP_DEFAULT;
+  } catch {
+    return WARMUP_DEFAULT;
   }
 }
 
@@ -66,6 +82,10 @@ class Lyrics {
   offsetMs = $state(loadOffset());
   /** Show the current line in the player bar. */
   inDeck = $state(loadInDeck());
+  /** How many upcoming songs to fetch lyrics for ahead of time; 0 turns it off. */
+  warmup = $state(loadWarmup());
+  /** Track id the backend's cache is following, so its lyrics can be dropped once it's played. */
+  #playing: string | null = null;
 
   setOffset(ms: number) {
     this.offsetMs = Math.round(ms);
@@ -82,6 +102,41 @@ class Lyrics {
       localStorage.setItem(IN_DECK_KEY, String(on));
     } catch {
       // Not persisted; still applies for this session.
+    }
+  }
+
+  setWarmup(count: number) {
+    this.warmup = Math.max(0, Math.round(count));
+    try {
+      localStorage.setItem(WARMUP_KEY, String(this.warmup));
+    } catch {
+      // Not persisted; still applies for this session.
+    }
+    this.#warmSoon();
+  }
+
+  /**
+   * Call on every track change. The backend caches lyrics only until their song has played,
+   * so the next play gets the latest sync; this drops the finished one and warms up what's next.
+   */
+  trackChanged(uri: string | undefined) {
+    const id = uri?.startsWith("spotify:track:") ? uri.split(":")[2] : null;
+    if (id === this.#playing) return;
+    const played = this.#playing;
+    this.#playing = id;
+    if (played) backend.forgetLyrics(played).catch(() => {});
+    this.#warmSoon();
+  }
+
+  #warmSoon = debounce(() => this.#warm(), WARMUP_DELAY_MS);
+
+  async #warm() {
+    if (this.warmup <= 0 || !this.#playing) return;
+    try {
+      const ids = upcomingTrackIds(await sp.queue(), this.#playing, this.warmup);
+      if (ids.length) await backend.warmLyrics(ids);
+    } catch {
+      // Best effort: the lyrics view fetches anything that wasn't warmed up.
     }
   }
 
