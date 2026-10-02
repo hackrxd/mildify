@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { debounce, formatDuration, formatRuntime, idFromUri, pickImage, plainText, plural, year } from "./util";
+import type { Queue, Track } from "./types";
+import {
+  debounce,
+  formatDuration,
+  formatRuntime,
+  idFromUri,
+  pickImage,
+  plainText,
+  plural,
+  upcomingTrackIds,
+  year,
+} from "./util";
 
 describe("formatDuration", () => {
   it.each([
@@ -75,6 +86,25 @@ describe("idFromUri", () => {
 
   it("passes a bare id through", () => {
     expect(idFromUri("4uLU6hMCjMI75M1A2tKUQC")).toBe("4uLU6hMCjMI75M1A2tKUQC");
+  });
+});
+
+describe("upcomingTrackIds", () => {
+  const t = (uri: string) => ({ uri }) as Track;
+  const queue = (...uris: string[]): Queue => ({ currently_playing: null, queue: uris.map(t) });
+
+  it("takes the next tracks in order, up to the count", () => {
+    expect(upcomingTrackIds(queue("spotify:track:a", "spotify:track:b", "spotify:track:c"), null, 2)).toEqual(["a", "b"]);
+  });
+
+  it("skips episodes, local files, repeats and the current track", () => {
+    const q = queue("spotify:track:now", "spotify:episode:e", "spotify:local:x", "spotify:track:a", "spotify:track:a", "spotify:track:b");
+    expect(upcomingTrackIds(q, "now", 5)).toEqual(["a", "b"]);
+  });
+
+  it("gives nothing for a zero count or no queue", () => {
+    expect(upcomingTrackIds(queue("spotify:track:a"), null, 0)).toEqual([]);
+    expect(upcomingTrackIds(null, null, 3)).toEqual([]);
   });
 });
 
