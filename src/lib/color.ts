@@ -39,7 +39,7 @@ function sample(url: string): Promise<string | null> {
 }
 
 /** Saturation-weighted average, so a vivid detail beats a sea of grey. */
-function dominant(data: Uint8ClampedArray): string {
+export function dominant(data: Uint8ClampedArray): string {
   let r = 0, g = 0, b = 0, total = 0;
   for (let i = 0; i < data.length; i += 4) {
     const [pr, pg, pb] = [data[i], data[i + 1], data[i + 2]];
