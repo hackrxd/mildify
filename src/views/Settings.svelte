@@ -160,6 +160,14 @@
         <button class="btn primary" type="submit" disabled={lyricsBusy}>{lyricsBusy ? "Signing in…" : "Sign in"}</button>
       </form>
     {/if}
+
+    <label class="row">
+      <span>
+        <span class="label">Lyrics in the player bar</span>
+        <span class="muted small">The current line, next to the song title, when the window is wide enough.</span>
+      </span>
+      <input type="checkbox" class="switch" checked={lyrics.inDeck} onchange={(e) => lyrics.setInDeck(e.currentTarget.checked)} />
+    </label>
   </section>
 
   <section>
