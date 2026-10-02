@@ -4,6 +4,7 @@
 # release with every installer attached, plus the signed update bundles and latest.json the in-app
 # updater reads. The release stays a draft until all four builds succeed, then it's published as
 # the latest release, so installed copies never see a latest.json that's missing a platform.
+# The test job (Vitest, svelte-check, cargo test) has to pass too before a release is published.
 name: build
 
 on:
@@ -61,6 +62,38 @@ jobs:
               draft: true,
             });
             return data.id;
+
+  # Runs beside the builds rather than before them, so it doesn't slow a release down; a failure
+  # still keeps the release a draft, since publish-release waits for it.
+  test:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: test
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: cargo test --lib --locked
+        working-directory: src-tauri
 
   build:
     needs: prepare
@@ -127,7 +160,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    needs: [prepare, build]
+    needs: [prepare, test, build]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
