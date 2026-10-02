@@ -1,5 +1,6 @@
 :root {
   /* Palette: a listening room at night, lit by a brass amplifier dial. */
+  --frame: #101114;
   --graphite: #191a1f;
   --panel: #202228;
   --raised: #2a2d35;
@@ -13,7 +14,8 @@
   /* Overridden per view from cover art. */
   --ambient: hsl(225 12% 26%);
 
-  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* Segoe on Windows; elsewhere the bundled Inter rather than whatever system-ui resolves to. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter Variable", system-ui, sans-serif;
   --font-display: "Archivo Variable", "Archivo", var(--font-ui);
 
   /* Type scale (px): 12 / 13 / 14 / 16 / 20 / 28 / display */
@@ -27,6 +29,11 @@
   --sidebar-w: 248px;
   --deck-h: 92px;
   --gutter: 28px;
+  /* Space between the floating panels, and their corners. */
+  --seam: 8px;
+  --panel-radius: 10px;
+
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 18px 48px rgb(0 0 0 / 0.55);
 
   color-scheme: dark;
 }
@@ -42,7 +49,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--graphite);
+  background: var(--frame);
   color: var(--paper);
   font-family: var(--font-ui);
   font-size: 16px;
@@ -140,7 +147,10 @@ img {
   font-size: var(--t-md);
   font-weight: 600;
   background: var(--raised);
-  transition: background 120ms;
+  transition: background 120ms, transform 120ms, box-shadow 120ms;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--raised), var(--paper) 10%);
@@ -156,6 +166,10 @@ img {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
 }
+.btn.quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper) 30%, transparent);
+}
 
 .icon-btn {
   display: inline-grid;
@@ -164,10 +178,14 @@ img {
   height: 32px;
   border-radius: 50%;
   color: var(--smoke);
-  transition: color 120ms, background 120ms;
+  transition: color 120ms, background 120ms, transform 100ms;
 }
 .icon-btn:hover:not(:disabled) {
   color: var(--paper);
+  background: color-mix(in srgb, var(--paper) 7%, transparent);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 .icon-btn.on {
   color: var(--brass);
@@ -182,11 +200,15 @@ img {
   border-radius: 50%;
   background: var(--brass);
   color: var(--brass-ink);
-  transition: transform 120ms, background 120ms;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.35);
+  transition: transform 120ms, background 120ms, opacity 140ms;
 }
-.play-fab:hover {
-  transform: scale(1.04);
+.play-fab:hover:not(:disabled) {
+  transform: scale(1.05);
   background: color-mix(in srgb, var(--brass), white 14%);
+}
+.play-fab:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .field {
@@ -197,10 +219,15 @@ img {
   border: 1px solid var(--line);
   background: var(--graphite);
   user-select: text;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.field:hover {
+  border-color: color-mix(in srgb, var(--paper) 22%, var(--line));
 }
 .field:focus {
   outline: none;
   border-color: var(--brass);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent);
 }
 
 .muted {
