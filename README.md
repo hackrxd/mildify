@@ -105,6 +105,9 @@ Lyrics come from the Spicy Lyrics API through the Nativify lyrics service (below
 always credits the provider (and the community members who made a sync), as the API's terms
 require.
 
+When the window is wide enough, the player bar also shows the current line next to the song title
+(hover it for the credit, click it for the lyrics view). Turn it off under Settings → Lyrics.
+
 Romanization isn't included yet: upstream downloads and runs romanization packages from a CDN
 at runtime. Lyrics that ship their own romanization still get the toggle.
 
