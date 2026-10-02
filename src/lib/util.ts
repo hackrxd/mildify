@@ -1,4 +1,4 @@
-import type { Image } from "./types";
+import type { Image, Queue } from "./types";
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -24,6 +24,18 @@ export function pickImage(images: Image[] | null | undefined, min = 300): string
 
 export function idFromUri(uri: string): string {
   return uri.split(":").pop() ?? uri;
+}
+
+/** Ids of the next `count` distinct Spotify tracks in a queue, leaving out `currentId`. */
+export function upcomingTrackIds(queue: Queue | null, currentId: string | null, count: number): string[] {
+  const ids: string[] = [];
+  for (const t of queue?.queue ?? []) {
+    if (ids.length >= count) break;
+    if (!t?.uri?.startsWith("spotify:track:")) continue;
+    const id = idFromUri(t.uri);
+    if (id !== currentId && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
 }
 
 export function year(releaseDate: string | undefined): string {
