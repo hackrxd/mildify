@@ -40,3 +40,35 @@ fn picks_wayland(wayland_display: Option<&OsStr>, gdk_backend: &str) -> bool {
     }
     matches!(gdk_backend.split(',').next().map(str::trim), None | Some("" | "*" | "wayland"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn picks(display: Option<&str>, backend: &str) -> bool {
+        picks_wayland(display.map(OsStr::new), backend)
+    }
+
+    #[test]
+    fn needs_a_wayland_display() {
+        assert!(!picks(None, ""));
+        assert!(!picks(Some(""), ""));
+        assert!(!picks(None, "wayland"));
+    }
+
+    #[test]
+    fn wayland_by_default() {
+        assert!(picks(Some("wayland-0"), ""));
+        assert!(picks(Some("wayland-0"), "*"));
+        assert!(picks(Some("wayland-0"), "wayland"));
+    }
+
+    #[test]
+    fn follows_the_first_backend_gdk_would_try() {
+        assert!(picks(Some("wayland-0"), "wayland,x11"));
+        assert!(picks(Some("wayland-0"), " wayland , x11"));
+        assert!(!picks(Some("wayland-0"), "x11"));
+        assert!(!picks(Some("wayland-0"), "x11,wayland"));
+        assert!(!picks(Some("wayland-0"), "broadway"));
+    }
+}
