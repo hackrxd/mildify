@@ -42,6 +42,9 @@ Additions: `src/components/Pages/PageState.ts` holds the page element outside an
 Upstream's esbuild bundle rewrites top-level `let` to `var`, which hides a temporal-dead-zone
 read; native ES modules (Vite) don't, so the binding lives in a module with no imports.
 
+`tests/` holds Native Spotify's Vitest tests for the pure helpers (empty-line pruning, display text
+choice, RTL detection, the spring). They import the verbatim files without changing them.
+
 Every modified upstream file carries a `Modified for Native Spotify` note at the top describing
 the change, as AGPL section 5(a) requires.
 
