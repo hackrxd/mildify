@@ -213,3 +213,98 @@ main{{text-align:center}}h1{{font-size:22px;margin:0 0 8px}}p{{color:#9a9894;mar
 <body><main><h1>{title}</h1><p>{message}</p></main></body></html>"#
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use tokio::task::JoinHandle;
+
+    use super::*;
+
+    #[test]
+    fn redirect_uris_match_what_the_developer_app_registers() {
+        assert_eq!(WEBAPI_REDIRECT.uri(), "http://127.0.0.1:8898/callback");
+        assert_eq!(LIBRESPOT_REDIRECT.uri(), "http://127.0.0.1:5588/login");
+    }
+
+    #[test]
+    fn code_challenge_matches_rfc_7636() {
+        // Appendix B of RFC 7636.
+        assert_eq!(
+            code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
+
+    /// Starts waiting for a sign-in redirect on a free loopback port.
+    async fn listen(state: &str) -> (SocketAddr, JoinHandle<Result<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let state = state.to_owned();
+        let task = tokio::spawn(async move { wait_for_code(&listener, "/callback", &state).await });
+        (addr, task)
+    }
+
+    /// Sends what a browser would for `target` and returns the raw response.
+    async fn browse(addr: SocketAddr, target: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let request = format!("GET {target} HTTP/1.1\r\nHost: {addr}\r\nAccept: text/html\r\n\r\n");
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        response
+    }
+
+    #[tokio::test]
+    async fn returns_the_code() {
+        let (addr, task) = listen("st4te").await;
+        let page = browse(addr, "/callback?code=abc%2F123&state=st4te").await;
+        assert!(page.starts_with("HTTP/1.1 200 OK"));
+        assert!(page.contains("You're signed in"));
+        assert_eq!(task.await.unwrap().unwrap(), "abc/123");
+    }
+
+    #[tokio::test]
+    async fn keeps_waiting_through_stray_requests() {
+        let (addr, task) = listen("st4te").await;
+        assert!(browse(addr, "/favicon.ico").await.starts_with("HTTP/1.1 404"));
+        assert!(browse(addr, "/callback?code=abc&state=other").await.starts_with("HTTP/1.1 400"));
+        assert!(browse(addr, "/callback?state=st4te").await.starts_with("HTTP/1.1 400"));
+        // A connection that closes without sending anything.
+        drop(TcpStream::connect(addr).await.unwrap());
+        assert!(!task.is_finished());
+
+        browse(addr, "/callback?code=abc&state=st4te").await;
+        assert_eq!(task.await.unwrap().unwrap(), "abc");
+    }
+
+    #[tokio::test]
+    async fn reports_a_declined_sign_in() {
+        let (addr, task) = listen("st4te").await;
+        let page = browse(addr, "/callback?error=access_denied&state=st4te").await;
+        assert!(page.contains("Sign-in cancelled"));
+        match task.await.unwrap() {
+            Err(AppError::Auth(msg)) => assert!(msg.contains("access_denied"), "{msg}"),
+            other => panic!("expected an auth error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn ignores_an_error_from_someone_elses_attempt() {
+        let (addr, task) = listen("st4te").await;
+        assert!(browse(addr, "/callback?error=access_denied&state=forged").await.starts_with("HTTP/1.1 400"));
+        assert!(!task.is_finished());
+        browse(addr, "/callback?code=abc&state=st4te").await;
+        assert_eq!(task.await.unwrap().unwrap(), "abc");
+    }
+
+    #[tokio::test]
+    async fn responses_declare_their_length() {
+        let (addr, task) = listen("st4te").await;
+        let page = browse(addr, "/callback?code=abc&state=st4te").await;
+        let (head, body) = page.split_once("\r\n\r\n").unwrap();
+        assert!(head.contains(&format!("Content-Length: {}", body.len())), "{head}");
+        task.await.unwrap().unwrap();
+    }
+}
