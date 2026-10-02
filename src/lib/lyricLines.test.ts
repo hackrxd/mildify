@@ -1,23 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { HOLD_GAP_MS, lineAt, lyricLines, nextChange, type LyricLine } from "./lyricLines";
+import { HOLD_GAP_MS, lineAt, lyricLines, nextChange, sung, type LyricLine } from "./lyricLines";
 
-const syl = (Text: string, IsPartOfWord = false) => ({ Text, StartTime: 0, EndTime: 0, IsPartOfWord });
+const syl = (Text: string, StartTime: number, EndTime: number, IsPartOfWord = false) => ({
+  Text,
+  StartTime,
+  EndTime,
+  IsPartOfWord,
+});
 
 describe("lyricLines", () => {
-  it("joins syllables into words and converts seconds to ms", () => {
+  it("joins syllables into words and keeps their timing, in ms", () => {
     const response = {
       Body: {
         Type: "Syllable",
         Content: [
           {
             Type: "Vocal",
-            Lead: { StartTime: 2, EndTime: 4.5, Syllables: [syl("Pa", true), syl("per"), syl("lan", true), syl("terns")] },
-            Background: [{ Syllables: [syl("ooh")] }],
+            Lead: {
+              StartTime: 2,
+              EndTime: 4.5,
+              Syllables: [syl("Pa", 2, 2.5, true), syl("per", 2.5, 3), syl("lan", 3, 3.5, true), syl("terns", 3.5, 4.5)],
+            },
+            Background: [{ Syllables: [syl("ooh", 2, 4)] }],
           },
         ],
       },
     };
-    expect(lyricLines(response)).toEqual([{ start: 2000, end: 4500, text: "Paper lanterns" }]);
+    expect(lyricLines(response)).toEqual([
+      {
+        start: 2000,
+        end: 4500,
+        text: "Paper lanterns",
+        syllables: [
+          { start: 2000, end: 2500, text: "Pa", partOfWord: true },
+          { start: 2500, end: 3000, text: "per", partOfWord: false },
+          { start: 3000, end: 3500, text: "lan", partOfWord: true },
+          { start: 3500, end: 4500, text: "terns", partOfWord: false },
+        ],
+      },
+    ]);
+  });
+
+  it("drops empty and untimed syllables", () => {
+    const body = {
+      Type: "Syllable",
+      Content: [{ Lead: { StartTime: 1, EndTime: 3, Syllables: [syl("\u200B", 1, 2), { Text: "no time" }, syl("kept", 2, 3)] } }],
+    };
+    expect(lyricLines(body)[0]).toMatchObject({ text: "kept", syllables: [{ text: "kept" }] });
+  });
+
+  it("gives line-synced lines no syllables", () => {
+    expect(lyricLines({ Type: "Line", Content: [{ Text: "a", StartTime: 1, EndTime: 2 }] })[0].syllables).toBeUndefined();
   });
 
   it("reads line-synced lyrics, with or without the Body wrapper", () => {
@@ -25,7 +58,7 @@ describe("lyricLines", () => {
       Type: "Line",
       Content: [
         { Type: "Vocal", Text: "second", StartTime: 5, EndTime: 7 },
-        { Type: "Vocal", Text: "  first​  line ", StartTime: 1, EndTime: 3 },
+        { Type: "Vocal", Text: "  first\u200B  line ", StartTime: 1, EndTime: 3 },
       ],
     };
     const expected = [
@@ -40,7 +73,7 @@ describe("lyricLines", () => {
     const body = {
       Type: "Line",
       Content: [
-        { Text: "​ ", StartTime: 1, EndTime: 2 },
+        { Text: "\u200B ", StartTime: 1, EndTime: 2 },
         { Text: "no time" },
         { Text: "kept", StartTime: 3, EndTime: 4 },
       ],
@@ -102,5 +135,25 @@ describe("nextChange", () => {
     [12_000, Infinity],
   ])("at %i ms → %d", (ms, at) => {
     expect(nextChange(lines, ms)).toBe(at);
+  });
+});
+
+describe("sung", () => {
+  const s = { start: 1000, end: 2000, text: "la", partOfWord: false };
+
+  it.each([
+    [0, 0],
+    [1000, 0],
+    [1250, 0.25],
+    [1500, 0.5],
+    [2000, 1],
+    [5000, 1],
+  ])("at %i ms → %d", (ms, part) => {
+    expect(sung(s, ms)).toBe(part);
+  });
+
+  it("treats a zero-length syllable as sung once it starts", () => {
+    expect(sung({ ...s, end: 1000 }, 999)).toBe(0);
+    expect(sung({ ...s, end: 1000 }, 1000)).toBe(1);
   });
 });
