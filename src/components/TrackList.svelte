@@ -152,15 +152,19 @@
     grid-template-columns: var(--cols);
     align-items: center;
     gap: 12px;
-    min-height: 54px;
+    min-height: 56px;
     padding: 0 12px;
-    border-radius: 6px;
+    border-radius: 8px;
+    transition: background 100ms;
     content-visibility: auto;
-    contain-intrinsic-size: auto 54px;
+    contain-intrinsic-size: auto 56px;
+  }
+  .row.current {
+    background: color-mix(in srgb, var(--brass) 8%, transparent);
   }
   .row:not(.head):hover,
   .row:focus-within {
-    background: color-mix(in srgb, var(--paper) 6%, transparent);
+    background: color-mix(in srgb, var(--paper) 7%, transparent);
   }
 
   .head {
@@ -169,7 +173,10 @@
     border-bottom: 1px solid var(--line);
     border-radius: 0;
     color: var(--smoke);
-    font-size: var(--t-sm);
+    font-size: var(--t-xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .disc {
@@ -216,9 +223,10 @@
   .title img {
     width: 40px;
     height: 40px;
-    border-radius: 3px;
+    border-radius: 5px;
     flex: none;
     background: var(--raised);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .title-text {
     display: grid;
@@ -232,8 +240,9 @@
     white-space: nowrap;
   }
   .name {
-    font-size: var(--t-lg);
-    line-height: 1.3;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.35;
   }
   .artists {
     display: flex;
