@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Queue, Track } from "./types";
 import {
+  copyText,
   debounce,
   formatDuration,
   formatRuntime,
@@ -178,5 +179,56 @@ describe("debounce", () => {
     d("b");
     vi.advanceTimersByTime(100);
     expect(fn.mock.calls).toEqual([["a"], ["b"]]);
+  });
+});
+
+describe("copyText", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "clipboard");
+    Reflect.deleteProperty(document, "execCommand");
+  });
+
+  function clipboard(writeText: (t: string) => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  }
+
+  function execCommand(result: boolean) {
+    const fn = vi.fn((cmd: string) => {
+      void cmd;
+      return result;
+    });
+    Object.defineProperty(document, "execCommand", { value: fn, configurable: true });
+    return fn;
+  }
+
+  it("uses the async clipboard when it's allowed", async () => {
+    const write = vi.fn(async () => {});
+    clipboard(write);
+    const exec = execCommand(true);
+    await copyText("la la");
+    expect(write).toHaveBeenCalledWith("la la");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a selected textarea, and cleans it up", async () => {
+    clipboard(async () => {
+      throw new Error("NotAllowedError");
+    });
+    let selected = "";
+    const exec = execCommand(true);
+    exec.mockImplementation(() => {
+      selected = document.querySelector("textarea")!.value;
+      return true;
+    });
+    await copyText("la la");
+    expect(exec).toHaveBeenCalledWith("copy");
+    expect(selected).toBe("la la");
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
+  it("rejects when nothing could copy", async () => {
+    execCommand(false);
+    await expect(copyText("la la")).rejects.toThrow();
+    expect(document.querySelector("textarea")).toBeNull();
   });
 });
