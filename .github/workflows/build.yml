@@ -5,6 +5,8 @@
 # updater reads. The release stays a draft until all four builds succeed, then it's published as
 # the latest release, so installed copies never see a latest.json that's missing a platform.
 # The test job (Vitest, svelte-check, cargo test) has to pass too before a release is published.
+# Pushes to main and pull requests only run the tests; installers are built for version tags, or
+# for any branch when the workflow is started by hand.
 name: build
 
 on:
@@ -30,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # `git push origin main v1.2.3` starts a branch run and a tag run for the same commit. The tag
-      # run builds the release, so the branch run stands down instead of building everything twice.
+      # run tests and builds the release, so the branch run stands down instead of testing twice.
       - id: tagged
         if: github.ref_type == 'branch'
         run: |
@@ -97,7 +99,7 @@ jobs:
 
   build:
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
+    if: needs.prepare.outputs.skip != 'true' && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
