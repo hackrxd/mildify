@@ -43,11 +43,11 @@
   // catches the line changes in between on time. `shown` is read untracked: it's written here.
   $effect(() => {
     if (!visible) return;
-    void [player.position, player.isPlaying, lyrics.offsetMs];
+    void [player.position, player.isPlaying, lyrics.totalOffsetMs];
     const ls = lines;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = () => {
-      const now = Math.max(0, player.positionNow() - lyrics.offsetMs);
+      const now = Math.max(0, player.positionNow() - lyrics.totalOffsetMs);
       const index = lineAt(ls, now);
       if (shown?.lines !== ls || shown.index !== index) shown = { lines: ls, index };
       if (player.isPlaying) timer = setTimeout(tick, Math.min(1000, Math.max(16, nextChange(ls, now) - now)));
@@ -62,12 +62,12 @@
     const el = lineEl;
     const syllables = line?.syllables;
     if (!el || !syllables) return;
-    void [player.position, player.isPlaying, lyrics.offsetMs];
+    void [player.position, player.isPlaying, lyrics.totalOffsetMs];
     const spans = el.querySelectorAll<HTMLElement>(".syllable");
     const painted: number[] = [];
     let frame = 0;
     const paint = () => {
-      const now = Math.max(0, player.positionNow() - lyrics.offsetMs);
+      const now = Math.max(0, player.positionNow() - lyrics.totalOffsetMs);
       syllables.forEach((s, i) => {
         const part = sung(s, now);
         if (painted[i] !== part) spans[i]?.style.setProperty("--sung", String((painted[i] = part)));
