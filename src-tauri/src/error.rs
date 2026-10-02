@@ -62,3 +62,66 @@ impl Serialize for AppError {
         st.end()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    use super::*;
+
+    fn ipc(e: AppError) -> Value {
+        serde_json::to_value(e).unwrap()
+    }
+
+    // `ipc.ts` mirrors this shape; the UI branches on `kind`.
+    #[test]
+    fn crosses_ipc_as_kind_message_status() {
+        assert_eq!(
+            ipc(AppError::Api { status: 404, message: "Not found".into() }),
+            json!({ "kind": "api", "message": "Spotify API error 404: Not found", "status": 404 })
+        );
+        assert_eq!(
+            ipc(AppError::NotSignedIn),
+            json!({ "kind": "not_signed_in", "message": "Not signed in to Spotify", "status": null })
+        );
+    }
+
+    #[test]
+    fn rate_limits_carry_429_and_the_wait() {
+        let v = ipc(AppError::RateLimited { retry_after: 20 });
+        assert_eq!(v["kind"], "rate_limited");
+        assert_eq!(v["status"], 429);
+        // player.svelte.ts reads the wait back out of the message with /(\d+)s/.
+        assert_eq!(v["message"], "Rate limited, retry in 20s");
+    }
+
+    #[test]
+    fn every_kind_is_one_ipc_ts_knows() {
+        let known = [
+            "api", "rate_limited", "not_signed_in", "no_client_id", "cancelled", "auth", "device", "network", "io",
+            "other",
+        ];
+        let errors = [
+            AppError::Api { status: 500, message: String::new() },
+            AppError::RateLimited { retry_after: 1 },
+            AppError::NotSignedIn,
+            AppError::NoClientId,
+            AppError::Cancelled,
+            AppError::Auth("x".into()),
+            AppError::Device("x".into()),
+            AppError::Io(std::io::Error::other("x")),
+            AppError::Other("x".into()),
+        ];
+        for e in errors {
+            let v = ipc(e);
+            assert!(known.contains(&v["kind"].as_str().unwrap()), "unknown kind in {v}");
+        }
+    }
+
+    #[test]
+    fn messages_pass_through_unprefixed() {
+        assert_eq!(ipc(AppError::Auth("Wrong username or password".into()))["message"], "Wrong username or password");
+        assert_eq!(ipc(AppError::Other("Bad".into()))["message"], "Bad");
+        assert_eq!(ipc(AppError::Device("not running".into()))["message"], "Playback device: not running");
+    }
+}
