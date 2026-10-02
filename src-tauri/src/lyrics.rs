@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::RETRY_AFTER;
@@ -18,11 +19,9 @@ use crate::error::{AppError, Result};
 /// The lyrics service. Not user-configurable.
 pub const LYRICS_SERVER: &str = "https://nativify.hackrvt.xyz";
 
-/// The service caches for 24h too; this just spares repeat requests while a track
-/// is replayed. Well inside the Spicy Lyrics API's 30-day caching cap.
-const HIT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-/// "No lyrics" can change as the community uploads syncs, so remember it briefly.
-const MISS_TTL: Duration = Duration::from_secs(60 * 60);
+/// Lyrics are kept only until their track has played (`forget`), so every play gets the
+/// latest sync. This bounds the ones warmed up for songs that never came up.
+const CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ENTRIES: usize = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +56,8 @@ pub struct ServerStatus {
 pub struct LyricsClient {
     http: reqwest::Client,
     cache: Mutex<Cache>,
+    /// Bumped by each warm-up, so an older one still running stops.
+    warm_generation: AtomicU64,
     session: Mutex<Option<ServerSession>>,
     session_file: PathBuf,
 }
@@ -70,6 +71,7 @@ impl LyricsClient {
         Self {
             http,
             cache: Mutex::new(HashMap::new()),
+            warm_generation: AtomicU64::new(0),
             session: Mutex::new(session),
             session_file,
         }
@@ -220,6 +222,36 @@ impl LyricsClient {
         Ok(value)
     }
 
+    /// Fetches lyrics for upcoming tracks into the cache, one at a time, skipping ones already
+    /// there. Stops when a newer warm-up starts, or when the service rate-limits or wants a
+    /// sign-in. Returns how many were fetched.
+    pub async fn warm(&self, track_ids: &[String]) -> usize {
+        let generation = self.warm_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut fetched = 0;
+        for id in track_ids {
+            if self.warm_generation.load(Ordering::SeqCst) != generation {
+                break;
+            }
+            if !is_track_id(id) || cached(&*self.cache.lock().await, id, Instant::now()).is_some() {
+                continue;
+            }
+            match self.get(id).await {
+                Ok(_) => fetched += 1,
+                Err(e) if stops_warm_up(&e) => {
+                    log::debug!("lyrics warm-up stopped: {e}");
+                    break;
+                }
+                Err(e) => log::debug!("lyrics warm-up skipped {id}: {e}"),
+            }
+        }
+        fetched
+    }
+
+    /// Drops a track's lyrics once it has played, so the next play fetches them again.
+    pub async fn forget(&self, track_id: &str) {
+        self.cache.lock().await.remove(track_id);
+    }
+
     pub async fn clear_cache(&self) {
         self.cache.lock().await.clear();
     }
@@ -234,8 +266,12 @@ fn is_track_id(id: &str) -> bool {
 /// A cached result still within its TTL: `Some(None)` is a remembered "no lyrics".
 fn cached(cache: &Cache, track_id: &str, now: Instant) -> Option<Option<Value>> {
     let (at, value) = cache.get(track_id)?;
-    let ttl = if value.is_some() { HIT_TTL } else { MISS_TTL };
-    (now.duration_since(*at) < ttl).then(|| value.clone())
+    (now.duration_since(*at) < CACHE_TTL).then(|| value.clone())
+}
+
+/// Errors that would fail every remaining track of a warm-up just the same.
+fn stops_warm_up(e: &AppError) -> bool {
+    matches!(e, AppError::RateLimited { .. } | AppError::Api { status: 401, .. })
 }
 
 fn remember(cache: &mut Cache, track_id: &str, value: Option<Value>, now: Instant) {
@@ -297,13 +333,13 @@ mod tests {
     // ---- cache -----------------------------------------------------------------
 
     #[test]
-    fn hits_are_kept_for_a_day() {
+    fn hits_are_kept_for_an_hour() {
         let t0 = Instant::now();
         let mut cache = Cache::new();
         remember(&mut cache, ID, Some(json!({ "Type": "Line" })), t0);
         assert_eq!(cached(&cache, ID, t0), Some(Some(json!({ "Type": "Line" }))));
-        assert!(cached(&cache, ID, t0 + HIT_TTL - Duration::from_secs(1)).is_some());
-        assert_eq!(cached(&cache, ID, t0 + HIT_TTL), None);
+        assert!(cached(&cache, ID, t0 + CACHE_TTL - Duration::from_secs(1)).is_some());
+        assert_eq!(cached(&cache, ID, t0 + CACHE_TTL), None);
     }
 
     #[test]
@@ -311,8 +347,8 @@ mod tests {
         let t0 = Instant::now();
         let mut cache = Cache::new();
         remember(&mut cache, ID, None, t0);
-        assert_eq!(cached(&cache, ID, t0 + MISS_TTL - Duration::from_secs(1)), Some(None));
-        assert_eq!(cached(&cache, ID, t0 + MISS_TTL), None);
+        assert_eq!(cached(&cache, ID, t0 + CACHE_TTL - Duration::from_secs(1)), Some(None));
+        assert_eq!(cached(&cache, ID, t0 + CACHE_TTL), None);
     }
 
     #[test]
@@ -333,6 +369,14 @@ mod tests {
         assert!(!cache.contains_key("track0"));
         assert!(cache.contains_key("track1"));
         assert!(cache.contains_key(ID));
+    }
+
+    #[test]
+    fn rate_limits_and_sign_ins_stop_a_warm_up() {
+        assert!(stops_warm_up(&AppError::RateLimited { retry_after: 10 }));
+        assert!(stops_warm_up(&AppError::Api { status: 401, message: String::new() }));
+        assert!(!stops_warm_up(&AppError::Api { status: 503, message: String::new() }));
+        assert!(!stops_warm_up(&AppError::Other(String::new())));
     }
 
     #[test]
@@ -441,6 +485,29 @@ mod tests {
         assert_eq!(client.get(ID).await.unwrap(), Some(json!({ "Type": "Static" })));
         client.clear_cache().await;
         assert!(client.cache.lock().await.is_empty());
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn forgets_a_played_track() {
+        let (client, file) = client_with(None);
+        let other = "0000000000000000000000";
+        for id in [ID, other] {
+            remember(&mut *client.cache.lock().await, id, None, Instant::now());
+        }
+        client.forget(ID).await;
+        let cache = client.cache.lock().await;
+        assert!(!cache.contains_key(ID));
+        assert!(cache.contains_key(other));
+        drop(cache);
+        cleanup(&file);
+    }
+
+    #[tokio::test]
+    async fn warm_up_skips_cached_tracks_and_bad_ids_without_requests() {
+        let (client, file) = client_with(None);
+        remember(&mut *client.cache.lock().await, ID, Some(json!({ "Type": "Line" })), Instant::now());
+        assert_eq!(client.warm(&[ID.to_owned(), "../auth/logout".to_owned()]).await, 0);
         cleanup(&file);
     }
 }
