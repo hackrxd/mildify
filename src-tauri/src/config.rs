@@ -28,7 +28,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             client_id: None,
-            device_name: "Native Spotify".into(),
+            device_name: "Mildify".into(),
             device_id: random_hex(20),
             bitrate: 320,
             initial_volume: 50,
@@ -41,10 +41,14 @@ impl Default for Config {
 impl Config {
     /// Loads the config, falling back to defaults, and writes it back so generated fields persist.
     pub fn load(path: &Path) -> Self {
-        let cfg: Config = fs::read_to_string(path)
+        let mut cfg: Config = fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        // The default device name from before the app was renamed: follow the rename unless it was changed.
+        if cfg.device_name == "Native Spotify" {
+            cfg.device_name = Config::default().device_name;
+        }
         if let Err(e) = cfg.save(path) {
             log::warn!("couldn't write config to {}: {e}", path.display());
         }
@@ -101,7 +105,7 @@ mod tests {
 
     /// A scratch file path, unique per test, under the system temp dir.
     fn scratch(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("nativespotify-test-{}", random_hex(8))).join(name)
+        std::env::temp_dir().join(format!("mildify-test-{}", random_hex(8))).join(name)
     }
 
     #[test]
@@ -117,7 +121,7 @@ mod tests {
     fn defaults() {
         let c = Config::default();
         assert_eq!(c.client_id, None);
-        assert_eq!(c.device_name, "Native Spotify");
+        assert_eq!(c.device_name, "Mildify");
         assert_eq!(c.device_id.len(), 40);
         assert_eq!(c.bitrate, 320);
         assert_eq!(c.initial_volume, 50);
@@ -145,12 +149,23 @@ mod tests {
     }
 
     #[test]
+    fn load_renames_the_old_default_device_name_only() {
+        let path = scratch("config.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{ "device_name": "Native Spotify" }"#).unwrap();
+        assert_eq!(Config::load(&path).device_name, "Mildify");
+        std::fs::write(&path, r#"{ "device_name": "Desk" }"#).unwrap();
+        assert_eq!(Config::load(&path).device_name, "Desk");
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn load_falls_back_to_defaults_for_a_corrupt_file() {
         let path = scratch("config.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{ not json").unwrap();
         let c = Config::load(&path);
-        assert_eq!(c.device_name, "Native Spotify");
+        assert_eq!(c.device_name, "Mildify");
         let reread: Config = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(reread.device_id, c.device_id);
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
