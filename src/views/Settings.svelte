@@ -46,7 +46,7 @@
     input.value = String(lyrics.warmup);
   }
 
-  const MODS_GUIDE = "https://github.com/hackrxd/nativespotify/blob/main/docs/mods.md";
+  const MODS_GUIDE = "https://github.com/hackrxd/mildify/blob/main/docs/mods.md";
 
   // Pick up files added since the app started.
   mods.refresh();
@@ -409,7 +409,7 @@
     <h2>Updates</h2>
     <div class="row">
       <span>
-        <span class="label">Native Spotify {updater.current}</span>
+        <span class="label">Mildify {updater.current}</span>
         <span class="muted small">
           {#if import.meta.env.DEV}Development builds don't update themselves.
           {:else if updater.state === "checking"}Checking for updates…
