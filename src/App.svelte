@@ -249,6 +249,10 @@
     background: var(--backdrop-tint);
     backdrop-filter: none;
   }
+  /* A rule across a panel that isn't there any more just floats. */
+  .shell.see-through:not(.dim) > :global(.sidebar .heading) {
+    border-top-color: transparent;
+  }
 
   /* The lyrics view fills the pane instead of scrolling with it. */
   main.fill {
