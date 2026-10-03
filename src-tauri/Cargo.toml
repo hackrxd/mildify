@@ -46,6 +46,5 @@ librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "9
 librespot-core = { path = "vendor/librespot-core" }
 
 [profile.release]
-codegen-units = 1
-lto = true
+lto = "thin"
 strip = true
