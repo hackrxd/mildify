@@ -41,7 +41,10 @@ to restyle the app is to override its colour variables:
 ```
 
 Also available: `--font-ui`, `--font-display`, the type scale `--t-xs` … `--t-2xl`, and the layout
-sizes `--sidebar-w`, `--deck-h` (the player bar's height) and `--gutter`. `--ambient` is set per page
+sizes `--sidebar-w`, `--deck-h` (the player bar's height) and `--gutter`. The window frame behind the
+floating panels is `--frame` (derived from `--graphite`), the gap between panels `--seam`, their corners
+`--panel-radius`, and the shadow under menus and popovers `--shadow-pop`. Animations use `--ease-out`,
+`--ease-spring` and `--stagger` (the delay between list items popping in). `--ambient` is set per page
 from the cover art.
 
 Components keep their class names (`.sidebar`, `.nav-item`, `.row`, `.btn`, …), but Svelte adds a
