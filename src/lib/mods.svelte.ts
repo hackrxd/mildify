@@ -3,6 +3,7 @@
 
 import { getVersion } from "@tauri-apps/api/app";
 import type { IconName } from "../components/Icon.svelte";
+import { builtinThemes } from "../themes";
 import { api, backend, errorMessage, type ModInfo, type ModKind, type ModList } from "./ipc";
 import { player } from "./player.svelte";
 import { router } from "./router.svelte";
@@ -122,7 +123,7 @@ function runAll(fns: (() => void)[], who: string) {
 
 class Mods {
   list = $state<ModList | null>(null);
-  /** Active theme id, or null for the built-in look. */
+  /** Active theme id (a `builtin:` one or a themes folder entry), or null for the default look. */
   theme = $state<string | null>(load(THEME_KEY, null, (s) => s || null));
   /** Ids of extensions the user turned on. */
   enabled = $state<string[]>(load(EXTENSIONS_KEY, [], parseIds));
@@ -134,7 +135,9 @@ class Mods {
   trackMenuItems = $state.raw<(TrackMenuItem & { extension: string })[]>([]);
 
   safeMode = $derived(this.list?.safe_mode ?? false);
-  activeTheme = $derived(this.list?.themes.find((t) => t.id === this.theme) ?? null);
+  activeTheme = $derived(
+    builtinThemes.find((t) => t.id === this.theme) ?? this.list?.themes.find((t) => t.id === this.theme) ?? null,
+  );
 
   /** Loads an extension module. Tests swap it out; the webview can't import from Node. */
   importer: (url: string) => Promise<Record<string, unknown>> = (url) => import(/* @vite-ignore */ url);
@@ -240,7 +243,8 @@ class Mods {
       link?.remove();
       return;
     }
-    const href = modUrl(this.list.base_url, "themes", theme.entry, `${theme.modified}${this.#themeBust}`);
+    const href =
+      "href" in theme ? theme.href : modUrl(this.list.base_url, "themes", theme.entry, `${theme.modified}${this.#themeBust}`);
     if (link?.getAttribute("href") === href) return;
     if (!link) {
       link = document.createElement("link");
