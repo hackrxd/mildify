@@ -6,6 +6,7 @@
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
   import { plural } from "../lib/util";
+  import { builtinThemes } from "../themes";
 
   const config = $derived(session.status?.config);
   const device = $derived(session.device);
@@ -263,15 +264,24 @@
             {mods.activeTheme.description ?? "A theme from your themes folder."}
             {#if mods.activeTheme.author}{" "}By {mods.activeTheme.author}.{/if}
           {:else}
-            CSS files in your themes folder. Edits show up when you switch back to the app.
+            Built-in themes, or CSS files in your themes folder. Edits show up when you switch back to the app.
           {/if}
         </span>
       </span>
       <select class="field" value={mods.theme ?? ""} onchange={(e) => mods.setTheme(e.currentTarget.value || null)}>
         <option value="">Default</option>
-        {#each themes as theme (theme.id)}
-          <option value={theme.id}>{theme.name}</option>
-        {/each}
+        <optgroup label="Built in">
+          {#each builtinThemes as theme (theme.id)}
+            <option value={theme.id}>{theme.name}</option>
+          {/each}
+        </optgroup>
+        {#if themes.length}
+          <optgroup label="Your themes">
+            {#each themes as theme (theme.id)}
+              <option value={theme.id}>{theme.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
         {#if mods.theme && !mods.activeTheme}
           <option value={mods.theme} disabled>{mods.theme} (missing)</option>
         {/if}
