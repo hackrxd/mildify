@@ -297,6 +297,24 @@ img {
   }
 }
 
+/* Scroll reveal (lib/reveal.ts): list items wait see-through until they scroll into view, then pop up,
+   each list's arrivals a beat apart. Waiting items stay focusable, so tabbing to one scrolls it in.
+   Important so a dimmed row (an unplayable track) doesn't show through before its turn. */
+[data-reveal="wait"] {
+  opacity: 0 !important;
+}
+[data-reveal="in"] {
+  animation: pop-up 520ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--reveal-beat, 0) * var(--stagger));
+}
+/* Wide rows only rise (a scale would slide their edges in); compact cards set --reveal-scale to grow too. */
+@keyframes pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(var(--reveal-scale, 1));
+  }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
