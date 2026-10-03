@@ -94,10 +94,18 @@
     bottom: calc(100% + 14px);
     width: 300px;
     padding: 14px 8px 8px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--raised);
-    box-shadow: 0 16px 40px rgb(0 0 0 / 0.45);
+    box-shadow: var(--shadow-pop);
     z-index: 20;
+    transform-origin: bottom right;
+    animation: pop-in 140ms ease-out;
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.97);
+    }
   }
 
   h3 {
@@ -118,7 +126,7 @@
     gap: 12px;
     width: 100%;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: left;
   }
   .dev:hover:not(:disabled) {
@@ -126,6 +134,7 @@
   }
   .dev.active {
     color: var(--brass);
+    background: color-mix(in srgb, var(--brass) 10%, transparent);
   }
 
   .label {
@@ -143,7 +152,10 @@
   .sub {
     font-size: var(--t-xs);
     color: var(--smoke);
-    text-transform: capitalize;
+  }
+  /* Device types can arrive lowercase; "Playing here" and "This computer" are already in sentence case. */
+  .sub::first-letter {
+    text-transform: uppercase;
   }
   .dev.active .sub {
     color: inherit;

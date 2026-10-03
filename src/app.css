@@ -9,11 +9,14 @@
   --brass: #e8b04b;
   --brass-ink: #241a06;
   --danger: #f07a6a;
+  /* Behind the panels, a shade below them; follows a theme's --graphite unless it sets its own. */
+  --frame: color-mix(in srgb, var(--graphite), black 35%);
 
   /* Overridden per view from cover art. */
   --ambient: hsl(225 12% 26%);
 
-  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  /* Segoe on Windows; elsewhere the bundled Inter rather than whatever system-ui resolves to. */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter Variable", system-ui, sans-serif;
   --font-display: "Archivo Variable", "Archivo", var(--font-ui);
 
   /* Type scale (px): 12 / 13 / 14 / 16 / 20 / 28 / display */
@@ -27,8 +30,31 @@
   --sidebar-w: 248px;
   --deck-h: 92px;
   --gutter: 28px;
+  /* Space between the floating panels, and their corners. */
+  --seam: 8px;
+  --panel-radius: 10px;
+
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 18px 48px rgb(0 0 0 / 0.55);
+
+  /* Motion: things arrive quickly and settle softly, like a needle finding the groove. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Gap between neighbours in a staggered entrance (cards, rows). */
+  --stagger: 28ms;
 
   color-scheme: dark;
+}
+
+/* Registered as colours so a new cover's colour glides in instead of snapping. */
+@property --ambient {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: hsl(225 12% 26%);
+}
+@property --deck-ambient {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
 }
 
 *,
@@ -42,7 +68,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--graphite);
+  background: var(--frame);
   color: var(--paper);
   font-family: var(--font-ui);
   font-size: 16px;
@@ -140,7 +166,10 @@ img {
   font-size: var(--t-md);
   font-weight: 600;
   background: var(--raised);
-  transition: background 120ms;
+  transition: background 120ms, transform 120ms, box-shadow 120ms;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--raised), var(--paper) 10%);
@@ -156,6 +185,10 @@ img {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
 }
+.btn.quiet:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper) 30%, transparent);
+}
 
 .icon-btn {
   display: inline-grid;
@@ -164,13 +197,21 @@ img {
   height: 32px;
   border-radius: 50%;
   color: var(--smoke);
-  transition: color 120ms, background 120ms;
+  transition: color 120ms, background 120ms, transform 100ms;
 }
 .icon-btn:hover:not(:disabled) {
   color: var(--paper);
+  background: color-mix(in srgb, var(--paper) 7%, transparent);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.92);
 }
 .icon-btn.on {
   color: var(--brass);
+}
+/* Stays brass under the pointer, so a heart you just liked pops in its liked colour. */
+.icon-btn.on:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--brass), white 18%);
 }
 
 /* The big round play button used in headers and on covers. */
@@ -182,11 +223,15 @@ img {
   border-radius: 50%;
   background: var(--brass);
   color: var(--brass-ink);
-  transition: transform 120ms, background 120ms;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.35);
+  transition: transform 120ms, background 120ms, opacity 140ms;
 }
-.play-fab:hover {
-  transform: scale(1.04);
+.play-fab:hover:not(:disabled) {
+  transform: scale(1.05);
   background: color-mix(in srgb, var(--brass), white 14%);
+}
+.play-fab:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .field {
@@ -197,10 +242,15 @@ img {
   border: 1px solid var(--line);
   background: var(--graphite);
   user-select: text;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.field:hover {
+  border-color: color-mix(in srgb, var(--paper) 22%, var(--line));
 }
 .field:focus {
   outline: none;
   border-color: var(--brass);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent);
 }
 
 .muted {
@@ -229,6 +279,43 @@ img {
   flex: none;
 }
 
+/* Shared entrances. Use with fill mode `backwards` so a delayed element waits hidden, then keeps its own styles. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* Scroll reveal (lib/reveal.ts): list items wait see-through until they scroll into view, then pop up,
+   each list's arrivals a beat apart. Waiting items stay focusable, so tabbing to one scrolls it in.
+   Important so a dimmed row (an unplayable track) doesn't show through before its turn. */
+[data-reveal="wait"] {
+  opacity: 0 !important;
+}
+[data-reveal="in"] {
+  animation: pop-up 520ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--reveal-beat, 0) * var(--stagger));
+}
+/* Wide rows only rise (a scale would slide their edges in); compact cards set --reveal-scale to grow too. */
+@keyframes pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(var(--reveal-scale, 1));
+  }
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -238,11 +325,15 @@ img {
   white-space: nowrap;
 }
 
+/* Entrances finish at once and looping animations (the equalizer) hold still. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
     animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

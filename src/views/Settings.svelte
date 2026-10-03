@@ -286,8 +286,9 @@
     gap: 14px;
     padding: 14px 16px;
     margin-bottom: 8px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--panel);
+    box-shadow: inset 0 0 0 1px var(--line);
     font-size: var(--t-md);
   }
   .status > div {
@@ -341,9 +342,40 @@
     appearance: auto;
   }
   .switch {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--brass);
+    /* Checkboxes drawn as toggle switches. */
+    appearance: none;
+    position: relative;
+    flex: none;
+    width: 40px;
+    height: 22px;
+    margin: 0;
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--paper) 18%, transparent);
+    cursor: pointer;
+    transition: background 160ms;
+  }
+  .switch::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--paper);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+    transition: transform 160ms;
+  }
+  .switch:checked {
+    background: var(--brass);
+  }
+  .switch:checked::before {
+    transform: translateX(18px);
+    background: var(--brass-ink);
+  }
+  .switch:disabled {
+    cursor: default;
+    opacity: 0.4;
   }
   .timing {
     display: flex !important;

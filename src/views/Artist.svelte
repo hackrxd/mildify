@@ -1,6 +1,7 @@
 <script lang="ts">
   import CoverGrid from "../components/CoverGrid.svelte";
   import Icon from "../components/Icon.svelte";
+  import Pop from "../components/Pop.svelte";
   import Status from "../components/Status.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
   import { albumItem } from "../lib/covers";
@@ -61,7 +62,7 @@
     {/snippet}
     {#snippet actions()}
       <button class="play-fab" onclick={playAll} title={playingHere ? "Pause" : "Play"}>
-        <Icon name={playingHere ? "pause" : "play"} size={22} />
+        <Pop key={playingHere}><Icon name={playingHere ? "pause" : "play"} size={22} /></Pop>
       </button>
     {/snippet}
   </ViewHeader>
