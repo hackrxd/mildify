@@ -20,8 +20,8 @@ folder when the theme has images or fonts: `url(./background.jpg)` and `@import 
 resolve to files next to the stylesheet.
 
 Pick a theme under **Settings → Theme**. One theme is active at a time. Edits show up when you switch
-back to the app window, so you can keep the app open next to your editor. **Reload** picks up a
-changed image or `@import`ed file the app can't notice by itself.
+back to the app window, so you can keep the app open next to your editor. For a folder theme, that
+includes its images and `@import`ed files.
 
 A theme loads after the app's own styles, so a rule with the same specificity wins. The easiest way
 to restyle the app is to override its colour variables:
@@ -96,8 +96,8 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, `onUnload` callbacks) and calls the function it returned. Editing the file restarts
-it the next time the app window gets focus. A module without a default export just runs once; it
+items, watchers, `onUnload` callbacks) and calls the function it returned. Editing it (for a folder extension,
+any file in the folder) restarts it the next time the app window gets focus. A module without a default export just runs once; it
 can't be undone, so turning it off or editing it takes effect when the window reloads (Settings
 offers a **Reload window** button then).
 
@@ -124,8 +124,8 @@ files next to the extension (`fetch(new URL("./data.json", ns.extension.url))`).
 
 ## When something breaks
 
-If a theme or extension leaves the app unusable, start it once with `--safe-mode`: nothing from the
-mods folders loads, and you can turn the culprit off in Settings. Or just delete it from its folder.
+If a theme or extension leaves the app unusable, start it once with `--safe-mode`: no theme,
+Quick CSS or extension loads, and you can turn the culprit off or clear Quick CSS in Settings. Or just delete it from its folder.
 
 On macOS: `open -a "Native Spotify" --args --safe-mode`. On Linux, run the app from a terminal with
 the flag. On Windows, add it to the end of the shortcut's Target (right-click the shortcut →
