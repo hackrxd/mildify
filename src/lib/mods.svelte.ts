@@ -101,9 +101,13 @@ function parseIds(s: string): string[] {
   return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
 }
 
-/** URL a mod's file is served at; `v` busts the webview's module and style caches after edits. */
+/**
+ * URL a mod's file is served at. The version `v` is a path segment, not a query, so the files the
+ * entry imports or links relatively get it too: after an edit the webview fetches all of them again
+ * instead of reusing cached modules and stylesheets.
+ */
 export function modUrl(base: string, kind: ModKind, entry: string, v: number | string): string {
-  return `${base}${kind}/${entry.split("/").map(encodeURIComponent).join("/")}?v=${v}`;
+  return `${base}${kind}/${encodeURIComponent(String(v))}/${entry.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function runAll(fns: (() => void)[], who: string) {
@@ -149,7 +153,6 @@ class Mods {
       .then((v) => (this.#appVersion = v))
       .catch(() => {});
     window.addEventListener("focus", () => this.refresh());
-    this.#applyQuickCss();
     await this.refresh();
   }
 
@@ -162,17 +165,19 @@ class Mods {
 
   /**
    * Re-reads the mods folders, reapplies an edited theme and restarts edited extensions.
-   * `force` reloads the theme even if its entry file didn't change (an image next to it did).
+   * `force` reloads them even if no file changed (one outside the mod's folder did).
    */
   async refresh(force = false) {
     try {
       this.list = await backend.listMods();
     } catch (e) {
       if (force) toasts.error(e);
+      this.#applyQuickCss();
       return;
     }
     if (force) this.#themeBust = String(Date.now());
     this.#applyTheme();
+    this.#applyQuickCss();
     if (this.#extensionsStarted) await this.#syncExtensions(force);
   }
 
@@ -249,7 +254,8 @@ class Mods {
 
   #applyQuickCss() {
     let style = document.querySelector<HTMLStyleElement>("style[data-nativify-quick-css]");
-    if (!this.quickCss.trim()) {
+    // Safe mode is for recovering from a broken look, and Quick CSS can break it as well as a theme.
+    if (this.safeMode || !this.quickCss.trim()) {
       style?.remove();
       return;
     }

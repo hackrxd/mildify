@@ -50,7 +50,7 @@ async function boot() {
   ({ mods, modUrl } = await import("./mods.svelte"));
   mods.importer = async (url) => {
     imported.push(url);
-    const id = decodeURIComponent(url.split("/extensions/")[1].split("?")[0].split("/")[0]);
+    const id = decodeURIComponent(url.split("/extensions/")[1].split("/")[1]);
     const m = modules[id];
     if (!m) throw new Error(`no module ${id}`);
     return m;
@@ -86,9 +86,17 @@ describe("modUrl", () => {
   it("encodes each path segment and keeps the slashes", async () => {
     await boot();
     expect(modUrl("nsmod://localhost/", "themes", "My Theme/theme #1.css", 42)).toBe(
-      "nsmod://localhost/themes/My%20Theme/theme%20%231.css?v=42",
+      "nsmod://localhost/themes/42/My%20Theme/theme%20%231.css",
     );
-    expect(modUrl("http://nsmod.localhost/", "extensions", "a.js", "1x")).toBe("http://nsmod.localhost/extensions/a.js?v=1x");
+    expect(modUrl("http://nsmod.localhost/", "extensions", "a.js", "1x")).toBe("http://nsmod.localhost/extensions/1x/a.js");
+  });
+
+  it("versions the files an entry imports relatively, too", async () => {
+    await boot();
+    const entry = modUrl("http://nsmod.localhost/", "extensions", "rp/index.js", 7);
+    expect(new URL("./format.js", entry).href).toBe("http://nsmod.localhost/extensions/7/rp/format.js");
+    const edited = modUrl("http://nsmod.localhost/", "extensions", "rp/index.js", 8);
+    expect(new URL("./format.js", edited).href).not.toBe(new URL("./format.js", entry).href);
   });
 });
 
@@ -96,7 +104,7 @@ describe("theme", () => {
   it("applies the saved theme on start, after the app's stylesheets", async () => {
     localStorage.setItem("nativify:theme", "Glass");
     await boot();
-    expect(themeLink()?.getAttribute("href")).toBe("nsmod://localhost/themes/Glass/theme.css?v=5");
+    expect(themeLink()?.getAttribute("href")).toBe("nsmod://localhost/themes/5/Glass/theme.css");
     expect(themeLink()?.parentElement).toBe(document.body);
     expect(mods.activeTheme?.id).toBe("Glass");
   });
@@ -105,7 +113,7 @@ describe("theme", () => {
     await boot();
     expect(themeLink()).toBeNull();
     mods.setTheme("plain.css");
-    expect(themeLink()?.getAttribute("href")).toBe("nsmod://localhost/themes/plain.css?v=7");
+    expect(themeLink()?.getAttribute("href")).toBe("nsmod://localhost/themes/7/plain.css");
     expect(localStorage.getItem("nativify:theme")).toBe("plain.css");
     mods.setTheme(null);
     expect(themeLink()).toBeNull();
@@ -118,7 +126,7 @@ describe("theme", () => {
     const link = themeLink();
     list.themes[0].modified = 6;
     window.dispatchEvent(new Event("focus"));
-    await vi.waitFor(() => expect(themeLink()?.getAttribute("href")).toContain("?v=6"));
+    await vi.waitFor(() => expect(themeLink()?.getAttribute("href")).toContain("/themes/6/"));
     expect(themeLink()).toBe(link);
   });
 
@@ -137,7 +145,7 @@ describe("theme", () => {
     const before = themeLink()?.getAttribute("href");
     await mods.refresh(true);
     expect(themeLink()?.getAttribute("href")).not.toBe(before);
-    expect(themeLink()?.getAttribute("href")).toMatch(/^nsmod:\/\/localhost\/themes\/Glass\/theme\.css\?v=5\d+$/);
+    expect(themeLink()?.getAttribute("href")).toMatch(/^nsmod:\/\/localhost\/themes\/5\d+\/Glass\/theme\.css$/);
   });
 
   it("isn't applied in safe mode", async () => {
@@ -165,6 +173,23 @@ describe("quick CSS", () => {
     mods.setQuickCss("  ");
     expect(quickCss()).toBeNull();
     expect(localStorage.getItem("nativify:quickCss")).toBeNull();
+  });
+
+  it("isn't applied in safe mode", async () => {
+    localStorage.setItem("nativify:quickCss", "* { display: none }");
+    list.safe_mode = true;
+    await boot();
+    expect(quickCss()).toBeNull();
+    mods.setQuickCss("body { color: red }");
+    expect(quickCss()).toBeNull();
+    expect(localStorage.getItem("nativify:quickCss")).toBe("body { color: red }");
+  });
+
+  it("still applies when the mods folders can't be listed", async () => {
+    localStorage.setItem("nativify:quickCss", "body { color: red }");
+    listMods.mockRejectedValue(new Error("io"));
+    await boot();
+    expect(quickCss()?.textContent).toBe("body { color: red }");
   });
 
   it("is restored on start", async () => {
@@ -200,7 +225,7 @@ describe("extensions", () => {
 
     await mods.startExtensions();
     expect(log).toEqual(["start stats.js"]);
-    expect(imported).toEqual(["nsmod://localhost/extensions/stats.js?v=1"]);
+    expect(imported).toEqual(["nsmod://localhost/extensions/1/stats.js"]);
     expect(mods.states["stats.js"]).toBe("on");
     expect(mods.pages.map((p) => p.key)).toEqual(["stats.js/stats"]);
     expect(document.head.querySelectorAll('style[data-nativify-extension="stats.js"]')).toHaveLength(1);
@@ -214,7 +239,7 @@ describe("extensions", () => {
     await boot();
     await mods.startExtensions();
     expect(ns?.appVersion).toBe("9.9.9");
-    expect(ns?.extension).toEqual({ id: "a.js", name: "a", url: "nsmod://localhost/extensions/a.js?v=1" });
+    expect(ns?.extension).toEqual({ id: "a.js", name: "a", url: "nsmod://localhost/extensions/1/a.js" });
     expect(ns?.player).toEqual({ name: "player" });
     expect(ns?.router).toEqual({ name: "router" });
     ns?.toasts.show("hi");
@@ -273,7 +298,7 @@ describe("extensions", () => {
     list.extensions[0].modified = 2;
     await mods.refresh();
     expect(log).toEqual(["start stats.js", "onUnload", "returned cleanup", "start stats.js"]);
-    expect(imported.at(-1)).toBe("nsmod://localhost/extensions/stats.js?v=2");
+    expect(imported.at(-1)).toBe("nsmod://localhost/extensions/2/stats.js");
     expect(mods.pages).toHaveLength(1);
     expect(mods.states["stats.js"]).toBe("on");
   });
