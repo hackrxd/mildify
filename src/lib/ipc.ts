@@ -43,6 +43,14 @@ export interface Config {
   bitrate: number;
   initial_volume: number;
   normalisation: boolean;
+  /** Serve the Spotify app's DevTools endpoint for mild-lyrics (devtools.rs). */
+  devtools: boolean;
+}
+
+/** The DevTools endpoint: the port it's on, or why it isn't. */
+export interface DevToolsStatus {
+  port: number | null;
+  error: string | null;
 }
 
 /** The Nativify lyrics service (fixed URL, set in the backend). */
@@ -82,13 +90,14 @@ export interface ModList {
 
 export type ModKind = "themes" | "extensions";
 
-type SettingsInput = Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation">>;
+type SettingsInput = Partial<Pick<Config, "client_id" | "device_name" | "bitrate" | "normalisation" | "devtools">>;
 
 export interface AppStatus {
   config: Config;
   redirect_uri: string;
   signed_in: boolean;
   device: DeviceStatus;
+  devtools: DevToolsStatus;
 }
 
 export type DeviceCommand =
@@ -141,6 +150,8 @@ export const backend = {
   lyricsServerLogout: () => invoke<LyricsServerStatus>("lyrics_server_logout"),
   listMods: () => invoke<ModList>("list_mods"),
   openModsFolder: (kind: ModKind) => invoke<void>("open_mods_folder", { kind }),
+  /** Answers a `devtools-ask` event. */
+  devtoolsAnswer: (id: number, value: unknown) => invoke<void>("devtools_answer", { id, value }),
 };
 
 let authLost: (() => void) | null = null;
