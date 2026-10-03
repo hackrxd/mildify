@@ -7,6 +7,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import Toasts from "./components/Toasts.svelte";
   import TopBar from "./components/TopBar.svelte";
+  import { startDevtools } from "./lib/devtools";
   import { player } from "./lib/player.svelte";
   import { router } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
@@ -36,6 +37,7 @@
   session.init().catch((e) => toasts.error(e));
   updater.start();
   mods.init();
+  startDevtools();
 
   // Start polling playback once the Web API is usable.
   $effect(() => {
