@@ -45,7 +45,7 @@ const PAGE_URL: &str = "https://xpui.app.spotify.com/index.html";
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// What the error for a script that isn't recognised says.
-const UNRECOGNISED: &str = "Native Spotify doesn't run scripts. It answers mild-lyrics' player reads and controls only.";
+const UNRECOGNISED: &str = "Mildify doesn't run scripts. It answers mild-lyrics' player reads and controls only.";
 
 /// Asks the window for something; it answers through [`DevTools::answer`] with the same id.
 pub type Asker = Arc<dyn Fn(u64, &Ask) + Send + Sync>;
@@ -338,7 +338,7 @@ impl DevTools {
         match path.trim_end_matches('/') {
             "/json" | "/json/list" => Reply::json(json!([self.page(host)])),
             "/json/version" => Reply::json(json!({
-                "Browser": concat!("NativeSpotify/", env!("CARGO_PKG_VERSION")),
+                "Browser": concat!("Mildify/", env!("CARGO_PKG_VERSION")),
                 "Protocol-Version": "1.3",
                 "webSocketDebuggerUrl": self.page(host)["webSocketDebuggerUrl"],
             })),
@@ -359,7 +359,7 @@ impl DevTools {
             "description": "",
             "devtoolsFrontendUrl": "",
             "id": self.target,
-            "title": "Native Spotify",
+            "title": "Mildify",
             "type": "page",
             "url": PAGE_URL,
             "webSocketDebuggerUrl": format!("ws://{host}/devtools/page/{}", self.target),
@@ -443,7 +443,7 @@ impl DevTools {
         self.asks.lock().unwrap().remove(&id);
         match answer {
             Ok(Ok(value)) => Ok(value),
-            _ => Err(json!({ "code": -32000, "message": "Native Spotify's window didn't answer." })),
+            _ => Err(json!({ "code": -32000, "message": "Mildify's window didn't answer." })),
         }
     }
 }
