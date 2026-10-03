@@ -3,6 +3,7 @@
   import { router, type Route } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { pickImage } from "../lib/util";
+  import Equalizer from "./Equalizer.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
 
   const nav: { route: Route; label: string; icon: IconName }[] = [
@@ -34,10 +35,10 @@
 
   <h2 class="heading">Playlists</h2>
   <ul class="playlists">
-    {#each session.playlists as pl (pl.id)}
+    {#each session.playlists as pl, i (pl.id)}
       {@const active = current.name === "playlist" && current.id === pl.id}
       {@const playing = player.contextUri === pl.uri}
-      <li>
+      <li style:--i={i}>
         <button class="pl" class:active onclick={() => router.go({ name: "playlist", id: pl.id })} title={pl.name}>
           {#if pickImage(pl.images, 60)}
             <img src={pickImage(pl.images, 60)} alt="" loading="lazy" />
@@ -46,7 +47,7 @@
           {/if}
           <span class="name" class:playing>{pl.name}</span>
           {#if playing && player.isPlaying}
-            <span class="eq" aria-label="Playing"><Icon name="volume" size={16} /></span>
+            <span class="eq"><Equalizer label="Playing" /></span>
           {/if}
         </button>
       </li>
@@ -114,6 +115,13 @@
     border-radius: 0 3px 3px 0;
     background: var(--brass);
     box-shadow: 0 0 8px color-mix(in srgb, var(--brass) 60%, transparent);
+    animation: marker-in 320ms var(--ease-out);
+  }
+  @keyframes marker-in {
+    from {
+      opacity: 0;
+      transform: scaleY(0);
+    }
   }
   .nav-item.active :global(svg) {
     color: var(--brass);
@@ -139,6 +147,18 @@
     padding: 0 4px;
     /* Fade the list out where it scrolls under the settings button. */
     mask-image: linear-gradient(180deg, #000 calc(100% - 24px), transparent);
+  }
+
+  /* Playlists slide in from the edge, one after another, when they load. */
+  .playlists li {
+    animation: slide-in 360ms var(--ease-out) backwards;
+    animation-delay: calc(min(var(--i), 16) * var(--stagger));
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
   }
 
   .pl {
@@ -182,6 +202,10 @@
   .eq {
     color: var(--brass);
   }
+  .eq {
+    display: grid;
+    padding-right: 4px;
+  }
 
   .empty {
     padding: 4px 12px;
@@ -197,5 +221,16 @@
     border-radius: 50%;
     background: var(--brass);
     margin-left: auto;
+    animation: attention 2.2s ease-out infinite;
+  }
+  /* A slow ripple, so the dot is noticed without nagging. */
+  @keyframes attention {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass) 60%, transparent);
+    }
+    60%,
+    100% {
+      box-shadow: 0 0 0 7px transparent;
+    }
   }
 </style>
