@@ -45,6 +45,8 @@ export const SONG_OFFSETS_KEPT = 1000;
 export const TEXT_SCALE_MIN = 0.7;
 export const TEXT_SCALE_MAX = 1.6;
 export const TEXT_SCALE_STEP = 0.1;
+/** How long the window takes to turn from the theme's colours to the cover background and back. */
+export const BACKDROP_FADE_MS = 400;
 
 function trackIdOf(uri: string | undefined): string | null {
   return uri?.startsWith("spotify:track:") ? uri.split(":")[2] : null;
