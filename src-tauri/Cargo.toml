@@ -1,5 +1,5 @@
 [package]
-name = "nativespotify"
+name = "mildify"
 version = "0.3.0"
 description = "A custom native Spotify client: Web API for browsing, librespot (Spotify Connect) for playback"
 edition = "2021"
@@ -7,7 +7,7 @@ rust-version = "1.85"
 license = "AGPL-3.0-only"
 
 [lib]
-name = "nativespotify_lib"
+name = "mildify_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

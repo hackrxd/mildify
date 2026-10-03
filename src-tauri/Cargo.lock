@@ -2779,6 +2779,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "mildify"
+version = "0.3.0"
+dependencies = [
+ "base64 0.22.1",
+ "env_logger",
+ "futures-util",
+ "librespot-connect",
+ "librespot-core",
+ "librespot-metadata",
+ "librespot-oauth",
+ "librespot-playback",
+ "log",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2863,35 +2892,6 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
-]
-
-[[package]]
-name = "nativespotify"
-version = "0.3.0"
-dependencies = [
- "base64 0.22.1",
- "env_logger",
- "futures-util",
- "librespot-connect",
- "librespot-core",
- "librespot-metadata",
- "librespot-oauth",
- "librespot-playback",
- "log",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "url",
 ]
 
 [[package]]
