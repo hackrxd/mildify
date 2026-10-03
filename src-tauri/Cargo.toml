@@ -30,6 +30,8 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 futures-util = "0.3"
+# Also in the tree through librespot-core; the DevTools endpoint (devtools.rs) speaks WebSocket with it.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 
 # librespot is pinned to a dev-branch commit: the 0.8.0 release predates the
 # 2026 CDN fallback fix (#1722) that keeps playback working against current servers.
