@@ -11,6 +11,7 @@
   import { liked } from "../lib/liked.svelte";
   import { menu } from "../lib/menu.svelte";
   import { player } from "../lib/player.svelte";
+  import { reveal } from "../lib/reveal";
   import { router } from "../lib/router.svelte";
   import { formatDuration, pickImage } from "../lib/util";
   import Equalizer from "./Equalizer.svelte";
@@ -42,9 +43,6 @@
   });
 
   const albumOf = (t: SimpleTrack | Track) => ("album" in t ? t.album : null);
-
-  /** Rows past this are below the fold when the list appears, so they skip the entrance. */
-  const ENTRANCE_ROWS = 40;
 
   function openMenu(e: MouseEvent, t: SimpleTrack | Track) {
     const album = albumOf(t);
@@ -81,18 +79,17 @@
     {@const saved = liked.has(t.uri)}
     {@const unplayable = t.is_playable === false}
     {#if multiDisc && (i === 0 || rows[i - 1].track.disc_number !== t.disc_number)}
-      <div class="disc" role="row"><Icon name="disc" size={16} /> Disc {t.disc_number}</div>
+      <div class="disc" role="row" {@attach reveal}><Icon name="disc" size={16} /> Disc {t.disc_number}</div>
     {/if}
     <div
       class="row"
       class:current
       class:unplayable
-      class:enter={i < ENTRANCE_ROWS}
-      style:--i={i}
       role="row"
       tabindex="-1"
       ondblclick={() => !unplayable && onplay(i)}
       oncontextmenu={(e) => openMenu(e, t)}
+      {@attach reveal}
     >
       <span class="n num" role="cell">
         <span class="idx">
@@ -165,11 +162,6 @@
     transition: background 100ms;
     content-visibility: auto;
     contain-intrinsic-size: auto 56px;
-  }
-  /* Rows rise in one after another when the list appears. */
-  .row.enter {
-    animation: rise 380ms var(--ease-out) backwards;
-    animation-delay: calc(min(var(--i), 16) * var(--stagger) * 0.7);
   }
   .row.current {
     background: color-mix(in srgb, var(--brass) 8%, transparent);
