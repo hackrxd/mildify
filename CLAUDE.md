@@ -74,6 +74,14 @@ and hands each the `ExtensionApi`. Everything an extension registers through it 
 window focus re-reads the folders, so edits apply live. `--safe-mode` loads none of it. User-facing guide:
 `docs/mods.md`.
 
+**mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
+`--remote-debugging-port`: `/json` with one `xpui` page target, and its websocket's `Runtime.evaluate`. It runs
+nothing it's sent: `recognise` matches mild-lyrics' player scripts (controls only as whole calls), asks the window
+for a player snapshot or control over `devtools-ask` (`src/lib/devtools.ts` answers through `devtools_answer`), and
+replies with the value that script returns in Spotify; anything else gets a JavaScript error back. Off unless
+Settings turns it on (port 9222) or the app is started with `--remote-debugging-port=N`; loopback only, and it
+refuses requests with an Origin or a non-IP, non-localhost Host, as Chromium does.
+
 **Vendored librespot-core.** librespot is pinned to a dev-branch commit (`Cargo.toml`), and `librespot-core` is
 patched from `src-tauri/vendor/librespot-core` so free accounts log an error instead of exiting the process. That
 error is surfaced as the `premium_required` device state. See `vendor/librespot-core/PATCHED.md`.
