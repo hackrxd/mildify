@@ -1,6 +1,5 @@
 :root {
   /* Palette: a listening room at night, lit by a brass amplifier dial. */
-  --frame: #101114;
   --graphite: #191a1f;
   --panel: #202228;
   --raised: #2a2d35;
@@ -10,6 +9,8 @@
   --brass: #e8b04b;
   --brass-ink: #241a06;
   --danger: #f07a6a;
+  /* Behind the panels, a shade below them; follows a theme's --graphite unless it sets its own. */
+  --frame: color-mix(in srgb, var(--graphite), black 35%);
 
   /* Overridden per view from cover art. */
   --ambient: hsl(225 12% 26%);
