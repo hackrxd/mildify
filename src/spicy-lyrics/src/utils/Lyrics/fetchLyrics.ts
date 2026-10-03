@@ -1,5 +1,5 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: the transport is replaced. Upstream posts to the
+// Modified for Mildify: the transport is replaced. Upstream posts to the
 // extension's private /query endpoint and caches in IndexedDB; this asks the host
 // (Rust backend), which calls the Nativify lyrics service (a proxy for the public
 // v1 API) and caches there. AdaptApiLyrics maps the public response onto the renderer's

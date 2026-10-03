@@ -1,6 +1,6 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: rewritten. Upstream reads the Spicetify player;
-// this reads Native Spotify's player through compat/host.ts. Only the members the
+// Modified for Mildify: rewritten. Upstream reads the Spicetify player;
+// this reads Mildify's player through compat/host.ts. Only the members the
 // vendored renderer uses are implemented.
 
 import { host } from "../../../compat/host.ts";

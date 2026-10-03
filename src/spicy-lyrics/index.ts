@@ -1,4 +1,4 @@
-// Entry point for the vendored Spicy Lyrics renderer inside Native Spotify.
+// Entry point for the vendored Spicy Lyrics renderer inside Mildify.
 // Mirrors the parts of upstream src/app.tsx that boot the renderer: stylesheets in
 // the same order, fonts, and the per-frame auto-scroll loop. The animation loop
 // itself starts when lyrics.ts is first imported, exactly as upstream.

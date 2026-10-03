@@ -1,4 +1,4 @@
-/* Native Spotify: the renderer's "SpicyLyrics" typeface, served locally.
+/* Mildify: the renderer's "SpicyLyrics" typeface, served locally.
    Upstream loads its own font files from fonts.spikerko.org, which only allows
    Spotify's origin. Inter (SIL OFL 1.1, via @fontsource-variable/inter) stands in
    under the same family name, so upstream's font-family rules apply unchanged. */

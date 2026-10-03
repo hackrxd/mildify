@@ -1,4 +1,4 @@
-// Bridge between the vendored Spicy Lyrics renderer and Native Spotify.
+// Bridge between the vendored Spicy Lyrics renderer and Mildify.
 // The app installs its implementation with setHost(); the renderer's replacement
 // modules (SpotifyPlayer, fetchLyrics, …) read from `host`.
 

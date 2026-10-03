@@ -1,4 +1,4 @@
-// Native Spotify's tests for the vendored renderer; not part of upstream.
+// Mildify's tests for the vendored renderer; not part of upstream.
 import { describe, expect, it } from "vitest";
 import {
   HasLyricsText,

@@ -1,4 +1,4 @@
-// Native Spotify addition (not in upstream Spicy Lyrics).
+// Mildify addition (not in upstream Spicy Lyrics).
 // Holds the page element in a module with no imports. Upstream declares it in
 // PageView.ts, which sits in an import cycle with modules that read it while the
 // cycle is still evaluating; esbuild's top-level let→var rewrite hides that

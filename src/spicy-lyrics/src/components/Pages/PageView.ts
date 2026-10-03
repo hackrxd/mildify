@@ -1,5 +1,5 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: rewritten. Builds the same #SpicyLyricsPage DOM and
+// Modified for Mildify: rewritten. Builds the same #SpicyLyricsPage DOM and
 // class contract as upstream, but mounts it into a host element supplied by the app
 // instead of Spotify's main view, and drops the Spotify-specific chrome (route
 // handling, card/PiP modes, Tippy view controls). View controls are rendered by the
@@ -66,7 +66,7 @@ export const GetPageRoot = () => PageHost;
 const PageView = {
   Open: OpenPage,
   Destroy: DestroyPage,
-  /** Upstream renders its view controls here; Native Spotify renders them in Svelte. */
+  /** Upstream renders its view controls here; Mildify renders them in Svelte. */
   AppendViewControls: (_reAppend: boolean = false) => {},
   IsOpened: false,
   IsTippyCapable: false,
@@ -80,7 +80,7 @@ function BackgroundTarget(): HTMLElement | null {
 async function OpenPage(AppendTo: HTMLElement | undefined = undefined, Backdrop: HTMLElement | null = null) {
   if (PageView.IsOpened) return;
   if (!AppendTo) {
-    pageLogger.error("OpenPage needs a host element in Native Spotify");
+    pageLogger.error("OpenPage needs a host element in Mildify");
     return;
   }
   PageHost = AppendTo;

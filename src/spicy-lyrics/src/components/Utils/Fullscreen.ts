@@ -1,5 +1,5 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: rewritten as state only. Native Spotify hosts the
+// Modified for Mildify: rewritten as state only. Mildify hosts the
 // lyrics page in its own view and toggles "full screen" itself, so the renderer
 // only needs to read these flags.
 

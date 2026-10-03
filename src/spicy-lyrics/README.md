@@ -6,7 +6,7 @@ Spotify desktop client.
 
 - Upstream commit: `c22a9d7` (2026-09-26, version 6.3.98)
 - License: GNU AGPL-3.0, Copyright (c) Spikerko and Spicy Lyrics contributors.
-  Native Spotify as a whole is distributed under the same license (see `/LICENSE`).
+  Mildify as a whole is distributed under the same license (see `/LICENSE`).
 
 The directory layout mirrors upstream (`src/…`, `project/config.ts`) so files can be diffed
 against upstream directly.
@@ -20,11 +20,11 @@ renderer CSS.
 ## What's replaced
 
 Upstream runs inside Spotify and reads everything from the `Spicetify` global. These modules are
-rewritten (same path and exports, new implementation) to run on Native Spotify's own player:
+rewritten (same path and exports, new implementation) to run on Mildify's own player:
 
 | Module | Replacement |
 | --- | --- |
-| `src/components/Global/SpotifyPlayer.ts` | Backed by Native Spotify's player store |
+| `src/components/Global/SpotifyPlayer.ts` | Backed by Mildify's player store |
 | `src/components/Pages/PageView.ts` | Builds the same page DOM inside the app's Lyrics view; can paint the dynamic background into a backdrop element the app puts behind its whole window, and keep it running after the page closes while the app fades it out |
 | `src/components/Utils/{Fullscreen,CompactMode,PopupLyrics}.ts` | Minimal state only; the app has no PiP/NPV card |
 | `src/utils/Lyrics/fetchLyrics.ts` | Fetches through the Rust backend from the Nativify lyrics service, which proxies the public Spicy Lyrics v1 API |
@@ -42,10 +42,10 @@ Additions: `src/components/Pages/PageState.ts` holds the page element outside an
 Upstream's esbuild bundle rewrites top-level `let` to `var`, which hides a temporal-dead-zone
 read; native ES modules (Vite) don't, so the binding lives in a module with no imports.
 
-`tests/` holds Native Spotify's Vitest tests for the pure helpers (empty-line pruning, display text
+`tests/` holds Mildify's Vitest tests for the pure helpers (empty-line pruning, display text
 choice, RTL detection, the spring). They import the verbatim files without changing them.
 
-Every modified upstream file carries a `Modified for Native Spotify` note at the top describing
+Every modified upstream file carries a `Modified for Mildify` note at the top describing
 the change, as AGPL section 5(a) requires.
 
 `compat/` holds a minimal `Spicetify` object (local storage, tooltips, link opening) so the

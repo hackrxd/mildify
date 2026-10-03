@@ -1,5 +1,5 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: profile links use the `url` the public API returns
+// Modified for Mildify: profile links use the `url` the public API returns
 // for the uploader and maker (required by its attribution terms), falling back to
 // the upstream profile URL.
 

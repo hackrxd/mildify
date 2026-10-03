@@ -1,5 +1,5 @@
 // Spicy Lyrics (https://github.com/Spikerko/spicy-lyrics), AGPL-3.0.
-// Modified for Native Spotify: added the "lyrics-signin" notice, and removed the
+// Modified for Mildify: added the "lyrics-signin" notice, and removed the
 // notice footer that pointed to upstream's Discord.
 
 // deno-lint-ignore-file no-explicit-any
