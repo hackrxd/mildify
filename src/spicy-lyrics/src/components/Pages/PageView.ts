@@ -3,7 +3,9 @@
 // class contract as upstream, but mounts it into a host element supplied by the app
 // instead of Spotify's main view, and drops the Spotify-specific chrome (route
 // handling, card/PiP modes, Tippy view controls). View controls are rendered by the
-// host; the NowBar keeps upstream's markup with a simplified updater.
+// host; the NowBar keeps upstream's markup with a simplified updater. The dynamic
+// background can be painted into a backdrop element outside the page, so the host
+// can put it behind its whole window.
 
 // Imported first so the binding exists before the import cycle below evaluates.
 import { PageContainer, SetPageContainer } from "./PageState.ts";
@@ -44,6 +46,8 @@ export const IsCardMode = false;
 export let LyricsApplied = false;
 
 let PageHost: HTMLElement | null = null;
+/** Where the dynamic background goes instead of the ContentBox, if the host gave one. */
+let BackgroundHost: HTMLElement | null = null;
 
 export const GetPageRoot = () => PageHost;
 
@@ -56,13 +60,19 @@ const PageView = {
   IsTippyCapable: false,
 };
 
-async function OpenPage(AppendTo: HTMLElement | undefined = undefined) {
+/** The element the page's dynamic background is painted into. */
+function BackgroundTarget(): HTMLElement | null {
+  return BackgroundHost ?? PageContainer?.querySelector<HTMLElement>(".ContentBox") ?? null;
+}
+
+async function OpenPage(AppendTo: HTMLElement | undefined = undefined, Backdrop: HTMLElement | null = null) {
   if (PageView.IsOpened) return;
   if (!AppendTo) {
     pageLogger.error("OpenPage needs a host element in Native Spotify");
     return;
   }
   PageHost = AppendTo;
+  BackgroundHost = Backdrop;
 
   const elem = document.createElement("div");
   elem.id = "SpicyLyricsPage";
@@ -110,10 +120,10 @@ async function OpenPage(AppendTo: HTMLElement | undefined = undefined) {
 
   ApplyExperimentClasses(elem);
 
-  const contentBox = elem.querySelector<HTMLElement>(".ContentBox");
-  if (contentBox) {
+  const background = BackgroundTarget();
+  if (background) {
     try {
-      ApplyDynamicBackground(contentBox, "lpagebg");
+      ApplyDynamicBackground(background, "lpagebg");
     } catch (err) {
       pageLogger.error("Error applying dynamic background", err);
     }
@@ -142,6 +152,9 @@ async function DestroyPage() {
 
   KawarpMap.get("lpagebg")?.dispose();
   KawarpMap.delete("lpagebg");
+  // A backdrop outlives the page; the page's own ContentBox goes with it below.
+  BackgroundHost?.querySelectorAll(".spicy-dynamic-bg").forEach((el) => el.remove());
+  BackgroundHost = null;
   ResetLastLine();
   CleanupScrollEvents();
   $lyricsContainerExists.set(false);
@@ -160,8 +173,8 @@ async function DestroyPage() {
 export function OnSongChange() {
   if (!PageContainer) return;
   UpdateNowBar();
-  const contentBox = PageContainer.querySelector<HTMLElement>(".ContentBox");
-  if (contentBox) void ApplyDynamicBackground(contentBox, "lpagebg");
+  const background = BackgroundTarget();
+  if (background) void ApplyDynamicBackground(background, "lpagebg");
   const uri = SpotifyPlayer.GetUri();
   if (uri) fetchLyrics(uri).then(ApplyLyrics);
 }

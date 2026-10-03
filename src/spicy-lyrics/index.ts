@@ -50,10 +50,13 @@ function start() {
   }).Start();
 }
 
-/** Mounts the lyrics page into `host` and loads lyrics for the current track. */
-export async function mount(host: HTMLElement) {
+/**
+ * Mounts the lyrics page into `host` and loads lyrics for the current track. With a
+ * `backdrop`, the dynamic background is painted there instead of behind the lyrics.
+ */
+export async function mount(host: HTMLElement, backdrop: HTMLElement | null = null) {
   start();
-  await PageView.Open(host);
+  await PageView.Open(host, backdrop);
 }
 
 export async function unmount() {
