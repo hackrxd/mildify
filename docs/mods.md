@@ -23,6 +23,10 @@ Pick a theme under **Settings → Theme**. One theme is active at a time. Edits 
 back to the app window, so you can keep the app open next to your editor. For a folder theme, that
 includes its images and `@import`ed files.
 
+The app also comes with a few built-in themes: Ember, Frost, Moss, Tide, Velvet, Verde and Void. They
+only change the colour variables below, so their stylesheets in [src/themes](../src/themes) make good
+starting points for your own.
+
 A theme loads after the app's own styles, so a rule with the same specificity wins. The easiest way
 to restyle the app is to override its colour variables:
 
