@@ -208,6 +208,10 @@ img {
 .icon-btn.on {
   color: var(--brass);
 }
+/* Stays brass under the pointer, so a heart you just liked pops in its liked colour. */
+.icon-btn.on:hover:not(:disabled) {
+  color: color-mix(in srgb, var(--brass), white 18%);
+}
 
 /* The big round play button used in headers and on covers. */
 .play-fab {
