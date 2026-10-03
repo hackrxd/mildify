@@ -13,7 +13,9 @@
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import { formatDuration, pickImage } from "../lib/util";
+  import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
+  import Pop from "./Pop.svelte";
 
   let {
     rows,
@@ -40,6 +42,9 @@
   });
 
   const albumOf = (t: SimpleTrack | Track) => ("album" in t ? t.album : null);
+
+  /** Rows past this are below the fold when the list appears, so they skip the entrance. */
+  const ENTRANCE_ROWS = 40;
 
   function openMenu(e: MouseEvent, t: SimpleTrack | Track) {
     const album = albumOf(t);
@@ -82,6 +87,8 @@
       class="row"
       class:current
       class:unplayable
+      class:enter={i < ENTRANCE_ROWS}
+      style:--i={i}
       role="row"
       tabindex="-1"
       ondblclick={() => !unplayable && onplay(i)}
@@ -90,13 +97,13 @@
       <span class="n num" role="cell">
         <span class="idx">
           {#if current && player.isPlaying}
-            <Icon name="volume" size={16} label="Playing" />
+            <Equalizer label="Playing" />
           {:else}
             {numbering === "track" ? t.track_number : i + 1}
           {/if}
         </span>
         <button class="play" onclick={() => onplay(i)} disabled={unplayable} title="Play {t.name}">
-          <Icon name={current && player.isPlaying ? "pause" : "play"} size={14} />
+          <Pop key={current && player.isPlaying}><Icon name={current && player.isPlaying ? "pause" : "play"} size={14} /></Pop>
         </button>
       </span>
 
@@ -128,7 +135,7 @@
       <span class="heart" role="cell">
         {#if saved !== undefined}
           <button class="icon-btn" class:on={saved} class:hidden={!saved} onclick={() => liked.toggle(t.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
-            <Icon name="heart" size={17} filled={saved} />
+            <Pop key={saved}><Icon name="heart" size={17} filled={saved} /></Pop>
           </button>
         {/if}
       </span>
@@ -158,6 +165,11 @@
     transition: background 100ms;
     content-visibility: auto;
     contain-intrinsic-size: auto 56px;
+  }
+  /* Rows rise in one after another when the list appears. */
+  .row.enter {
+    animation: rise 380ms var(--ease-out) backwards;
+    animation-delay: calc(min(var(--i), 16) * var(--stagger) * 0.7);
   }
   .row.current {
     background: color-mix(in srgb, var(--brass) 8%, transparent);
