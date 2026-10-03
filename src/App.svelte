@@ -19,7 +19,7 @@
   import Home from "./views/Home.svelte";
   import Liked from "./views/Liked.svelte";
   import Lyrics from "./views/Lyrics.svelte";
-  import { lyrics } from "./lib/lyrics.svelte";
+  import { BACKDROP_FADE_MS, lyrics } from "./lib/lyrics.svelte";
   import { mods } from "./lib/mods.svelte";
   import Playlist from "./views/Playlist.svelte";
   import ExtensionPage from "./views/ExtensionPage.svelte";
@@ -117,8 +117,15 @@
 {:else if !session.ready}
   <Setup />
 {:else}
-  <div class="backdrop" class:on={backdropOn} bind:this={backdrop}></div>
-  <div class="shell" class:queue-open={queueOpen} class:immersive class:see-through={backdropOn} class:dim={lyrics.backdropDim}>
+  <div class="backdrop" class:on={backdropOn} style:--backdrop-fade="{BACKDROP_FADE_MS}ms" bind:this={backdrop}></div>
+  <div
+    class="shell"
+    class:queue-open={queueOpen}
+    class:immersive
+    class:see-through={backdropOn}
+    class:dim={lyrics.backdropDim}
+    style:--backdrop-fade="{BACKDROP_FADE_MS}ms"
+  >
     {#if !immersive}<Sidebar />{/if}
 
     <main bind:this={main} class:fill={lyricsRoute} onscroll={() => (scrolled = (main?.scrollTop ?? 0) > 24)}>
@@ -220,15 +227,18 @@
   }
 
   /* In the lyrics view, its cover background fills the window and the panels turn see-through,
-     or tinted a little so they still read as panels. */
+     or tinted a little so they still read as panels. Both ways, the theme's colours cross-fade
+     with it; the renderer keeps the background running until the fade out is done. */
   .backdrop {
     position: fixed;
     inset: 0;
     pointer-events: none;
+    background: #000;
+    opacity: 0;
+    transition: opacity var(--backdrop-fade) var(--ease-out);
   }
   .backdrop.on {
-    background: #000;
-    animation: fade-in 300ms var(--ease-out) backwards;
+    opacity: 1;
   }
   .shell {
     position: relative;
@@ -237,17 +247,31 @@
   .shell.dim {
     --backdrop-tint: color-mix(in srgb, var(--graphite) 45%, transparent);
   }
-  .shell.see-through {
-    background: none;
+  .shell,
+  .shell main,
+  .shell > :global(:is(.sidebar, .panel)),
+  .shell > :global(.sidebar .heading) {
+    transition-property: background-color, border-color;
+    transition-duration: var(--backdrop-fade);
+    transition-timing-function: var(--ease-out);
   }
+  .shell.see-through,
   .shell.see-through main {
-    background: none;
+    background-color: transparent;
   }
   .shell.see-through > :global(:is(.sidebar, .panel)),
-  .shell.see-through .deck-slot > :global(.deck),
+  .shell.see-through .deck-slot > :global(.deck) {
+    background-color: var(--backdrop-tint);
+  }
+  /* The deck fades these itself, alongside its own colour. */
+  .shell.see-through .deck-slot > :global(.deck) {
+    --deck-glow: 0%;
+  }
   .shell.see-through .bar.scrolled {
-    background: var(--backdrop-tint);
+    background-color: var(--backdrop-tint);
     backdrop-filter: none;
+    transition-property: background-color, backdrop-filter;
+    transition-duration: var(--backdrop-fade);
   }
   /* A rule across a panel that isn't there any more just floats. */
   .shell.see-through:not(.dim) > :global(.sidebar .heading) {
