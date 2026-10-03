@@ -1,0 +1,71 @@
+# Keeps the release builds' Rust dependency cache warm. A tag run can only restore caches saved on
+# its own tag or on main, and main never builds release, so without this every release compiled all
+# its dependencies from scratch. This builds each platform as build.yml does, minus the bundling,
+# whenever the dependencies change. The schedule restores each cache every few days so GitHub doesn't
+# evict it after a week unused, and rebuilds it when a new stable Rust changes the cache key.
+# The matrix, setup steps and shared-key have to match the build job in build.yml, or its cache
+# keys won't.
+name: rust-cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
+      - .github/workflows/rust-cache.yml
+  schedule:
+    - cron: "0 5 */3 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system libraries
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - id: cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-${{ matrix.platform }}${{ matrix.args }}
+
+      # An exact hit means the cache is current, and restoring it was enough to keep it alive.
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: npm ci
+
+      # The same cargo build tauri-action runs (tauri build passes its own features), so the cached
+      # dependencies match.
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: npm run tauri build -- --no-bundle ${{ matrix.args }}
