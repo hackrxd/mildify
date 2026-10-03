@@ -164,11 +164,11 @@ async fn wait_for_code(listener: &TcpListener, path: &str, state: &str) -> Resul
             continue;
         }
         if let Some(err) = q.get("error") {
-            respond(&mut stream, "200 OK", &page("Sign-in cancelled", "You can close this tab and return to Native Spotify.")).await;
+            respond(&mut stream, "200 OK", &page("Sign-in cancelled", "You can close this tab and return to Mildify.")).await;
             return Err(AppError::Auth(format!("Spotify sign-in was not completed: {err}")));
         }
         if let Some(code) = q.get("code") {
-            respond(&mut stream, "200 OK", &page("You're signed in", "You can close this tab and return to Native Spotify.")).await;
+            respond(&mut stream, "200 OK", &page("You're signed in", "You can close this tab and return to Mildify.")).await;
             return Ok(code.clone());
         }
         respond(&mut stream, "400 Bad Request", "Missing code").await;
