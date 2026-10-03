@@ -8,6 +8,7 @@ const albumKind = { album: "Album", single: "Single", compilation: "Compilation"
 
 export const albumItem = (a: SimpleAlbum, subtitle: "artist" | "year" = "artist"): CoverItem => ({
   key: a.id,
+  uri: a.uri,
   title: a.name,
   subtitle:
     subtitle === "artist"
@@ -20,6 +21,7 @@ export const albumItem = (a: SimpleAlbum, subtitle: "artist" | "year" = "artist"
 
 export const artistItem = (a: Artist): CoverItem => ({
   key: a.id,
+  uri: a.uri,
   title: a.name,
   subtitle: "Artist",
   image: pickImage(a.images, 300),
@@ -30,6 +32,7 @@ export const artistItem = (a: Artist): CoverItem => ({
 
 export const playlistItem = (p: SimplePlaylist): CoverItem => ({
   key: p.id,
+  uri: p.uri,
   title: p.name,
   subtitle: `By ${p.owner.display_name ?? p.owner.id}`,
   image: pickImage(p.images, 300),
