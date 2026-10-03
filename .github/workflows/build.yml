@@ -133,10 +133,13 @@ jobs:
         with:
           targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # Restores the dependency cache rust-cache.yml keeps warm on main. A tag can't restore another
+      # tag's caches, so saving one here would only take up the repo's cache quota.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-          key: ${{ matrix.args }}
+          shared-key: release-${{ matrix.platform }}${{ matrix.args }}
+          save-if: false
 
       - run: npm ci
 
