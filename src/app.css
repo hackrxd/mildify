@@ -56,6 +56,12 @@
   inherits: true;
   initial-value: transparent;
 }
+/* How strongly that colour glows from the deck's corner; fades out over the lyrics backdrop. */
+@property --deck-glow {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
 
 *,
 *::before,
