@@ -341,8 +341,8 @@
   select.field {
     appearance: auto;
   }
-  /* Checkboxes drawn as toggle switches. */
   .switch {
+    /* Checkboxes drawn as toggle switches. */
     appearance: none;
     position: relative;
     flex: none;
