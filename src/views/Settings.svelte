@@ -218,7 +218,7 @@
     {#if mods.safeMode}
       <div class="status">
         <span class="dot state-error"></span>
-        <div><p>Safe mode: no theme or extension is loaded. Start the app normally to bring them back.</p></div>
+        <div><p>Safe mode: no theme, Quick CSS or extension is loaded. Start the app normally to bring them back.</p></div>
       </div>
     {/if}
 
