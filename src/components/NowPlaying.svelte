@@ -1,12 +1,14 @@
 <script lang="ts">
   import { coverColor } from "../lib/color";
   import { liked } from "../lib/liked.svelte";
+  import { rise } from "../lib/motion";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import { formatDuration } from "../lib/util";
   import DeckLyric from "./DeckLyric.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
+  import Pop from "./Pop.svelte";
   import Slider from "./Slider.svelte";
 
   let { queueOpen, ontogglequeue }: { queueOpen: boolean; ontogglequeue: () => void } = $props();
@@ -43,25 +45,28 @@
 <footer class="deck" style:--deck-ambient={ambient ?? "transparent"}>
   <div class="info">
     {#if track}
-      <button class="cover" onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
-        {#if track.cover}<img src={track.cover} alt="" />{/if}
-      </button>
-      <div class="text">
-        <div class="title-row">
-          <button class="title link" onclick={() => track.album.uri && router.openUri(track.album.uri)}>{track.name}</button>
-          {#if track.explicit}<span class="explicit" title="Explicit">E</span>{/if}
-        </div>
-        <div class="artists muted">
-          {#each track.artists as a, i (a.uri + i)}
-            {#if i > 0},&nbsp;{/if}<button class="link" onclick={() => a.uri && router.openUri(a.uri)}>{a.name}</button>
-          {/each}
-        </div>
-      </div>
-      {#if saved !== undefined}
-        <button class="icon-btn" class:on={saved} onclick={() => liked.toggle(track.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
-          <Icon name="heart" filled={saved} />
+      <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
+      {#key track.uri}
+        <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
+          {#if track.cover}<img src={track.cover} alt="" />{/if}
         </button>
-      {/if}
+        <div class="text" in:rise={{ y: 6, delay: 60 }}>
+          <div class="title-row">
+            <button class="title link" onclick={() => track.album.uri && router.openUri(track.album.uri)}>{track.name}</button>
+            {#if track.explicit}<span class="explicit" title="Explicit">E</span>{/if}
+          </div>
+          <div class="artists muted">
+            {#each track.artists as a, i (a.uri + i)}
+              {#if i > 0},&nbsp;{/if}<button class="link" onclick={() => a.uri && router.openUri(a.uri)}>{a.name}</button>
+            {/each}
+          </div>
+        </div>
+        {#if saved !== undefined}
+          <button class="icon-btn" class:on={saved} onclick={() => liked.toggle(track.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
+            <Pop key={saved}><Icon name="heart" filled={saved} /></Pop>
+          </button>
+        {/if}
+      {/key}
       <DeckLyric />
     {:else}
       <p class="idle muted">Pick something to play.</p>
@@ -77,7 +82,7 @@
         <Icon name="prev" size={18} />
       </button>
       <button class="play" onclick={() => player.togglePlay()} title={player.isPlaying ? "Pause" : "Play"}>
-        <Icon name={player.isPlaying ? "pause" : "play"} size={18} />
+        <Pop key={player.isPlaying}><Icon name={player.isPlaying ? "pause" : "play"} size={18} /></Pop>
       </button>
       <button class="icon-btn" onclick={() => player.next()} title="Next">
         <Icon name="next" size={18} />
@@ -154,7 +159,7 @@
     background:
       radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) 50%, transparent), transparent 60%),
       var(--frame);
-    transition: background 600ms;
+    transition: --deck-ambient 900ms ease;
   }
   /* The one glowing edge: the colour of what's playing, bleeding into the room. */
   .deck::before {
