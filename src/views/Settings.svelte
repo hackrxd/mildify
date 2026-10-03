@@ -10,6 +10,7 @@
 
   const config = $derived(session.status?.config);
   const device = $derived(session.device);
+  const devtools = $derived(session.status?.devtools);
 
   let deviceName = $state(session.status?.config.device_name ?? "");
 
@@ -264,6 +265,25 @@
         checked={lyrics.backdropDim}
         disabled={!lyrics.backdrop}
         onchange={(e) => lyrics.setBackdropDim(e.currentTarget.checked)}
+      />
+    </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Let Mild Lyrics follow playback</span>
+        <span class="muted small">
+          {#if devtools?.error}{devtools.error}
+          {:else if devtools?.port}Mild Lyrics can see what's playing and control it on port {devtools.port}, as with
+            Spotify started with its debug port.
+          {:else}Answers Mild Lyrics on port 9222, where it looks for Spotify. It can see what's playing and control
+            playback, nothing else.{/if}
+        </span>
+      </span>
+      <input
+        type="checkbox"
+        class="switch"
+        checked={config?.devtools}
+        onchange={(e) => session.saveSettings({ devtools: e.currentTarget.checked })}
       />
     </label>
   </section>
