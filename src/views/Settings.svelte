@@ -244,6 +244,28 @@
         {/each}
       </select>
     </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Cover background behind everything</span>
+        <span class="muted small">In the lyrics view, the moving cover art fills the whole window, not just the lyrics.</span>
+      </span>
+      <input type="checkbox" class="switch" checked={lyrics.backdrop} onchange={(e) => lyrics.setBackdrop(e.currentTarget.checked)} />
+    </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Dim it under the panels</span>
+        <span class="muted small">The sidebar, top bar, player bar and queue darken the background a little. Off, they're see-through.</span>
+      </span>
+      <input
+        type="checkbox"
+        class="switch"
+        checked={lyrics.backdropDim}
+        disabled={!lyrics.backdrop}
+        onchange={(e) => lyrics.setBackdropDim(e.currentTarget.checked)}
+      />
+    </label>
   </section>
 
   <section>
