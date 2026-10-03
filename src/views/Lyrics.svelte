@@ -7,6 +7,9 @@
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
 
+  /** The app's full-window layer the cover background moves to, when that's turned on. */
+  let { backdrop }: { backdrop?: HTMLElement } = $props();
+
   let host: HTMLDivElement | undefined = $state();
   let mounted = $state(false);
   let nowBar = $state(renderer.isNowBarOpen());
@@ -27,11 +30,12 @@
   let password = $state("");
   let signingIn = $state(false);
 
-  // Mount once per host element. Everything inside is untracked: the renderer reads
-  // the player while mounting, and tracking that would remount it on every poll.
+  // Mount once per host element (and background target). Everything inside is untracked: the
+  // renderer reads the player while mounting, and tracking that would remount it on every poll.
   $effect(() => {
     const el = host;
-    if (!el) return;
+    const bg = lyrics.backdrop ? backdrop : null;
+    if (!el || bg === undefined) return;
     const { off, ro } = untrack(() => {
       lyrics.install();
       lastUri = player.track?.uri;
@@ -41,7 +45,7 @@
       // Narrow panes pin the active line to the top, like upstream's compact mode.
       const ro = new ResizeObserver(([entry]) => renderer.setCompact(entry.contentRect.width < 720));
       ro.observe(el);
-      renderer.mount(el).then(() => (mounted = true));
+      renderer.mount(el, bg).then(() => (mounted = true));
       return { off, ro };
     });
     return () => {
@@ -167,7 +171,7 @@
 
 <svelte:window onkeydown={onKey} onclick={onWindowClick} />
 
-<section class="lyrics-view" aria-label="Lyrics" style:--lyrics-scale={lyrics.textScale}>
+<section class="lyrics-view" class:see-through={lyrics.backdrop} aria-label="Lyrics" style:--lyrics-scale={lyrics.textScale}>
   <div class="stage" bind:this={host}></div>
 
   <div class="controls">
@@ -301,6 +305,10 @@
     --spice-rgb-selected-row: 255, 255, 255;
     --background-tinted-base: rgb(255 255 255 / 0.07);
     --encore-graphic-size-decorative-base: 24px;
+  }
+  /* The cover background is behind the whole window instead. */
+  .lyrics-view.see-through {
+    background: none;
   }
 
   .stage {
