@@ -13,7 +13,7 @@ export interface BuiltinTheme {
 }
 
 function theme(file: string, name: string, description: string): BuiltinTheme {
-  return { id: `builtin:${file}`, name, description, author: "Native Spotify", href: urls[`./${file}.css`] };
+  return { id: `builtin:${file}`, name, description, author: "Mildify", href: urls[`./${file}.css`] };
 }
 
 export const builtinThemes: BuiltinTheme[] = [

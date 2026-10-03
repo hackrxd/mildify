@@ -53,7 +53,7 @@ vi.mock("./session.svelte", async () => {
 
 const { session } = (await import("./session.svelte")) as unknown as { session: { _s: SvelteMap<string, unknown> } };
 
-const LOCAL: DeviceStatus = { state: "ready", device_id: "local", name: "Native Spotify", error: null };
+const LOCAL: DeviceStatus = { state: "ready", device_id: "local", name: "Mildify", error: null };
 
 let player: typeof import("./player.svelte").player;
 
@@ -90,7 +90,7 @@ function state(over: Partial<PlaybackState> = {}, deviceId = "phone"): PlaybackS
   return {
     device: {
       id: deviceId,
-      name: deviceId === "local" ? "Native Spotify" : "Phone",
+      name: deviceId === "local" ? "Mildify" : "Phone",
       type: "Smartphone",
       is_active: true,
       is_restricted: false,
