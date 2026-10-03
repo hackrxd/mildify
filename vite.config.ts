@@ -28,6 +28,8 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts"],
     restoreMocks: true,
+    // Built-in themes are imported as ?url; unprocessed CSS would give them an empty one.
+    css: { include: [/src\/themes\//] },
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   build: {
