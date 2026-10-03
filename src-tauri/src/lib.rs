@@ -1,6 +1,7 @@
 mod auth;
 mod config;
 mod device;
+mod devtools;
 mod error;
 mod lyrics;
 mod mods;
@@ -12,11 +13,12 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use tokio::sync::oneshot;
 
 use config::{Config, Paths};
 use device::{ConnectDevice, DeviceCommand, DeviceState, DeviceStatus};
+use devtools::{DevTools, DevToolsStatus};
 use error::{AppError, Result};
 use lyrics::LyricsClient;
 use webapi::WebApi;
@@ -27,6 +29,9 @@ struct AppState {
     webapi: WebApi,
     device: Arc<ConnectDevice>,
     lyrics: LyricsClient,
+    devtools: Arc<DevTools>,
+    /// Started with `--remote-debugging-port=N`: serve DevTools there whatever the setting says.
+    devtools_flag: Option<u16>,
     /// Started with `--safe-mode`: no theme or extension loads.
     safe_mode: bool,
     /// Cancels the browser sign-in currently waiting for its redirect, if any.
@@ -44,6 +49,11 @@ impl AppState {
         rx
     }
 
+    /// Where the DevTools endpoint should be served: the launch flag's port, else 9222 if it's turned on.
+    fn devtools_port(&self, config: &Config) -> Option<u16> {
+        self.devtools_flag.or(config.devtools.then_some(devtools::DEFAULT_PORT))
+    }
+
     async fn status(&self) -> AppStatus {
         let config = self.config();
         let signed_in = match &config.client_id {
@@ -54,6 +64,7 @@ impl AppState {
             redirect_uri: auth::WEBAPI_REDIRECT.uri(),
             signed_in,
             device: self.device.status(),
+            devtools: self.devtools.status(),
             config,
         }
     }
@@ -66,6 +77,7 @@ struct AppStatus {
     redirect_uri: String,
     signed_in: bool,
     device: DeviceStatus,
+    devtools: DevToolsStatus,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +86,7 @@ struct SettingsInput {
     device_name: Option<String>,
     bitrate: Option<u16>,
     normalisation: Option<bool>,
+    devtools: Option<bool>,
 }
 
 #[tauri::command]
@@ -106,6 +119,9 @@ async fn save_settings(
         if let Some(n) = settings.normalisation {
             cfg.normalisation = n;
         }
+        if let Some(d) = settings.devtools {
+            cfg.devtools = d;
+        }
         cfg.save(&state.paths.config_file)?;
         (old, cfg.clone())
     };
@@ -122,8 +138,9 @@ async fn save_settings(
             DeviceState::Offline | DeviceState::NeedsLogin | DeviceState::PremiumRequired
         )
     {
-        state.device.start(app, new, None);
+        state.device.start(app.clone(), new.clone(), None);
     }
+    state.devtools.serve(state.devtools_port(&new), window_asker(app)).await;
     Ok(state.status().await)
 }
 
@@ -248,6 +265,21 @@ fn open_mods_folder(state: State<'_, AppState>, kind: String) -> Result<()> {
     tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| AppError::Other(e.to_string()))
 }
 
+/// The window's answer to a DevTools ask (devtools.rs).
+#[tauri::command]
+fn devtools_answer(state: State<'_, AppState>, id: u64, value: Value) {
+    state.devtools.answer(id, value);
+}
+
+/// Asks the main window for the player state or a control, as `devtools-ask` events.
+fn window_asker(app: AppHandle) -> devtools::Asker {
+    Arc::new(move |id, ask| {
+        if let Err(e) = app.emit_to("main", "devtools-ask", serde_json::json!({ "id": id, "ask": ask })) {
+            log::warn!("couldn't ask the window for DevTools: {e}");
+        }
+    })
+}
+
 #[tauri::command]
 fn device_command(state: State<'_, AppState>, command: DeviceCommand) -> Result<()> {
     state.device.command(command)
@@ -283,6 +315,8 @@ pub fn run() {
             let webapi = WebApi::new(http.clone(), paths.token_file.clone());
             let device = Arc::new(ConnectDevice::new(paths.clone(), http.clone(), &config));
             let lyrics = LyricsClient::new(http, paths.lyrics_session_file.clone());
+            let devtools = DevTools::new();
+            let devtools_flag = devtools::port_flag(std::env::args());
 
             app.manage(AppState {
                 config: Mutex::new(config),
@@ -290,8 +324,17 @@ pub fn run() {
                 webapi,
                 device,
                 lyrics,
+                devtools,
+                devtools_flag,
                 safe_mode: mods::safe_mode(std::env::args()),
                 sign_in_cancel: Mutex::new(None),
+            });
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = handle.state::<AppState>();
+                let port = state.devtools_port(&state.config());
+                state.devtools.serve(port, window_asker(handle.clone())).await;
             });
 
             // Bring the Connect device up right away if we're already signed in.
@@ -322,6 +365,7 @@ pub fn run() {
             lyrics_server_logout,
             device_command,
             restart_device,
+            devtools_answer,
             list_mods,
             open_mods_folder,
         ])
