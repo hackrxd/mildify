@@ -108,6 +108,19 @@ require.
 When the window is wide enough, the player bar also shows the current line next to the song title
 (hover it for the credit, click it for the lyrics view). Turn it off under Settings → Lyrics.
 
+The options button in the lyrics view (the sliders) holds:
+
+- **This song's timing**: when one song's sync is off, nudge it earlier or later. It's remembered
+  for that song and adds to the overall Lyrics timing in Settings, which is for headphone delay.
+  Settings → Lyrics → Per-song timing resets every song at once.
+- **Text size**, from 70% to 160%. Also under Settings → Lyrics.
+- **Copy lyrics**: the whole song as plain text, with a blank line between verses and background
+  vocals in parentheses. While the romanized view is on, it copies the romanization.
+
+Keys in the lyrics view: `[` and `]` nudge this song's timing by 50 ms (Shift for 500 ms), `\`
+resets it, Ctrl `+` / Ctrl `−` / Ctrl `0` change the text size, `F` fills the window and `Esc`
+leaves it.
+
 Romanization isn't included yet: upstream downloads and runs romanization packages from a CDN
 at runtime. Lyrics that ship their own romanization still get the toggle.
 

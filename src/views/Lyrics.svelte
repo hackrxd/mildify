@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { fade } from "svelte/transition";
   import * as renderer from "spicy-lyrics-renderer";
   import Icon from "../components/Icon.svelte";
-  import { lyrics } from "../lib/lyrics.svelte";
+  import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from "../lib/lyrics.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
 
@@ -12,6 +13,15 @@
   let romanAvailable = $state(false);
   let romanized = $state(renderer.isRomanizedView());
   let lastUri: string | undefined;
+
+  let optionsOpen = $state(false);
+  let optionsEl: HTMLElement | undefined = $state();
+  /** A short note after a change made from the keyboard, where the options panel isn't showing it. */
+  let readout = $state<string | null>(null);
+  let readoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** One nudge; Shift makes it ten. */
+  const NUDGE_MS = 50;
 
   let username = $state("");
   let password = $state("");
@@ -60,6 +70,69 @@
     if (mounted) untrack(() => renderer.setFullscreen(immersive));
   });
 
+  // Line heights follow the text size; have the renderer re-read them once it applies.
+  $effect(() => {
+    void lyrics.textScale;
+    if (mounted) untrack(() => requestAnimationFrame(() => renderer.remeasure()));
+  });
+
+  function timing(ms: number): string {
+    return ms === 0 ? "In step with the audio" : `${Math.abs(ms)} ms ${ms > 0 ? "later" : "earlier"}`;
+  }
+
+  function note(text: string) {
+    if (optionsOpen) return;
+    readout = text;
+    clearTimeout(readoutTimer);
+    readoutTimer = setTimeout(() => (readout = null), 1600);
+  }
+
+  function nudge(ms: number) {
+    lyrics.nudgeSong(ms);
+    note(`This song: ${timing(lyrics.songOffsetMs).toLowerCase()}`);
+  }
+
+  function resetSong() {
+    lyrics.setSongOffset(0);
+    note("This song: in step with the audio");
+  }
+
+  function zoom(steps: number) {
+    lyrics.setTextScale(steps === 0 ? 1 : lyrics.textScale + steps * TEXT_SCALE_STEP);
+    note(`Text size ${Math.round(lyrics.textScale * 100)}%`);
+  }
+
+  function typing(e: KeyboardEvent) {
+    const el = e.target as HTMLElement;
+    return el.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName);
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      if (optionsOpen) optionsOpen = false;
+      else if (lyrics.immersive) lyrics.immersive = false;
+      return;
+    }
+    if (typing(e) || lyrics.needsSignIn) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "=" || e.key === "+")) zoom(1);
+    else if (mod && e.key === "-") zoom(-1);
+    else if (mod && e.key === "0") zoom(0);
+    else if (mod || e.altKey) return;
+    // Shift turns [ and ] into { and } on most layouts.
+    else if (e.key === "[" || e.key === "{") nudge(-NUDGE_MS * (e.shiftKey ? 10 : 1));
+    else if (e.key === "]" || e.key === "}") nudge(NUDGE_MS * (e.shiftKey ? 10 : 1));
+    else if (e.key === "\\") resetSong();
+    else if (e.key === "f" || e.key === "F") lyrics.immersive = !lyrics.immersive;
+    else return;
+    e.preventDefault();
+  }
+
+  // The path, not contains(): a button that removes itself (Reset) is detached by the time this runs.
+  function onWindowClick(e: MouseEvent) {
+    if (optionsOpen && optionsEl && !e.composedPath().includes(optionsEl)) optionsOpen = false;
+  }
+
   function toggleNowBar() {
     nowBar = !nowBar;
     renderer.setNowBar(nowBar);
@@ -92,9 +165,9 @@
   });
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && lyrics.immersive && (lyrics.immersive = false)} />
+<svelte:window onkeydown={onKey} onclick={onWindowClick} />
 
-<section class="lyrics-view" aria-label="Lyrics">
+<section class="lyrics-view" aria-label="Lyrics" style:--lyrics-scale={lyrics.textScale}>
   <div class="stage" bind:this={host}></div>
 
   <div class="controls">
@@ -112,10 +185,75 @@
         <Icon name="romanize" size={18} />
       </button>
     {/if}
+    <div class="options-anchor" bind:this={optionsEl}>
+      <button
+        class="ctl"
+        class:on={optionsOpen || lyrics.songOffsetMs !== 0}
+        onclick={() => (optionsOpen = !optionsOpen)}
+        title="Timing, text size and copying"
+        aria-expanded={optionsOpen}
+      >
+        <Icon name="sliders" size={18} />
+      </button>
+      {#if optionsOpen}
+        <div class="options" role="dialog" aria-label="Lyrics options">
+          <div class="option">
+            <span class="option-label">This song's timing</span>
+            <div class="stepper">
+              <button class="step" onclick={() => nudge(-NUDGE_MS)} title="Earlier ([)" aria-label="Show lyrics earlier">
+                <Icon name="minus" size={16} />
+              </button>
+              <span class="value" aria-live="polite">{timing(lyrics.songOffsetMs)}</span>
+              <button class="step" onclick={() => nudge(NUDGE_MS)} title="Later (])" aria-label="Show lyrics later">
+                <Icon name="plus" size={16} />
+              </button>
+            </div>
+            <span class="hint">
+              For this song only, on top of the timing in Settings{lyrics.offsetMs !== 0
+                ? ` (${timing(lyrics.offsetMs).toLowerCase()})`
+                : ""}. Keys: [ and ], Shift for bigger steps.
+            </span>
+            {#if lyrics.songOffsetMs !== 0}
+              <button class="link" onclick={resetSong}>Reset this song (\)</button>
+            {/if}
+          </div>
+          <div class="option">
+            <span class="option-label">Text size</span>
+            <div class="stepper">
+              <button
+                class="step"
+                onclick={() => zoom(-1)}
+                disabled={lyrics.textScale <= TEXT_SCALE_MIN}
+                title="Smaller (Ctrl −)"
+                aria-label="Smaller lyrics"
+              >
+                <span class="glyph small">A</span>
+              </button>
+              <button class="value as-button" onclick={() => zoom(0)} title="Reset text size (Ctrl 0)">
+                {Math.round(lyrics.textScale * 100)}%
+              </button>
+              <button
+                class="step"
+                onclick={() => zoom(1)}
+                disabled={lyrics.textScale >= TEXT_SCALE_MAX}
+                title="Larger (Ctrl +)"
+                aria-label="Larger lyrics"
+              >
+                <span class="glyph">A</span>
+              </button>
+            </div>
+          </div>
+          <button class="copy" onclick={() => lyrics.copy(romanAvailable && romanized)} disabled={!lyrics.hasText}>
+            <Icon name="copy" size={16} />
+            {romanAvailable && romanized ? "Copy romanized lyrics" : "Copy lyrics"}
+          </button>
+        </div>
+      {/if}
+    </div>
     <button
       class="ctl"
       onclick={() => (lyrics.immersive = !lyrics.immersive)}
-      title={lyrics.immersive ? "Exit full window (Esc)" : "Fill the window"}
+      title={lyrics.immersive ? "Exit full window (Esc)" : "Fill the window (F)"}
     >
       <Icon name={lyrics.immersive ? "collapse" : "expand"} size={18} />
     </button>
@@ -123,6 +261,10 @@
       <Icon name="close" size={18} />
     </button>
   </div>
+
+  {#if readout}
+    <div class="readout" role="status" transition:fade={{ duration: 140 }}>{readout}</div>
+  {/if}
 
   {#if lyrics.needsSignIn}
     <form class="panel" onsubmit={signIn}>
@@ -191,6 +333,125 @@
   }
   .ctl.on {
     color: var(--brass);
+  }
+
+  .options-anchor {
+    position: relative;
+  }
+  .options {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    display: grid;
+    gap: 16px;
+    width: 280px;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgb(20 21 26 / 0.9);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+    font-size: var(--t-sm);
+  }
+  .option {
+    display: grid;
+    gap: 8px;
+    justify-items: start;
+  }
+  .option-label {
+    font-weight: 600;
+  }
+  .stepper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .step {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.08);
+    color: #fff;
+  }
+  .step:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.16);
+  }
+  .step:disabled {
+    opacity: 0.35;
+  }
+  .glyph {
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 1;
+  }
+  .glyph.small {
+    font-size: 12px;
+  }
+  .value {
+    flex: 1;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .as-button {
+    padding: 6px 0;
+    border-radius: 6px;
+  }
+  .as-button:hover {
+    background: rgb(255 255 255 / 0.08);
+  }
+  .hint {
+    color: rgb(255 255 255 / 0.55);
+    font-size: var(--t-xs);
+  }
+  .link {
+    color: var(--brass);
+    font-size: var(--t-xs);
+  }
+  .link:hover {
+    text-decoration: underline;
+  }
+  .copy {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.08);
+    color: #fff;
+  }
+  .copy:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.16);
+  }
+  .copy:disabled {
+    opacity: 0.4;
+  }
+
+  .readout {
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.5);
+    backdrop-filter: blur(14px);
+    color: #fff;
+    font-size: var(--t-sm);
+    pointer-events: none;
+  }
+
+  /* Text size: the renderer's own sizes, scaled. One more class than its rules, so these win. */
+  .lyrics-view :global(#SpicyLyricsPage .LyricsContainer .LyricsContent) {
+    --DefaultLyricsSize: calc(clamp(1.85rem, calc(1cqw * 7), 3.5rem) * var(--lyrics-scale, 1));
+  }
+  .lyrics-view
+    :global(#SpicyLyricsPage.SpicyRenderer .LyricsContainer .SpicyLyricsScrollContainer[data-lyrics-type="Static"]) {
+    --DefaultLyricsSize: calc(clamp(0.8rem, calc(1cqw * 5), 2.5rem) * var(--lyrics-scale, 1));
   }
 
   .panel {

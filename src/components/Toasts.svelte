@@ -27,7 +27,7 @@
     pointer-events: auto;
     max-width: min(560px, 90vw);
     padding: 10px 18px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--paper);
     color: var(--graphite);
     font-size: var(--t-md);

@@ -57,6 +57,10 @@ per-frame for lyrics.
 diffed against upstream. Any upstream file you modify needs a `Modified for Native Spotify` note at the top
 (AGPL §5(a)) and an entry in `src/spicy-lyrics/README.md`. Lyrics are fetched only from the Nativify lyrics
 service (`lyrics.rs`; the URL is fixed in the backend), which may require its own account login.
+The lyrics clock is shifted by `lyrics.totalOffsetMs`: the global offset plus the playing song's own nudge
+(`songOffsets`, by track id). Anything that times lines against `player.positionNow()` must subtract it, as the
+host and `DeckLyric` do. The text size scales the renderer's `--DefaultLyricsSize` from `Lyrics.svelte`'s styles,
+not from the vendored CSS.
 
 **Themes and extensions.** `mods.rs` lists `themes/` and `extensions/` in the app config dir and serves them
 over the `nsmod` URI scheme (`nsmod://localhost/…`, `http://nsmod.localhost/…` on Windows; allowed in the CSP),

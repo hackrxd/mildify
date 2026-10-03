@@ -112,6 +112,28 @@
     font-size: var(--t-lg);
   }
 
+  /* First run: the headline rises in, then each step in turn. */
+  h1,
+  .intro p,
+  .steps li {
+    animation: rise 620ms var(--ease-out) backwards;
+  }
+  .intro p {
+    animation-delay: 120ms;
+  }
+  .steps li:nth-child(1) {
+    animation-delay: 260ms;
+  }
+  .steps li:nth-child(2) {
+    animation-delay: 340ms;
+  }
+  .steps li:nth-child(3) {
+    animation-delay: 420ms;
+  }
+  .steps li:nth-child(4) {
+    animation-delay: 500ms;
+  }
+
   .steps {
     list-style: none;
     margin: 0;

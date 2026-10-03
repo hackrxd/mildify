@@ -1,9 +1,11 @@
 <script lang="ts">
   import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
+  import { reveal } from "../lib/reveal";
   import { router, type Route } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { pickImage } from "../lib/util";
+  import Equalizer from "./Equalizer.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
 
   const nav: { route: Route; label: string; icon: IconName }[] = [
@@ -50,7 +52,7 @@
     {#each session.playlists as pl (pl.id)}
       {@const active = current.name === "playlist" && current.id === pl.id}
       {@const playing = player.contextUri === pl.uri}
-      <li>
+      <li {@attach reveal}>
         <button class="pl" class:active onclick={() => router.go({ name: "playlist", id: pl.id })} title={pl.name}>
           {#if pickImage(pl.images, 60)}
             <img src={pickImage(pl.images, 60)} alt="" loading="lazy" />
@@ -59,7 +61,7 @@
           {/if}
           <span class="name" class:playing>{pl.name}</span>
           {#if playing && player.isPlaying}
-            <span class="eq" aria-label="Playing"><Icon name="volume" size={16} /></span>
+            <span class="eq"><Equalizer label="Playing" /></span>
           {/if}
         </button>
       </li>
@@ -82,8 +84,9 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--panel);
-    padding: 14px 10px 10px;
+    border-radius: var(--panel-radius);
+    background: var(--graphite);
+    padding: 12px 8px 8px;
   }
 
   ul {
@@ -93,34 +96,61 @@
   }
 
   .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 14px;
     width: 100%;
-    height: 38px;
+    height: 40px;
     padding: 0 12px;
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--smoke);
     font-size: var(--t-md);
     font-weight: 600;
     text-align: left;
+    transition: color 120ms, background 120ms;
   }
   .nav-item:hover {
     color: var(--paper);
+    background: color-mix(in srgb, var(--paper) 4%, transparent);
   }
   .nav-item.active {
     color: var(--paper);
     background: var(--raised);
+  }
+  /* A lit tick on the dial: marks where you are. */
+  .nav-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--brass);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--brass) 60%, transparent);
+    animation: marker-in 320ms var(--ease-out);
+  }
+  @keyframes marker-in {
+    from {
+      opacity: 0;
+      transform: scaleY(0);
+    }
   }
   .nav-item.active :global(svg) {
     color: var(--brass);
   }
 
   .heading {
-    font-size: var(--t-sm);
+    font-size: var(--t-xs);
     color: var(--smoke);
-    font-weight: 600;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     padding: 22px 12px 8px;
+    margin-top: 10px;
+    border-top: 1px solid var(--line);
   }
 
   .playlists {
@@ -129,32 +159,52 @@
     min-height: 0;
     margin: 0 -4px;
     padding: 0 4px;
+    /* Fade the list out where it scrolls under the settings button. */
+    mask-image: linear-gradient(180deg, #000 calc(100% - 24px), transparent);
+  }
+
+  /* Playlists slide in from the edge rather than rise, when they load and as the list scrolls. */
+  .playlists li:global([data-reveal="in"]) {
+    animation-name: slide-in;
+    animation-duration: 380ms;
+    animation-timing-function: var(--ease-out);
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
   }
 
   .pl {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     width: 100%;
     padding: 5px 8px;
-    border-radius: 6px;
+    border-radius: 8px;
     text-align: left;
     font-size: var(--t-md);
+    color: color-mix(in srgb, var(--paper) 88%, var(--smoke));
+    transition: background 120ms;
   }
   .pl:hover {
-    background: color-mix(in srgb, var(--raised) 60%, transparent);
+    background: color-mix(in srgb, var(--paper) 5%, transparent);
+    color: var(--paper);
   }
   .pl.active {
     background: var(--raised);
+    color: var(--paper);
   }
   .pl img,
   .ph {
-    width: 34px;
-    height: 34px;
-    border-radius: 3px;
+    width: 38px;
+    height: 38px;
+    border-radius: 5px;
     flex: none;
     object-fit: cover;
     background: var(--raised);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .name {
     flex: 1;
@@ -167,6 +217,10 @@
   .eq {
     color: var(--brass);
   }
+  .eq {
+    display: grid;
+    padding-right: 4px;
+  }
 
   .empty {
     padding: 4px 12px;
@@ -174,8 +228,7 @@
   }
 
   .settings {
-    margin-top: 8px;
-    position: relative;
+    margin-top: 4px;
   }
   .dot {
     width: 7px;
@@ -183,5 +236,16 @@
     border-radius: 50%;
     background: var(--brass);
     margin-left: auto;
+    animation: attention 2.2s ease-out infinite;
+  }
+  /* A slow ripple, so the dot is noticed without nagging. */
+  @keyframes attention {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass) 60%, transparent);
+    }
+    60%,
+    100% {
+      box-shadow: 0 0 0 7px transparent;
+    }
   }
 </style>

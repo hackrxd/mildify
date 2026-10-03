@@ -103,11 +103,14 @@
     border-radius: 2px;
     background: color-mix(in srgb, var(--paper) 18%, transparent);
   }
+  /* Glides between updates (the position ticks four times a second; seeks and arrow keys jump),
+     but follows the pointer exactly while dragging. */
   .fill {
     position: absolute;
     inset: 0 auto 0 0;
     border-radius: 2px;
     background: var(--paper);
+    transition: width 250ms linear, background 120ms;
   }
   .thumb {
     position: absolute;
@@ -117,6 +120,12 @@
     border-radius: 50%;
     background: var(--paper);
     transform: translate(-50%, -50%) scale(0);
+    transition: transform 100ms, left 250ms linear;
+  }
+  .dragging .fill {
+    transition: background 120ms;
+  }
+  .dragging .thumb {
     transition: transform 100ms;
   }
   .slider:hover:not(.disabled) .fill,

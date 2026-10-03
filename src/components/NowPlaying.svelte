@@ -1,12 +1,14 @@
 <script lang="ts">
   import { coverColor } from "../lib/color";
   import { liked } from "../lib/liked.svelte";
+  import { rise } from "../lib/motion";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import { formatDuration } from "../lib/util";
   import DeckLyric from "./DeckLyric.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
+  import Pop from "./Pop.svelte";
   import Slider from "./Slider.svelte";
 
   let { queueOpen, ontogglequeue }: { queueOpen: boolean; ontogglequeue: () => void } = $props();
@@ -43,25 +45,28 @@
 <footer class="deck" style:--deck-ambient={ambient ?? "transparent"}>
   <div class="info">
     {#if track}
-      <button class="cover" onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
-        {#if track.cover}<img src={track.cover} alt="" />{/if}
-      </button>
-      <div class="text">
-        <div class="title-row">
-          <button class="title link" onclick={() => track.album.uri && router.openUri(track.album.uri)}>{track.name}</button>
-          {#if track.explicit}<span class="explicit" title="Explicit">E</span>{/if}
-        </div>
-        <div class="artists muted">
-          {#each track.artists as a, i (a.uri + i)}
-            {#if i > 0},&nbsp;{/if}<button class="link" onclick={() => a.uri && router.openUri(a.uri)}>{a.name}</button>
-          {/each}
-        </div>
-      </div>
-      {#if saved !== undefined}
-        <button class="icon-btn" class:on={saved} onclick={() => liked.toggle(track.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
-          <Icon name="heart" filled={saved} />
+      <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
+      {#key track.uri}
+        <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
+          {#if track.cover}<img src={track.cover} alt="" />{/if}
         </button>
-      {/if}
+        <div class="text" in:rise={{ y: 6, delay: 60 }}>
+          <div class="title-row">
+            <button class="title link" onclick={() => track.album.uri && router.openUri(track.album.uri)}>{track.name}</button>
+            {#if track.explicit}<span class="explicit" title="Explicit">E</span>{/if}
+          </div>
+          <div class="artists muted">
+            {#each track.artists as a, i (a.uri + i)}
+              {#if i > 0},&nbsp;{/if}<button class="link" onclick={() => a.uri && router.openUri(a.uri)}>{a.name}</button>
+            {/each}
+          </div>
+        </div>
+        {#if saved !== undefined}
+          <button class="icon-btn" class:on={saved} onclick={() => liked.toggle(track.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
+            <Pop key={saved}><Icon name="heart" filled={saved} /></Pop>
+          </button>
+        {/if}
+      {/key}
       <DeckLyric />
     {:else}
       <p class="idle muted">Pick something to play.</p>
@@ -77,7 +82,7 @@
         <Icon name="prev" size={18} />
       </button>
       <button class="play" onclick={() => player.togglePlay()} title={player.isPlaying ? "Pause" : "Play"}>
-        <Icon name={player.isPlaying ? "pause" : "play"} size={18} />
+        <Pop key={player.isPlaying}><Icon name={player.isPlaying ? "pause" : "play"} size={18} /></Pop>
       </button>
       <button class="icon-btn" onclick={() => player.next()} title="Next">
         <Icon name="next" size={18} />
@@ -152,17 +157,19 @@
     height: var(--deck-h);
     padding: 0 20px 0 14px;
     background:
-      linear-gradient(90deg, color-mix(in srgb, var(--deck-ambient) 55%, transparent), transparent 55%),
-      var(--panel);
-    transition: background 600ms;
+      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) 50%, transparent), transparent 60%),
+      var(--frame);
+    transition: --deck-ambient 900ms ease;
   }
   /* The one glowing edge: the colour of what's playing, bleeding into the room. */
   .deck::before {
     content: "";
     position: absolute;
-    inset: -1px 0 auto 0;
+    inset: 0 auto auto var(--seam);
+    width: 60%;
     height: 1px;
-    background: linear-gradient(90deg, var(--deck-ambient), transparent 70%);
+    background: linear-gradient(90deg, var(--deck-ambient), transparent);
+    opacity: 0.8;
   }
 
   .info {
@@ -175,9 +182,14 @@
     flex: none;
     width: 60px;
     height: 60px;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     background: var(--raised);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
+    transition: transform 140ms;
+  }
+  .cover:hover {
+    transform: scale(1.04);
   }
   .cover img {
     width: 100%;
@@ -218,7 +230,7 @@
   .buttons {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
   }
   .play {
     display: grid;
@@ -228,11 +240,34 @@
     border-radius: 50%;
     background: var(--paper);
     color: var(--graphite);
-    transition: transform 100ms;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+    transition: transform 100ms, background 120ms;
   }
   .play:hover {
     transform: scale(1.06);
+    background: #fff;
   }
+  .play:active {
+    transform: scale(0.96);
+  }
+  /* Toggles that are on get a lit dot underneath, like a switched-on channel. */
+  .buttons :global(.icon-btn.on),
+  .extras :global(.icon-btn.on) {
+    position: relative;
+  }
+  .buttons :global(.icon-btn.on)::after,
+  .extras :global(.icon-btn.on)::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--brass);
+    transform: translateX(-50%);
+  }
+
   .progress {
     display: grid;
     grid-template-columns: 44px 1fr 44px;

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Equalizer from "./Equalizer.svelte";
+
   // Loading / error placeholder for views. Loading text appears only after a
   // short delay so fast loads don't flash.
   let { error = null, onretry }: { error?: string | null; onretry?: () => void } = $props();
@@ -15,7 +17,7 @@
     <p>{error}</p>
     {#if onretry}<button class="btn quiet" onclick={onretry}>Try again</button>{/if}
   {:else if showLoading}
-    <p class="muted">Loading…</p>
+    <p class="loading muted"><Equalizer /> Loading…</p>
   {/if}
 </div>
 
@@ -29,5 +31,16 @@
   }
   p {
     max-width: 60ch;
+  }
+  .status > * {
+    animation: fade-in 300ms ease-out backwards;
+  }
+  .loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .loading :global(.eq) {
+    color: var(--brass);
   }
 </style>

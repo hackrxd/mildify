@@ -195,11 +195,15 @@
     background: var(--graphite);
   }
 
+  /* Sidebar, main pane and queue float as rounded panels on a darker frame; the deck sits on the frame. */
   .shell {
     display: grid;
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) var(--deck-h);
+    gap: 0 var(--seam);
     height: 100%;
+    padding: var(--seam) var(--seam) 0;
+    background: var(--frame);
   }
   .shell.queue-open {
     grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 320px;
@@ -227,6 +231,8 @@
     overflow-y: auto;
     overflow-x: hidden;
     min-width: 0;
+    border-radius: var(--panel-radius);
+    background: var(--graphite);
   }
 
   /* Sticky top bar; transparent over headers, solid once content scrolls under it. */
@@ -241,8 +247,19 @@
     backdrop-filter: blur(12px);
   }
 
+  /* Each page settles in as it opens. The lyrics stage only fades: it measures its own layout. */
   .view {
     position: relative;
+    animation: view-in 300ms var(--ease-out) backwards;
+  }
+  main.fill .view {
+    animation-name: fade-in;
+  }
+  @keyframes view-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
   }
 
   .banner {
@@ -255,9 +272,17 @@
     border-radius: 8px;
     background: color-mix(in srgb, var(--brass) 16%, var(--panel));
     font-size: var(--t-md);
+    animation: drop-in 360ms var(--ease-out) backwards;
+  }
+  @keyframes drop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
   }
 
   .deck-slot {
     grid-column: 1 / -1;
+    margin: 0 calc(-1 * var(--seam));
   }
 </style>

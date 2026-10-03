@@ -1,10 +1,11 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { lyrics, WARMUP_MAX } from "../lib/lyrics.svelte";
+  import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
+  import { plural } from "../lib/util";
 
   const config = $derived(session.status?.config);
   const device = $derived(session.device);
@@ -50,6 +51,11 @@
   const themes = $derived(mods.list?.themes ?? []);
   const extensions = $derived(mods.list?.extensions ?? []);
   const needsReload = $derived(Object.values(mods.states).includes("restart"));
+
+  const scales = Array.from(
+    { length: Math.round((TEXT_SCALE_MAX - TEXT_SCALE_MIN) / TEXT_SCALE_STEP) + 1 },
+    (_, i) => Math.round((TEXT_SCALE_MIN + i * TEXT_SCALE_STEP) * 100) / 100,
+  );
 
   function saveName() {
     const name = deviceName.trim();
@@ -209,6 +215,33 @@
         />
         <span class="muted small">songs</span>
       </span>
+    </label>
+
+    <div class="row">
+      <span>
+        <span class="label">Per-song timing</span>
+        <span class="muted small">
+          {#if lyrics.songOffsetCount === 0}None yet. If one song's sync is off, nudge it from the lyrics view with
+            the options button or the [ and ] keys.
+          {:else}{plural(lyrics.songOffsetCount, "song")} {lyrics.songOffsetCount === 1 ? "has its" : "have their"} own
+            timing, on top of Lyrics timing.{/if}
+        </span>
+      </span>
+      <button class="btn quiet" type="button" disabled={lyrics.songOffsetCount === 0} onclick={() => lyrics.forgetSongOffsets()}>
+        Reset all
+      </button>
+    </div>
+
+    <label class="row">
+      <span>
+        <span class="label">Lyrics text size</span>
+        <span class="muted small">How big the lyrics view writes them. Ctrl + and Ctrl − change it there too.</span>
+      </span>
+      <select class="field narrow" value={lyrics.textScale} onchange={(e) => lyrics.setTextScale(Number(e.currentTarget.value))}>
+        {#each scales as scale (scale)}
+          <option value={scale}>{Math.round(scale * 100)}%{scale === 1 ? " (default)" : ""}</option>
+        {/each}
+      </select>
     </label>
   </section>
 
@@ -391,8 +424,9 @@
     gap: 14px;
     padding: 14px 16px;
     margin-bottom: 8px;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--panel);
+    box-shadow: inset 0 0 0 1px var(--line);
     font-size: var(--t-md);
   }
   .status > div {
@@ -445,10 +479,44 @@
   select.field {
     appearance: auto;
   }
+  .row .field.narrow {
+    width: 160px;
+  }
   .switch {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--brass);
+    /* Checkboxes drawn as toggle switches. */
+    appearance: none;
+    position: relative;
+    flex: none;
+    width: 40px;
+    height: 22px;
+    margin: 0;
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--paper) 18%, transparent);
+    cursor: pointer;
+    transition: background 160ms;
+  }
+  .switch::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--paper);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+    transition: transform 160ms;
+  }
+  .switch:checked {
+    background: var(--brass);
+  }
+  .switch:checked::before {
+    transform: translateX(18px);
+    background: var(--brass-ink);
+  }
+  .switch:disabled {
+    cursor: default;
+    opacity: 0.4;
   }
   .timing {
     display: flex !important;

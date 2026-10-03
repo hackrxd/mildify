@@ -12,9 +12,12 @@
   import { menu } from "../lib/menu.svelte";
   import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
+  import { reveal } from "../lib/reveal";
   import { router } from "../lib/router.svelte";
   import { formatDuration, pickImage } from "../lib/util";
+  import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
+  import Pop from "./Pop.svelte";
 
   let {
     rows,
@@ -78,7 +81,7 @@
     {@const saved = liked.has(t.uri)}
     {@const unplayable = t.is_playable === false}
     {#if multiDisc && (i === 0 || rows[i - 1].track.disc_number !== t.disc_number)}
-      <div class="disc" role="row"><Icon name="disc" size={16} /> Disc {t.disc_number}</div>
+      <div class="disc" role="row" {@attach reveal}><Icon name="disc" size={16} /> Disc {t.disc_number}</div>
     {/if}
     <div
       class="row"
@@ -88,17 +91,18 @@
       tabindex="-1"
       ondblclick={() => !unplayable && onplay(i)}
       oncontextmenu={(e) => openMenu(e, t)}
+      {@attach reveal}
     >
       <span class="n num" role="cell">
         <span class="idx">
           {#if current && player.isPlaying}
-            <Icon name="volume" size={16} label="Playing" />
+            <Equalizer label="Playing" />
           {:else}
             {numbering === "track" ? t.track_number : i + 1}
           {/if}
         </span>
         <button class="play" onclick={() => onplay(i)} disabled={unplayable} title="Play {t.name}">
-          <Icon name={current && player.isPlaying ? "pause" : "play"} size={14} />
+          <Pop key={current && player.isPlaying}><Icon name={current && player.isPlaying ? "pause" : "play"} size={14} /></Pop>
         </button>
       </span>
 
@@ -130,7 +134,7 @@
       <span class="heart" role="cell">
         {#if saved !== undefined}
           <button class="icon-btn" class:on={saved} class:hidden={!saved} onclick={() => liked.toggle(t.uri)} title={saved ? "Remove from Liked Songs" : "Save to Liked Songs"}>
-            <Icon name="heart" size={17} filled={saved} />
+            <Pop key={saved}><Icon name="heart" size={17} filled={saved} /></Pop>
           </button>
         {/if}
       </span>
@@ -154,15 +158,19 @@
     grid-template-columns: var(--cols);
     align-items: center;
     gap: 12px;
-    min-height: 54px;
+    min-height: 56px;
     padding: 0 12px;
-    border-radius: 6px;
+    border-radius: 8px;
+    transition: background 100ms;
     content-visibility: auto;
-    contain-intrinsic-size: auto 54px;
+    contain-intrinsic-size: auto 56px;
+  }
+  .row.current {
+    background: color-mix(in srgb, var(--brass) 8%, transparent);
   }
   .row:not(.head):hover,
   .row:focus-within {
-    background: color-mix(in srgb, var(--paper) 6%, transparent);
+    background: color-mix(in srgb, var(--paper) 7%, transparent);
   }
 
   .head {
@@ -171,7 +179,10 @@
     border-bottom: 1px solid var(--line);
     border-radius: 0;
     color: var(--smoke);
-    font-size: var(--t-sm);
+    font-size: var(--t-xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .disc {
@@ -218,9 +229,10 @@
   .title img {
     width: 40px;
     height: 40px;
-    border-radius: 3px;
+    border-radius: 5px;
     flex: none;
     background: var(--raised);
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .title-text {
     display: grid;
@@ -234,8 +246,9 @@
     white-space: nowrap;
   }
   .name {
-    font-size: var(--t-lg);
-    line-height: 1.3;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.35;
   }
   .artists {
     display: flex;

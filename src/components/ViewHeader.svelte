@@ -58,18 +58,25 @@
     gap: 32px;
     padding: 72px var(--gutter) 28px;
     margin-top: -60px;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--ambient) 85%, transparent), color-mix(in srgb, var(--ambient) 35%, transparent));
-    transition: background 500ms;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--ambient) 85%, transparent), color-mix(in srgb, var(--ambient) 45%, transparent));
+    transition: --ambient 800ms ease;
   }
 
   .art {
     flex: none;
     width: clamp(168px, 18vw, 232px);
     aspect-ratio: 1;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     background: color-mix(in srgb, var(--graphite) 40%, transparent);
-    box-shadow: 0 18px 50px rgb(0 0 0 / 0.4);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    animation: art-in 560ms var(--ease-out) backwards;
+  }
+  @keyframes art-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.92);
+    }
   }
   .art.round {
     border-radius: 50%;
@@ -85,9 +92,27 @@
     display: grid;
     gap: 10px;
   }
+  /* The words follow the cover in, top to bottom. */
+  .kind,
+  .title,
+  .meta {
+    animation: rise 520ms var(--ease-out) backwards;
+  }
   .kind {
-    font-size: var(--t-sm);
-    font-weight: 600;
+    animation-delay: 60ms;
+  }
+  .title {
+    animation-delay: 110ms;
+  }
+  .meta {
+    animation-delay: 170ms;
+  }
+
+  .kind {
+    font-size: var(--t-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   /* The signature: record-sleeve titles set wide and heavy. */
@@ -125,11 +150,30 @@
     color: color-mix(in srgb, var(--paper) 80%, transparent);
   }
 
+  /* Picks up where the hero's wash ends and fades it out behind the top of the list, so there's no seam.
+     The extra bottom padding carries the fade; the negative margin pulls the list back up over it. */
   .actions {
+    --fade: 160px;
     display: flex;
     align-items: center;
     gap: 18px;
-    padding: 22px var(--gutter);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--ambient) 22%, transparent), transparent 140px);
+    padding: 22px var(--gutter) calc(22px + var(--fade));
+    margin-bottom: calc(-1 * var(--fade));
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ambient) 45%, transparent),
+      color-mix(in srgb, var(--ambient) 24%, transparent) 70px,
+      color-mix(in srgb, var(--ambient) 8%, transparent) 170px,
+      transparent
+    );
+    transition: --ambient 800ms ease;
+  }
+  /* The play button (and the heart, once it knows) pop in last. */
+  .actions > :global(*) {
+    animation: pop 460ms var(--ease-spring) backwards;
+    animation-delay: 220ms;
+  }
+  .actions > :global(:nth-child(2)) {
+    animation-delay: 280ms;
   }
 </style>

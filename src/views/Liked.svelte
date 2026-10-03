@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
+  import Pop from "../components/Pop.svelte";
   import Status from "../components/Status.svelte";
   import TrackList, { type Row } from "../components/TrackList.svelte";
   import ViewHeader from "../components/ViewHeader.svelte";
@@ -80,7 +81,7 @@
     {/snippet}
     {#snippet actions()}
       <button class="play-fab" onclick={() => play()} title={playingHere ? "Pause" : "Play"} disabled={!rows.length}>
-        <Icon name={playingHere ? "pause" : "play"} size={22} />
+        <Pop key={playingHere}><Icon name={playingHere ? "pause" : "play"} size={22} /></Pop>
       </button>
     {/snippet}
   </ViewHeader>

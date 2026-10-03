@@ -65,16 +65,24 @@
     z-index: 50;
     min-width: 200px;
     margin: 0;
-    padding: 4px;
+    padding: 5px;
     list-style: none;
-    border-radius: 8px;
+    border-radius: 10px;
     background: var(--raised);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+    box-shadow: var(--shadow-pop);
+    transform-origin: top left;
+    animation: pop-in 120ms ease-out;
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
   }
   button {
     width: 100%;
     padding: 8px 12px;
-    border-radius: 4px;
+    border-radius: 6px;
     text-align: left;
     font-size: var(--t-md);
   }
