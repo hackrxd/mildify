@@ -157,9 +157,13 @@
     height: var(--deck-h);
     padding: 0 20px 0 14px;
     background:
-      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) 50%, transparent), transparent 60%),
+      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) var(--deck-glow), transparent), transparent 60%),
       var(--frame);
-    transition: --deck-ambient 900ms ease;
+    /* The glow and colour follow the lyrics view's cover background in and out. */
+    transition:
+      --deck-ambient 900ms ease,
+      --deck-glow var(--backdrop-fade, 0ms) var(--ease-out),
+      background-color var(--backdrop-fade, 0ms) var(--ease-out);
   }
   /* The one glowing edge: the colour of what's playing, bleeding into the room. */
   .deck::before {
