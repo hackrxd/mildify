@@ -5,6 +5,7 @@
   import * as sp from "../lib/spotify";
   import type { Queue, Track } from "../lib/types";
   import { formatDuration, pickImage } from "../lib/util";
+  import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -34,6 +35,7 @@
   <li class="item" class:current>
     <button class="cover" onclick={() => t.album && router.go({ name: "album", id: t.album.id })} tabindex="-1">
       {#if pickImage(t.album?.images, 64)}<img src={pickImage(t.album?.images, 64)} alt="" loading="lazy" />{/if}
+      {#if current && player.isPlaying}<span class="live"><Equalizer label="Playing" /></span>{/if}
     </button>
     <span class="text">
       <span class="name">{t.name}</span>
@@ -78,6 +80,13 @@
     min-height: 0;
     background: var(--graphite);
     border-radius: var(--panel-radius);
+    animation: panel-in 320ms var(--ease-out) backwards;
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
   }
   header {
     display: flex;
@@ -119,6 +128,7 @@
     background: color-mix(in srgb, var(--brass) 10%, transparent);
   }
   .cover {
+    position: relative;
     width: 42px;
     height: 42px;
     flex: none;
@@ -130,6 +140,18 @@
   .cover img {
     width: 100%;
     height: 100%;
+  }
+  .live {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: rgb(0 0 0 / 0.5);
+    color: var(--brass);
+  }
+  /* The lists fade in once they load; later reloads update them in place. */
+  .scroll > * {
+    animation: fade-in 360ms ease-out backwards;
   }
   .text {
     flex: 1;
