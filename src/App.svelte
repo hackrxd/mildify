@@ -118,7 +118,7 @@
   <Setup />
 {:else}
   <div class="backdrop" class:on={backdropOn} bind:this={backdrop}></div>
-  <div class="shell" class:queue-open={queueOpen} class:immersive class:backdrop={backdropOn} class:dim={lyrics.backdropDim}>
+  <div class="shell" class:queue-open={queueOpen} class:immersive class:see-through={backdropOn} class:dim={lyrics.backdropDim}>
     {#if !immersive}<Sidebar />{/if}
 
     <main bind:this={main} class:fill={lyricsRoute} onscroll={() => (scrolled = (main?.scrollTop ?? 0) > 24)}>
@@ -237,15 +237,15 @@
   .shell.dim {
     --backdrop-tint: color-mix(in srgb, var(--graphite) 45%, transparent);
   }
-  .shell.backdrop {
+  .shell.see-through {
     background: none;
   }
-  .shell.backdrop main {
+  .shell.see-through main {
     background: none;
   }
-  .shell.backdrop > :global(:is(.sidebar, .panel)),
-  .shell.backdrop .deck-slot > :global(.deck),
-  .shell.backdrop .bar.scrolled {
+  .shell.see-through > :global(:is(.sidebar, .panel)),
+  .shell.see-through .deck-slot > :global(.deck),
+  .shell.see-through .bar.scrolled {
     background: var(--backdrop-tint);
     backdrop-filter: none;
   }
