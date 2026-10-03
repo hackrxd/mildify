@@ -15,6 +15,7 @@
 
 <script lang="ts">
   import { player } from "../lib/player.svelte";
+  import { reveal } from "../lib/reveal";
   import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
   import Pop from "./Pop.svelte";
@@ -23,11 +24,11 @@
 </script>
 
 <ul class="grid" class:one-row={oneRow}>
-  {#each items as item, i (item.key)}
+  {#each items as item (item.key)}
     {@const here = !!item.uri && player.contextUri === item.uri && !!player.track}
     {@const live = here && player.isPlaying}
     <!-- The card for what's playing keeps its button out, and it pauses instead of restarting. -->
-    <li class="item" class:here style:--i={i}>
+    <li class="item" class:here {@attach reveal}>
       <div class="art" class:round={item.round}>
         <button class="open" onclick={item.open} aria-label="Open {item.title}">
           {#if item.image}
@@ -72,14 +73,13 @@
     overflow: hidden;
   }
 
-  /* Cards rise in one after another when the grid appears. */
   .item {
+    /* Grows a little as it pops up on scroll (data-reveal in app.css). */
+    --reveal-scale: 0.94;
     min-width: 0;
     padding: 10px 10px 14px;
     border-radius: 10px;
     transition: background 160ms;
-    animation: rise 440ms var(--ease-out) backwards;
-    animation-delay: calc(min(var(--i), 12) * var(--stagger));
   }
   .item:hover,
   .item:focus-within {
