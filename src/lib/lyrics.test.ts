@@ -156,6 +156,24 @@ describe("text size", () => {
   });
 });
 
+describe("cover background", () => {
+  it("fills the window, dimmed, until turned off", () => {
+    expect(lyrics.backdrop).toBe(true);
+    expect(lyrics.backdropDim).toBe(true);
+  });
+
+  it("remembers both switches", async () => {
+    lyrics.setBackdrop(false);
+    lyrics.setBackdropDim(false);
+    await fresh();
+    expect(lyrics.backdrop).toBe(false);
+    expect(lyrics.backdropDim).toBe(false);
+    lyrics.setBackdrop(true);
+    await fresh();
+    expect(lyrics.backdrop).toBe(true);
+  });
+});
+
 describe("copy", () => {
   const response = { Body: { Type: "Static", Lines: [{ Text: "one", TransliteratedText: "uno" }, { Text: "two" }] } };
 
