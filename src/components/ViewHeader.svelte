@@ -59,7 +59,7 @@
     padding: 72px var(--gutter) 28px;
     margin-top: -60px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--ambient) 85%, transparent), color-mix(in srgb, var(--ambient) 45%, transparent));
-    transition: background 500ms;
+    transition: --ambient 800ms ease;
   }
 
   .art {
@@ -70,6 +70,13 @@
     overflow: hidden;
     background: color-mix(in srgb, var(--graphite) 40%, transparent);
     box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    animation: art-in 560ms var(--ease-out) backwards;
+  }
+  @keyframes art-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.92);
+    }
   }
   .art.round {
     border-radius: 50%;
@@ -85,6 +92,22 @@
     display: grid;
     gap: 10px;
   }
+  /* The words follow the cover in, top to bottom. */
+  .kind,
+  .title,
+  .meta {
+    animation: rise 520ms var(--ease-out) backwards;
+  }
+  .kind {
+    animation-delay: 60ms;
+  }
+  .title {
+    animation-delay: 110ms;
+  }
+  .meta {
+    animation-delay: 170ms;
+  }
+
   .kind {
     font-size: var(--t-xs);
     font-weight: 700;
@@ -143,5 +166,14 @@
       color-mix(in srgb, var(--ambient) 8%, transparent) 170px,
       transparent
     );
+    transition: --ambient 800ms ease;
+  }
+  /* The play button (and the heart, once it knows) pop in last. */
+  .actions > :global(*) {
+    animation: pop 460ms var(--ease-spring) backwards;
+    animation-delay: 220ms;
+  }
+  .actions > :global(:nth-child(2)) {
+    animation-delay: 280ms;
   }
 </style>
