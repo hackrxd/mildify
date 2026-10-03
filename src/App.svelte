@@ -27,6 +27,7 @@
   import Settings from "./views/Settings.svelte";
 
   let main: HTMLElement | undefined = $state();
+  let backdrop: HTMLElement | undefined = $state();
   let topbar: TopBar | undefined = $state();
   let scrolled = $state(false);
   let queueOpen = $state(false);
@@ -64,6 +65,8 @@
   const route = $derived(router.current);
   const lyricsRoute = $derived(route.name === "lyrics");
   const immersive = $derived(lyricsRoute && lyrics.immersive);
+  // The lyrics view's cover background, behind the whole window.
+  const backdropOn = $derived(lyricsRoute && lyrics.backdrop);
   // Search updates its route in place while typing; don't remount it per keystroke.
   const viewKey = $derived(route.name === "search" ? "search" : JSON.stringify(route));
 
@@ -114,7 +117,8 @@
 {:else if !session.ready}
   <Setup />
 {:else}
-  <div class="shell" class:queue-open={queueOpen} class:immersive>
+  <div class="backdrop" class:on={backdropOn} bind:this={backdrop}></div>
+  <div class="shell" class:queue-open={queueOpen} class:immersive class:backdrop={backdropOn} class:dim={lyrics.backdropDim}>
     {#if !immersive}<Sidebar />{/if}
 
     <main bind:this={main} class:fill={lyricsRoute} onscroll={() => (scrolled = (main?.scrollTop ?? 0) > 24)}>
@@ -166,7 +170,7 @@
           {:else if route.name === "playlist"}
             <Playlist id={route.id} />
           {:else if route.name === "lyrics"}
-            <Lyrics />
+            <Lyrics {backdrop} />
           {:else if route.name === "settings"}
             <Settings />
           {:else if route.name === "extension"}
@@ -213,6 +217,37 @@
   }
   .shell.immersive.queue-open {
     grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  /* In the lyrics view, its cover background fills the window and the panels turn see-through,
+     or tinted a little so they still read as panels. */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .backdrop.on {
+    background: #000;
+    animation: fade-in 300ms var(--ease-out) backwards;
+  }
+  .shell {
+    position: relative;
+    --backdrop-tint: transparent;
+  }
+  .shell.dim {
+    --backdrop-tint: color-mix(in srgb, var(--graphite) 45%, transparent);
+  }
+  .shell.backdrop {
+    background: none;
+  }
+  .shell.backdrop main {
+    background: none;
+  }
+  .shell.backdrop > :global(:is(.sidebar, .panel)),
+  .shell.backdrop .deck-slot > :global(.deck),
+  .shell.backdrop .bar.scrolled {
+    background: var(--backdrop-tint);
+    backdrop-filter: none;
   }
 
   /* The lyrics view fills the pane instead of scrolling with it. */
