@@ -20,6 +20,8 @@ pub struct Config {
     pub initial_volume: u8,
     /// Apply ReplayGain-style volume normalisation.
     pub normalisation: bool,
+    /// Serve the Spotify app's DevTools endpoint on port 9222, for tools such as mild-lyrics (devtools.rs).
+    pub devtools: bool,
 }
 
 impl Default for Config {
@@ -31,6 +33,7 @@ impl Default for Config {
             bitrate: 320,
             initial_volume: 50,
             normalisation: false,
+            devtools: false,
         }
     }
 }
@@ -119,6 +122,7 @@ mod tests {
         assert_eq!(c.bitrate, 320);
         assert_eq!(c.initial_volume, 50);
         assert!(!c.normalisation);
+        assert!(!c.devtools);
     }
 
     #[test]
