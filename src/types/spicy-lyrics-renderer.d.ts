@@ -31,6 +31,7 @@ declare module "spicy-lyrics-renderer" {
   export function isNowBarOpen(): boolean;
   export function setFullscreen(open: boolean): void;
   export function setCompact(on: boolean): void;
+  export function remeasure(): void;
   export function romanizationAvailable(): boolean;
   export function isRomanizedView(): boolean;
   export function toggleRomanization(): void;

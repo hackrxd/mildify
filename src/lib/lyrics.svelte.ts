@@ -7,7 +7,8 @@ import { backend, isAppError, type LyricsServerStatus } from "./ipc";
 import { player } from "./player.svelte";
 import * as sp from "./spotify";
 import { toasts } from "./toasts.svelte";
-import { debounce, upcomingTrackIds } from "./util";
+import { lyricsText } from "./lyricLines";
+import { copyText, debounce, upcomingTrackIds } from "./util";
 
 export interface Credit {
   username: string;
@@ -27,11 +28,65 @@ export interface Attribution {
 const OFFSET_KEY = "nativify:lyricsOffsetMs";
 const IN_DECK_KEY = "nativify:lyricsInDeck";
 const WARMUP_KEY = "nativify:lyricsWarmup";
+const SONG_OFFSETS_KEY = "nativify:lyricsSongOffsets";
+const TEXT_SCALE_KEY = "nativify:lyricsTextScale";
 export const WARMUP_DEFAULT = 20;
 /** Spotify's queue endpoint only lists the next 20 songs. */
 export const WARMUP_MAX = 20;
 /** Wait for the queue to settle after a track change (and for skipping through to stop). */
 const WARMUP_DELAY_MS = 200;
+
+/** Per-song nudges fix syncs that are off, which can be by more than headphone delay. */
+export const SONG_OFFSET_MAX = 10_000;
+/** How many songs' own timings are remembered; the least recently adjusted are dropped first. */
+export const SONG_OFFSETS_KEPT = 1000;
+export const TEXT_SCALE_MIN = 0.7;
+export const TEXT_SCALE_MAX = 1.6;
+export const TEXT_SCALE_STEP = 0.1;
+
+function trackIdOf(uri: string | undefined): string | null {
+  return uri?.startsWith("spotify:track:") ? uri.split(":")[2] : null;
+}
+
+function persist(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Not persisted; still applies for this session.
+  }
+}
+
+function loadSongOffsets(): Record<string, number> {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(SONG_OFFSETS_KEY) ?? "{}");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    const out: Record<string, number> = {};
+    for (const [id, ms] of Object.entries(raw)) {
+      if (typeof ms === "number" && Number.isFinite(ms) && ms !== 0) {
+        out[id] = Math.max(-SONG_OFFSET_MAX, Math.min(SONG_OFFSET_MAX, Math.round(ms)));
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function clampScale(scale: number): number {
+  const stepped = Math.round(scale / TEXT_SCALE_STEP) * TEXT_SCALE_STEP;
+  // Rounded to tenths so steps don't drift (0.7 + 0.1 is 0.7999…).
+  return Math.round(Math.max(TEXT_SCALE_MIN, Math.min(TEXT_SCALE_MAX, stepped)) * 100) / 100;
+}
+
+function loadTextScale(): number {
+  try {
+    const v = Number(localStorage.getItem(TEXT_SCALE_KEY) ?? 1);
+    return Number.isFinite(v) && v > 0 ? clampScale(v) : 1;
+  } catch {
+    return 1;
+  }
+}
 
 function loadOffset(): number {
   try {
@@ -86,6 +141,20 @@ class Lyrics {
   inDeck = $state(loadInDeck());
   /** How many upcoming songs to fetch lyrics for ahead of time; 0 turns it off. */
   warmup = $state(loadWarmup());
+  /** Per-song timing nudges in ms by track id, on top of `offsetMs`, for syncs that are off. */
+  songOffsets = $state.raw<Record<string, number>>(loadSongOffsets());
+  /** Lyrics text size, relative to the renderer's own. */
+  textScale = $state(loadTextScale());
+  /** The most recently fetched lyrics, so they can be copied as text. */
+  #loaded = $state.raw<{ trackId: string; response: unknown } | null>(null);
+  #trackId = $derived(trackIdOf(player.track?.uri));
+  /** The playing song's own nudge. */
+  songOffsetMs = $derived(this.#trackId ? (this.songOffsets[this.#trackId] ?? 0) : 0);
+  /** What the lyrics clock is shifted by: the global offset plus the playing song's own. */
+  totalOffsetMs = $derived(this.offsetMs + this.songOffsetMs);
+  songOffsetCount = $derived(Object.keys(this.songOffsets).length);
+  /** Whether the playing song's lyrics are loaded and have text to copy. */
+  hasText = $derived(this.#loaded?.trackId === this.#trackId && lyricsText(this.#loaded?.response) !== "");
   /** Track id the backend's cache is following, so its lyrics can be dropped once it's played. */
   #playing: string | null = null;
 
@@ -95,6 +164,47 @@ class Lyrics {
       localStorage.setItem(OFFSET_KEY, String(this.offsetMs));
     } catch {
       // Not persisted; still applies for this session.
+    }
+  }
+
+  /** Sets the playing song's own nudge; 0 forgets it. */
+  setSongOffset(ms: number) {
+    const id = this.#trackId;
+    if (!id) return;
+    const value = Math.max(-SONG_OFFSET_MAX, Math.min(SONG_OFFSET_MAX, Math.round(ms)));
+    const { [id]: _, ...next } = this.songOffsets;
+    // Re-added at the end, so the oldest adjustments are the ones dropped past the cap.
+    if (value !== 0) next[id] = value;
+    const ids = Object.keys(next);
+    for (const old of ids.slice(0, Math.max(0, ids.length - SONG_OFFSETS_KEPT))) delete next[old];
+    this.songOffsets = next;
+    persist(SONG_OFFSETS_KEY, JSON.stringify(next));
+  }
+
+  nudgeSong(deltaMs: number) {
+    this.setSongOffset(this.songOffsetMs + deltaMs);
+  }
+
+  forgetSongOffsets() {
+    this.songOffsets = {};
+    persist(SONG_OFFSETS_KEY, null);
+  }
+
+  setTextScale(scale: number) {
+    this.textScale = clampScale(scale);
+    persist(TEXT_SCALE_KEY, this.textScale === 1 ? null : String(this.textScale));
+  }
+
+  /** Copies the playing song's lyrics; the romanization where there is one, when asked. */
+  async copy(romanized = false) {
+    const loaded = this.#loaded;
+    const text = loaded?.trackId === this.#trackId ? lyricsText(loaded?.response, romanized) : "";
+    if (!text) return;
+    try {
+      await copyText(text);
+      toasts.show("Lyrics copied");
+    } catch (e) {
+      toasts.error(e);
     }
   }
 
@@ -122,7 +232,7 @@ class Lyrics {
    * so the next play gets the latest sync; this drops the finished one and warms up what's next.
    */
   trackChanged(uri: string | undefined) {
-    const id = uri?.startsWith("spotify:track:") ? uri.split(":")[2] : null;
+    const id = trackIdOf(uri);
     if (id === this.#playing) return;
     const played = this.#playing;
     this.#playing = id;
@@ -157,7 +267,7 @@ class Lyrics {
     if (this.#installed) return;
     this.#installed = true;
     setHost({
-      position: () => Math.max(0, player.positionNow() - this.offsetMs),
+      position: () => Math.max(0, player.positionNow() - this.totalOffsetMs),
       isPlaying: () => player.isPlaying,
       track: (): HostTrack | null => {
         const t = player.track;
@@ -175,7 +285,7 @@ class Lyrics {
         };
       },
       // Lyric times are on the offset clock; map back to the audio's.
-      seek: (ms) => player.seek(Math.max(0, ms + this.offsetMs)),
+      seek: (ms) => player.seek(Math.max(0, ms + this.totalOffsetMs)),
       fetchLyrics: (trackId) => this.#fetch(trackId),
       openUrl: (url) => {
         openUrl(url).catch((e) => toasts.error(e));
@@ -201,6 +311,7 @@ class Lyrics {
     try {
       const response = await this.#lyricsWithRetry(trackId);
       this.needsSignIn = false;
+      this.#loaded = { trackId, response };
       const body = (response as { Body?: Record<string, unknown> } | null)?.Body;
       if (body) {
         const source = String(body.source ?? "");

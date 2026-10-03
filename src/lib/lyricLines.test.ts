@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOLD_GAP_MS, lineAt, lyricLines, nextChange, sung, type LyricLine } from "./lyricLines";
+import { HOLD_GAP_MS, lineAt, lyricLines, lyricsText, nextChange, sung, VERSE_GAP_MS, type LyricLine } from "./lyricLines";
 
 const syl = (Text: string, StartTime: number, EndTime: number, IsPartOfWord = false) => ({
   Text,
@@ -155,5 +155,72 @@ describe("sung", () => {
   it("treats a zero-length syllable as sung once it starts", () => {
     expect(sung({ ...s, end: 1000 }, 999)).toBe(0);
     expect(sung({ ...s, end: 1000 }, 1000)).toBe(1);
+  });
+});
+
+describe("lyricsText", () => {
+  it("writes static lyrics one line per row, empty lines as single verse breaks", () => {
+    const response = {
+      Body: {
+        Type: "Static",
+        Lines: [{ Text: "" }, { Text: "Paper  lanterns" }, { Text: "drift" }, { Text: "" }, { Text: "​" }, { Text: "harbor" }, { Text: "" }],
+      },
+    };
+    expect(lyricsText(response)).toBe("Paper lanterns\ndrift\n\nharbor");
+  });
+
+  it("orders line-synced lyrics and breaks verses at long pauses", () => {
+    const response = {
+      Type: "Line",
+      Content: [
+        { StartTime: 10, EndTime: 12, Text: "third" },
+        { StartTime: 0, EndTime: 2, Text: "first" },
+        { StartTime: 2.5, EndTime: 5, Text: "second" },
+        { StartTime: 13, EndTime: 14, Text: "   " },
+      ],
+    };
+    expect(lyricsText(response)).toBe("first\nsecond\n\nthird");
+  });
+
+  it("keeps a pause just under the verse gap in the same verse", () => {
+    const gap = VERSE_GAP_MS / 1000 - 0.01;
+    const response = {
+      Type: "Line",
+      Content: [
+        { StartTime: 0, EndTime: 1, Text: "a" },
+        { StartTime: 1 + gap, EndTime: 3 + gap, Text: "b" },
+      ],
+    };
+    expect(lyricsText(response)).toBe("a\nb");
+  });
+
+  it("joins syllables into words and puts background vocals in parentheses", () => {
+    const response = {
+      Body: {
+        Type: "Syllable",
+        Content: [
+          {
+            Lead: { StartTime: 2, EndTime: 4, Syllables: [syl("Pa", 2, 2.5, true), syl("per", 2.5, 3), syl("lanterns", 3, 4)] },
+            Background: [{ Syllables: [syl("ooh", 2, 3)] }, { Syllables: [syl("ah", 3, 4)] }],
+          },
+          { Lead: { StartTime: 4.5, EndTime: 5, Syllables: [] }, Background: [{ Syllables: [syl("hey", 4.5, 5)] }] },
+        ],
+      },
+    };
+    expect(lyricsText(response)).toBe("Paper lanterns (ooh ah)\n(hey)");
+  });
+
+  it("uses the romanization when asked and present, the original otherwise", () => {
+    const response = {
+      Type: "Static",
+      Lines: [{ Text: "夜空", TransliteratedText: "yozora" }, { Text: "and you" }, { Text: "", TransliteratedText: "only roman" }],
+    };
+    expect(lyricsText(response, true)).toBe("yozora\nand you\nonly roman");
+    expect(lyricsText(response)).toBe("夜空\nand you\nonly roman");
+  });
+
+  it("is empty for missing or unknown lyrics", () => {
+    expect(lyricsText(null)).toBe("");
+    expect(lyricsText({ Body: { Type: "Mystery", Content: [] } })).toBe("");
   });
 });

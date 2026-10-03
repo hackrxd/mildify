@@ -30,6 +30,7 @@ import { IntervalManager } from "./src/utils/IntervalManager.ts";
 import { ScrollingIntervalTime, isRomanized, setRomanizedStatus } from "./src/utils/Lyrics/lyrics.ts";
 import { ScrollToActiveLine } from "./src/utils/Scrolling/ScrollToActiveLine.ts";
 import { ScrollSimplebar } from "./src/utils/Scrolling/Simplebar/ScrollSimplebar.ts";
+import { triggerRemeasureLV } from "./src/utils/Lyrics/LyricsVirtualizer.ts";
 import fetchLyrics from "./src/utils/Lyrics/fetchLyrics.ts";
 import ApplyLyrics from "./src/utils/Lyrics/Global/Applyer.ts";
 import { $isNowBarOpen } from "./src/utils/uiState.ts";
@@ -80,6 +81,11 @@ export function setFullscreen(open: boolean) {
 export function setCompact(on: boolean) {
   if (on) EnableCompactMode();
   else DisableCompactMode();
+}
+
+/** Re-reads line heights, after something outside the renderer changed them (the text size). */
+export function remeasure() {
+  triggerRemeasureLV();
 }
 
 /** Whether the lyrics on screen ship a romanization the user can switch to. */
