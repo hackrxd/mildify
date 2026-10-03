@@ -13,6 +13,7 @@ npm run tauri dev        # run the app (Vite on :1420 + debug Rust build)
 npm run check            # svelte-check: type-checks the whole frontend, including the vendored renderer
 npm run build            # frontend only, into dist/ (tauri build runs this itself)
 npm run tauri build      # installers for the current OS, into src-tauri/target/release/bundle/
+npm run tauri build -- --bundles deb   # one quick bundle for local testing (the AppImage takes longest)
 npm test                 # Vitest (jsdom): src/**/*.test.ts
 cd src-tauri && cargo test --lib
 cd src-tauri && cargo clippy
@@ -115,6 +116,11 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
 
 Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
 starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
+
+A tag run can't reuse another tag's caches, so `.github/workflows/rust-cache.yml` keeps the release builds'
+dependency cache warm on `main`: it builds each platform without bundling when `Cargo.toml`/`Cargo.lock` change,
+and every three days restores the caches so they aren't evicted. Its matrix, setup steps and `shared-key` must match
+the build job's.
 
 ## Commit conventions
 
