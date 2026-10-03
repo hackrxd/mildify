@@ -30,6 +30,8 @@ const IN_DECK_KEY = "nativify:lyricsInDeck";
 const WARMUP_KEY = "nativify:lyricsWarmup";
 const SONG_OFFSETS_KEY = "nativify:lyricsSongOffsets";
 const TEXT_SCALE_KEY = "nativify:lyricsTextScale";
+const BACKDROP_KEY = "nativify:lyricsBackdrop";
+const BACKDROP_DIM_KEY = "nativify:lyricsBackdropDim";
 export const WARMUP_DEFAULT = 20;
 /** Spotify's queue endpoint only lists the next 20 songs. */
 export const WARMUP_MAX = 20;
@@ -107,9 +109,10 @@ function loadWarmup(): number {
   }
 }
 
-function loadInDeck(): boolean {
+/** A switch that's on unless turned off. */
+function loadOn(key: string): boolean {
   try {
-    return localStorage.getItem(IN_DECK_KEY) !== "false";
+    return localStorage.getItem(key) !== "false";
   } catch {
     return true;
   }
@@ -138,13 +141,17 @@ class Lyrics {
   /** User timing nudge in ms: positive shows lyrics later, negative earlier. */
   offsetMs = $state(loadOffset());
   /** Show the current line in the player bar. */
-  inDeck = $state(loadInDeck());
+  inDeck = $state(loadOn(IN_DECK_KEY));
   /** How many upcoming songs to fetch lyrics for ahead of time; 0 turns it off. */
   warmup = $state(loadWarmup());
   /** Per-song timing nudges in ms by track id, on top of `offsetMs`, for syncs that are off. */
   songOffsets = $state.raw<Record<string, number>>(loadSongOffsets());
   /** Lyrics text size, relative to the renderer's own. */
   textScale = $state(loadTextScale());
+  /** In the lyrics view, the animated cover background fills the whole window. */
+  backdrop = $state(loadOn(BACKDROP_KEY));
+  /** With `backdrop`, the sidebar, top bar, player bar and queue darken it a little. */
+  backdropDim = $state(loadOn(BACKDROP_DIM_KEY));
   /** The most recently fetched lyrics, so they can be copied as text. */
   #loaded = $state.raw<{ trackId: string; response: unknown } | null>(null);
   #trackId = $derived(trackIdOf(player.track?.uri));
@@ -193,6 +200,16 @@ class Lyrics {
   setTextScale(scale: number) {
     this.textScale = clampScale(scale);
     persist(TEXT_SCALE_KEY, this.textScale === 1 ? null : String(this.textScale));
+  }
+
+  setBackdrop(on: boolean) {
+    this.backdrop = on;
+    persist(BACKDROP_KEY, on ? null : "false");
+  }
+
+  setBackdropDim(on: boolean) {
+    this.backdropDim = on;
+    persist(BACKDROP_DIM_KEY, on ? null : "false");
   }
 
   /** Copies the playing song's lyrics; the romanization where there is one, when asked. */
