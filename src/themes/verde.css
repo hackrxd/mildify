@@ -1,0 +1,12 @@
+/* Verde: near-black panels and a bright green accent. */
+
+:root {
+  --graphite: #121212;
+  --panel: #181818;
+  --raised: #262626;
+  --line: #2e2e2e;
+  --paper: #f5f5f5;
+  --smoke: #a7a7a7;
+  --brass: #1ed760;
+  --brass-ink: #04230f;
+}
