@@ -1,5 +1,6 @@
 <script lang="ts">
   import { player } from "../lib/player.svelte";
+  import { reveal } from "../lib/reveal";
   import { router, type Route } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { pickImage } from "../lib/util";
@@ -35,10 +36,10 @@
 
   <h2 class="heading">Playlists</h2>
   <ul class="playlists">
-    {#each session.playlists as pl, i (pl.id)}
+    {#each session.playlists as pl (pl.id)}
       {@const active = current.name === "playlist" && current.id === pl.id}
       {@const playing = player.contextUri === pl.uri}
-      <li style:--i={i}>
+      <li {@attach reveal}>
         <button class="pl" class:active onclick={() => router.go({ name: "playlist", id: pl.id })} title={pl.name}>
           {#if pickImage(pl.images, 60)}
             <img src={pickImage(pl.images, 60)} alt="" loading="lazy" />
@@ -149,10 +150,11 @@
     mask-image: linear-gradient(180deg, #000 calc(100% - 24px), transparent);
   }
 
-  /* Playlists slide in from the edge, one after another, when they load. */
-  .playlists li {
-    animation: slide-in 360ms var(--ease-out) backwards;
-    animation-delay: calc(min(var(--i), 16) * var(--stagger));
+  /* Playlists slide in from the edge rather than rise, when they load and as the list scrolls. */
+  .playlists li:global([data-reveal="in"]) {
+    animation-name: slide-in;
+    animation-duration: 380ms;
+    animation-timing-function: var(--ease-out);
   }
   @keyframes slide-in {
     from {
