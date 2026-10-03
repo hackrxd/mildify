@@ -3,7 +3,7 @@
   import { fade } from "svelte/transition";
   import * as renderer from "spicy-lyrics-renderer";
   import Icon from "../components/Icon.svelte";
-  import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from "../lib/lyrics.svelte";
+  import { BACKDROP_FADE_MS, lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from "../lib/lyrics.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
 
@@ -52,7 +52,8 @@
       off();
       ro.disconnect();
       mounted = false;
-      renderer.unmount();
+      // The app fades the backdrop out; its background has to last that long.
+      renderer.unmount(bg ? BACKDROP_FADE_MS : 0);
       lyrics.immersive = false;
     };
   });
