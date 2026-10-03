@@ -1,8 +1,9 @@
 //! User mods: CSS themes and JavaScript extensions dropped into the app config dir.
 //!
-//! The UI loads them through the `nsmod` URI scheme (`nsmod://localhost/themes/…`, or
+//! The UI loads them through the `nsmod` URI scheme (`nsmod://localhost/themes/<version>/…`, or
 //! `http://nsmod.localhost/…` on Windows), so a theme's relative `url(…)`s and an extension's
-//! relative `import`s resolve to files next to it.
+//! relative `import`s resolve to files next to it. The version segment is ignored here; the UI
+//! changes it after an edit so the webview fetches every file of the mod again, not just the entry.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -60,7 +61,8 @@ pub struct ModInfo {
     pub description: Option<String>,
     pub author: Option<String>,
     pub version: Option<String>,
-    /// Entry file's modification time in ms since the epoch; changes when it's edited.
+    /// Newest modification time, in ms since the epoch, of the entry file or, for a folder mod,
+    /// of any file in the folder; changes when any of them is edited.
     pub modified: u64,
 }
 
@@ -137,32 +139,55 @@ pub fn scan(dir: &Path, kind: Kind) -> Vec<ModInfo> {
                 return None;
             }
             let path = entry.path();
-            let (file, entry) = if path.is_dir() {
+            if path.is_dir() {
                 let name = kind.folder_entries().iter().find(|e| path.join(e).is_file())?;
-                (path.join(name), format!("{id}/{name}"))
+                let modified = newest_mtime(&path, 0);
+                Some(info(id.clone(), format!("{id}/{name}"), &path.join(name), modified))
             } else {
                 let ext = path.extension()?.to_str()?.to_ascii_lowercase();
                 if !kind.file_exts().contains(&ext.as_str()) {
                     return None;
                 }
-                (path.clone(), id.clone())
-            };
-            Some(info(id, entry, &file))
+                let modified = mtime(&path);
+                Some(info(id.clone(), id, &path, modified))
+            }
         })
         .collect();
     mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.id.cmp(&b.id)));
     mods
 }
 
-fn info(id: String, entry: String, file: &Path) -> ModInfo {
-    // Metadata lives at the top, so a few KB is plenty and big bundles aren't read whole.
-    let head = fs::read(file).map(|b| String::from_utf8_lossy(&b[..b.len().min(8192)]).into_owned());
-    let meta = head.map(|s| parse_meta(&s)).unwrap_or_default();
-    let modified = fs::metadata(file)
+fn mtime(path: &Path) -> u64 {
+    fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_millis() as u64);
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Newest file modification time under `dir`, skipping hidden entries. Stops a few folders deep,
+/// so a mod that bundles `node_modules` isn't walked whole on every focus.
+fn newest_mtime(dir: &Path, depth: usize) -> u64 {
+    let Ok(read) = fs::read_dir(dir) else {
+        return 0;
+    };
+    read.flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .map(|e| {
+            let path = e.path();
+            match e.file_type() {
+                Ok(t) if t.is_dir() => if depth < 4 { newest_mtime(&path, depth + 1) } else { 0 },
+                _ => mtime(&path),
+            }
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn info(id: String, entry: String, file: &Path, modified: u64) -> ModInfo {
+    // Metadata lives at the top, so a few KB is plenty and big bundles aren't read whole.
+    let head = fs::read(file).map(|b| String::from_utf8_lossy(&b[..b.len().min(8192)]).into_owned());
+    let meta = head.map(|s| parse_meta(&s)).unwrap_or_default();
     let name = meta.name.unwrap_or_else(|| {
         let stem = Path::new(&id).file_stem().and_then(|s| s.to_str()).unwrap_or(&id);
         stem.replace(['-', '_'], " ")
@@ -178,11 +203,15 @@ fn info(id: String, entry: String, file: &Path) -> ModInfo {
     }
 }
 
-/// Maps a request path (`/themes/midnight/bg.png`) to a file under the matching mods folder.
-/// Anything that could step outside it (`..`, absolute or prefixed parts) is refused.
+/// Maps a request path (`/themes/<version>/midnight/bg.png`) to a file under the matching mods
+/// folder. Anything that could step outside it (`..`, absolute or prefixed parts) is refused.
 pub fn resolve(themes_dir: &Path, extensions_dir: &Path, request_path: &str) -> Option<PathBuf> {
     let decoded = percent_decode(request_path.trim_start_matches('/'))?;
     let (top, rest) = decoded.split_once('/')?;
+    let (version, rest) = rest.split_once('/')?;
+    if version.is_empty() {
+        return None;
+    }
     let root = match top {
         "themes" => themes_dir,
         "extensions" => extensions_dir,
@@ -315,6 +344,7 @@ mod tests {
         s.write("themes/midnight-blue.css", ":root{}");
         s.write("themes/Glass/theme.css", "/* @name Glass */");
         s.write("themes/Glass/bg.png", "");
+        let glass_entry = mtime(&s.themes().join("Glass/theme.css"));
         s.write("themes/no-entry/readme.md", "");
         s.write("themes/.hidden.css", "");
         s.write("themes/notes.txt", "");
@@ -326,10 +356,33 @@ mod tests {
         let ids: Vec<_> = themes.iter().map(|m| (m.id.as_str(), m.entry.as_str(), m.name.as_str())).collect();
         assert_eq!(ids, [("Glass", "Glass/theme.css", "Glass"), ("midnight-blue.css", "midnight-blue.css", "midnight blue")]);
         assert!(themes.iter().all(|m| m.modified > 0));
+        assert!(themes[0].modified >= glass_entry, "a folder's version covers every file in it");
 
         let exts = scan(&s.extensions(), Kind::Extension);
         let ids: Vec<_> = exts.iter().map(|m| (m.id.as_str(), m.entry.as_str(), m.version.as_deref())).collect();
         assert_eq!(ids, [("bundle", "bundle/index.mjs", None), ("clock.JS", "clock.JS", Some("2"))]);
+    }
+
+    #[test]
+    fn a_folder_mod_changes_version_when_any_file_in_it_does() {
+        let s = Scratch::new();
+        s.write("extensions/rp/index.js", "");
+        s.write("extensions/rp/lib/format.js", "");
+        s.write("extensions/rp/.git/HEAD", "");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        let newer = old + std::time::Duration::from_secs(60);
+        let set = |rel: &str, t| fs::File::options().write(true).open(s.0.join(rel)).unwrap().set_modified(t).unwrap();
+        set("extensions/rp/index.js", old);
+        set("extensions/rp/lib/format.js", old);
+        let before = scan(&s.extensions(), Kind::Extension)[0].modified;
+
+        set("extensions/rp/lib/format.js", newer);
+        let after = scan(&s.extensions(), Kind::Extension)[0].modified;
+        assert_eq!(after - before, 60_000);
+
+        // Hidden files (an editor's swap file, .git) don't count.
+        set("extensions/rp/.git/HEAD", newer + std::time::Duration::from_secs(60));
+        assert_eq!(scan(&s.extensions(), Kind::Extension)[0].modified, after);
     }
 
     #[test]
@@ -346,21 +399,25 @@ mod tests {
         s.write("secret.txt", "");
         let r = |p: &str| resolve(&s.themes(), &s.extensions(), p);
 
-        assert_eq!(r("/themes/Glass/theme.css"), Some(s.themes().join("Glass/theme.css").canonicalize().unwrap()));
-        assert!(r("/themes/My%20Theme.css").is_some());
-        assert!(r("/extensions/clock.js").is_some());
+        assert_eq!(r("/themes/5/Glass/theme.css"), Some(s.themes().join("Glass/theme.css").canonicalize().unwrap()));
+        assert!(r("/themes/5/My%20Theme.css").is_some());
+        assert!(r("/extensions/1/clock.js").is_some());
+        assert_eq!(r("/extensions/1/clock.js"), r("/extensions/2/clock.js"), "the version is ignored");
 
         for bad in [
+            "/themes/1/../secret.txt",
             "/themes/../secret.txt",
-            "/themes/%2E%2E/secret.txt",
-            "/themes/Glass/../../secret.txt",
-            "/themes/..%5Csecret.txt",
-            "/themes//etc/passwd",
-            "/themes/",
-            "/themes/Glass",
-            "/other/clock.js",
-            "/extensions/missing.js",
-            "/themes/%zz.css",
+            "/themes/1/%2E%2E/secret.txt",
+            "/themes/1/Glass/../../secret.txt",
+            "/themes/1/..%5Csecret.txt",
+            "/themes/1//etc/passwd",
+            "/themes//Glass/theme.css",
+            "/themes/1/",
+            "/themes/1/Glass",
+            "/themes/Glass/theme.css",
+            "/other/1/clock.js",
+            "/extensions/1/missing.js",
+            "/themes/1/%zz.css",
         ] {
             assert_eq!(r(bad), None, "{bad}");
         }
@@ -372,7 +429,7 @@ mod tests {
         let s = Scratch::new();
         s.write("secret.txt", "");
         std::os::unix::fs::symlink(s.0.join("secret.txt"), s.themes().join("link.css")).unwrap();
-        assert_eq!(resolve(&s.themes(), &s.extensions(), "/themes/link.css"), None);
+        assert_eq!(resolve(&s.themes(), &s.extensions(), "/themes/1/link.css"), None);
     }
 
     #[test]
@@ -381,14 +438,14 @@ mod tests {
         s.write("extensions/clock.js", "export default () => {}");
         let get = |uri: &str| serve(&s.themes(), &s.extensions(), &Request::get(uri).body(Vec::new()).unwrap());
 
-        let ok = get("nsmod://localhost/extensions/clock.js?v=123");
+        let ok = get("nsmod://localhost/extensions/123/clock.js");
         assert_eq!(ok.status(), StatusCode::OK);
         assert_eq!(ok.headers()[header::CONTENT_TYPE], "text/javascript; charset=utf-8");
         assert_eq!(ok.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(ok.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
         assert_eq!(ok.body(), b"export default () => {}");
 
-        let missing = get("http://nsmod.localhost/extensions/nope.js");
+        let missing = get("http://nsmod.localhost/extensions/1/nope.js");
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
         assert!(missing.body().is_empty());
     }
