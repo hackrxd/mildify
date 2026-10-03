@@ -5,7 +5,7 @@
 // handling, card/PiP modes, Tippy view controls). View controls are rendered by the
 // host; the NowBar keeps upstream's markup with a simplified updater. The dynamic
 // background can be painted into a backdrop element outside the page, so the host
-// can put it behind its whole window.
+// can put it behind its whole window, and outlive the page while the host fades it out.
 
 // Imported first so the binding exists before the import cycle below evaluates.
 import { PageContainer, SetPageContainer } from "./PageState.ts";
@@ -22,6 +22,7 @@ import {
 } from "../../utils/Scrolling/ScrollToActiveLine.ts";
 import { ClearScrollSimplebar, ScrollSimplebar } from "../../utils/Scrolling/Simplebar/ScrollSimplebar.ts";
 import ApplyDynamicBackground, { KawarpMap } from "../DynamicBG/dynamicBackground.ts";
+import type Kawarp from "@kawarp/core";
 import {
   $lineHoverBackground,
   $lyricsContainerExists,
@@ -48,6 +49,17 @@ export let LyricsApplied = false;
 let PageHost: HTMLElement | null = null;
 /** Where the dynamic background goes instead of the ContentBox, if the host gave one. */
 let BackgroundHost: HTMLElement | null = null;
+/** A backdrop's background still running after its page closed, while the host fades it out. */
+let Lingering: { host: HTMLElement; kawarp: Kawarp | undefined; timer: ReturnType<typeof setTimeout> } | null =
+  null;
+
+function EndLinger() {
+  if (!Lingering) return;
+  clearTimeout(Lingering.timer);
+  Lingering.kawarp?.dispose();
+  Lingering.host.querySelectorAll(".spicy-dynamic-bg").forEach((el) => el.remove());
+  Lingering = null;
+}
 
 export const GetPageRoot = () => PageHost;
 
@@ -73,6 +85,12 @@ async function OpenPage(AppendTo: HTMLElement | undefined = undefined, Backdrop:
   }
   PageHost = AppendTo;
   BackgroundHost = Backdrop;
+  // Reopened while the last one fades out: keep that background rather than start over.
+  if (Lingering && Lingering.host === Backdrop) {
+    clearTimeout(Lingering.timer);
+    if (Lingering.kawarp) KawarpMap.set("lpagebg", Lingering.kawarp);
+    Lingering = null;
+  }
 
   const elem = document.createElement("div");
   elem.id = "SpicyLyricsPage";
@@ -144,16 +162,23 @@ async function OpenPage(AppendTo: HTMLElement | undefined = undefined, Backdrop:
   Global.Event.evoke("page:open", { cardMode: false });
 }
 
-async function DestroyPage() {
+/** With a backdrop, its background keeps running for `LingerMs` so the host can fade it out. */
+async function DestroyPage(LingerMs: number = 0) {
   if (!PageView.IsOpened) return;
   PageView.IsOpened = false;
 
   cleanupApplyLyricsAbortController();
 
-  KawarpMap.get("lpagebg")?.dispose();
+  const kawarp = KawarpMap.get("lpagebg");
   KawarpMap.delete("lpagebg");
   // A backdrop outlives the page; the page's own ContentBox goes with it below.
-  BackgroundHost?.querySelectorAll(".spicy-dynamic-bg").forEach((el) => el.remove());
+  if (BackgroundHost && LingerMs > 0) {
+    EndLinger();
+    Lingering = { host: BackgroundHost, kawarp, timer: setTimeout(EndLinger, LingerMs) };
+  } else {
+    kawarp?.dispose();
+    BackgroundHost?.querySelectorAll(".spicy-dynamic-bg").forEach((el) => el.remove());
+  }
   BackgroundHost = null;
   ResetLastLine();
   CleanupScrollEvents();

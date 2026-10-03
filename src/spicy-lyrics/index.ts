@@ -59,8 +59,9 @@ export async function mount(host: HTMLElement, backdrop: HTMLElement | null = nu
   await PageView.Open(host, backdrop);
 }
 
-export async function unmount() {
-  await PageView.Destroy();
+/** With a backdrop, its background keeps running for `lingerMs` so the host can fade it out. */
+export async function unmount(lingerMs = 0) {
+  await PageView.Destroy(lingerMs);
 }
 
 /** Tell the renderer the track changed (refreshes lyrics, NowBar and background). */

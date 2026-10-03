@@ -26,7 +26,8 @@ declare module "spicy-lyrics-renderer" {
   export function setHost(impl: Host): void;
   /** With a `backdrop`, the cover background is painted there instead of behind the lyrics. */
   export function mount(host: HTMLElement, backdrop?: HTMLElement | null): Promise<void>;
-  export function unmount(): Promise<void>;
+  /** With a backdrop, its background keeps running for `lingerMs` so the host can fade it out. */
+  export function unmount(lingerMs?: number): Promise<void>;
   export function songChanged(): void;
   export function setNowBar(open: boolean): void;
   export function isNowBarOpen(): boolean;
