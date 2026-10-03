@@ -155,6 +155,34 @@ describe("theme", () => {
     expect(themeLink()).toBeNull();
     expect(mods.safeMode).toBe(true);
   });
+
+  it("links a built-in theme from the app's own files", async () => {
+    await boot();
+    mods.setTheme("builtin:tide");
+    expect(themeLink()?.getAttribute("href")).toMatch(/\/themes\/tide\.css$/);
+    expect(mods.activeTheme?.name).toBe("Tide");
+    expect(localStorage.getItem("nativify:theme")).toBe("builtin:tide");
+  });
+
+  it("keeps a built-in theme out of safe mode too", async () => {
+    localStorage.setItem("nativify:theme", "builtin:tide");
+    list.safe_mode = true;
+    await boot();
+    expect(themeLink()).toBeNull();
+  });
+});
+
+describe("built-in themes", () => {
+  it("each has a stylesheet and a name", async () => {
+    const { builtinThemes } = await import("../themes");
+    expect(builtinThemes.length).toBeGreaterThan(0);
+    for (const t of builtinThemes) {
+      expect(t.href, t.id).toBeTruthy();
+      expect(t.id).toMatch(/^builtin:/);
+      expect(t.name).toBeTruthy();
+    }
+    expect(new Set(builtinThemes.map((t) => t.id)).size).toBe(builtinThemes.length);
+  });
 });
 
 describe("quick CSS", () => {
