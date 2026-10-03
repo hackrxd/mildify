@@ -237,8 +237,19 @@
     backdrop-filter: blur(12px);
   }
 
+  /* Each page settles in as it opens. The lyrics stage only fades: it measures its own layout. */
   .view {
     position: relative;
+    animation: view-in 300ms var(--ease-out) backwards;
+  }
+  main.fill .view {
+    animation-name: fade-in;
+  }
+  @keyframes view-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
   }
 
   .banner {
@@ -251,6 +262,13 @@
     border-radius: 8px;
     background: color-mix(in srgb, var(--brass) 16%, var(--panel));
     font-size: var(--t-md);
+    animation: drop-in 360ms var(--ease-out) backwards;
+  }
+  @keyframes drop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
   }
 
   .deck-slot {
