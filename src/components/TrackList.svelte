@@ -10,6 +10,7 @@
 <script lang="ts">
   import { liked } from "../lib/liked.svelte";
   import { menu } from "../lib/menu.svelte";
+  import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
   import { reveal } from "../lib/reveal";
   import { router } from "../lib/router.svelte";
@@ -59,6 +60,7 @@
         label: t.artists.length > 1 ? `Go to ${a.name}` : "Go to artist",
         action: () => router.go({ name: "artist", id: a.id }),
       })),
+      ...mods.trackMenu(t),
     ]);
   }
 </script>

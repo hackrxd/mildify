@@ -36,6 +36,7 @@
     romanize: "M3.5 18 8 6l4.5 12M5.2 13.5h5.6M15 10.5c.6-.7 1.5-1 2.5-1 1.7 0 2.5 1 2.5 2.6V18M20 13.8c-3.5 0-5.3.7-5.3 2.3 0 1.1.8 1.9 2.1 1.9 1.6 0 3.2-1.2 3.2-3",
     expand: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
     collapse: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
+    puzzle: "M5 7h3.5a2 2 0 1 1 4 0H16v3.5a2 2 0 1 1 0 4V18h-3.5a2 2 0 1 0-4 0H5v-3.5a2 2 0 1 0 0-4z",
   } as const;
 
   const FILLED = new Set(["play", "pause", "next", "prev"]);

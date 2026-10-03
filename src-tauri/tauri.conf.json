@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost https://*.scdn.co https://*.spotifycdn.com"
+      "csp": "default-src 'self'; script-src 'self' nsmod: http://nsmod.localhost; img-src 'self' data: blob: https: nsmod: http://nsmod.localhost; style-src 'self' 'unsafe-inline' nsmod: http://nsmod.localhost; font-src 'self' data: nsmod: http://nsmod.localhost; connect-src ipc: http://ipc.localhost https://*.scdn.co https://*.spotifycdn.com nsmod: http://nsmod.localhost"
     }
   },
   "bundle": {

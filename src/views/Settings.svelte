@@ -1,6 +1,8 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
+  import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
   import { plural } from "../lib/util";
@@ -41,6 +43,14 @@
     // Show what was kept: clamped, rounded, or the old value for nonsense.
     input.value = String(lyrics.warmup);
   }
+
+  const MODS_GUIDE = "https://github.com/hackrxd/nativespotify/blob/main/docs/mods.md";
+
+  // Pick up files added since the app started.
+  mods.refresh();
+  const themes = $derived(mods.list?.themes ?? []);
+  const extensions = $derived(mods.list?.extensions ?? []);
+  const needsReload = $derived(Object.values(mods.states).includes("restart"));
 
   const scales = Array.from(
     { length: Math.round((TEXT_SCALE_MAX - TEXT_SCALE_MIN) / TEXT_SCALE_STEP) + 1 },
@@ -233,6 +243,101 @@
         {/each}
       </select>
     </label>
+  </section>
+
+  <section>
+    <h2>Themes and extensions</h2>
+
+    {#if mods.safeMode}
+      <div class="status">
+        <span class="dot state-error"></span>
+        <div><p>Safe mode: no theme, Quick CSS or extension is loaded. Start the app normally to bring them back.</p></div>
+      </div>
+    {/if}
+
+    <label class="row">
+      <span>
+        <span class="label">Theme</span>
+        <span class="muted small">
+          {#if mods.activeTheme}
+            {mods.activeTheme.description ?? "A theme from your themes folder."}
+            {#if mods.activeTheme.author}{" "}By {mods.activeTheme.author}.{/if}
+          {:else}
+            CSS files in your themes folder. Edits show up when you switch back to the app.
+          {/if}
+        </span>
+      </span>
+      <select class="field" value={mods.theme ?? ""} onchange={(e) => mods.setTheme(e.currentTarget.value || null)}>
+        <option value="">Default</option>
+        {#each themes as theme (theme.id)}
+          <option value={theme.id}>{theme.name}</option>
+        {/each}
+        {#if mods.theme && !mods.activeTheme}
+          <option value={mods.theme} disabled>{mods.theme} (missing)</option>
+        {/if}
+      </select>
+    </label>
+
+    <label class="row stacked">
+      <span>
+        <span class="label">Quick CSS</span>
+        <span class="muted small">Small tweaks on top of the theme, applied as you type.</span>
+      </span>
+      <textarea
+        class="field code"
+        rows="5"
+        spellcheck="false"
+        placeholder={":root {\n  --brass: #7aa2f7;\n}"}
+        value={mods.quickCss}
+        oninput={(e) => mods.setQuickCss(e.currentTarget.value)}
+      ></textarea>
+    </label>
+
+    {#each extensions as ext (ext.id)}
+      {@const state = mods.states[ext.id] ?? "off"}
+      <label class="row">
+        <span>
+          <span class="label">{ext.name}{#if ext.version}<span class="muted small version">{ext.version}</span>{/if}</span>
+          {#if ext.description || ext.author}
+            <span class="muted small">{ext.description ?? ""}{#if ext.author}{" "}By {ext.author}.{/if}</span>
+          {/if}
+          {#if state === "error"}
+            <span class="small error">Couldn't start: {mods.errors[ext.id]}</span>
+          {:else if state === "restart"}
+            <span class="small">Still active until the window reloads.</span>
+          {/if}
+        </span>
+        <input
+          type="checkbox"
+          class="switch"
+          checked={mods.isEnabled(ext.id)}
+          disabled={mods.safeMode}
+          onchange={(e) => mods.setEnabled(ext.id, e.currentTarget.checked)}
+        />
+      </label>
+    {:else}
+      <div class="row">
+        <span>
+          <span class="label">No extensions yet</span>
+          <span class="muted small">Put .js files (or folders with an index.js) in your extensions folder.</span>
+        </span>
+      </div>
+    {/each}
+
+    <div class="row">
+      <span class="muted small">
+        Extensions run with full access to the app and your Spotify account. Only turn on ones you trust.
+        <button class="link" onclick={() => openUrl(MODS_GUIDE).catch(() => {})}>How to make themes and extensions</button>
+      </span>
+    </div>
+    <div class="actions">
+      <button class="btn quiet" onclick={() => mods.openFolder("themes")}>Themes folder</button>
+      <button class="btn quiet" onclick={() => mods.openFolder("extensions")}>Extensions folder</button>
+      <button class="btn quiet" onclick={() => mods.refresh(true)}><Icon name="refresh" size={16} /> Reload</button>
+      {#if needsReload}
+        <button class="btn primary" onclick={() => location.reload()}>Reload window</button>
+      {/if}
+    </div>
   </section>
 
   <section>
@@ -430,6 +535,44 @@
   }
   .login .field {
     width: 200px;
+  }
+  .stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .row .code {
+    width: 100%;
+    height: auto;
+    padding: 10px 12px;
+    color: inherit;
+    resize: vertical;
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+    font-size: var(--t-sm);
+    user-select: text;
+  }
+  .version {
+    margin-left: 8px;
+    font-weight: 400;
+  }
+  .error {
+    color: var(--danger);
+  }
+  .link {
+    display: block;
+    margin-top: 4px;
+    padding: 0;
+    color: var(--brass);
+    font-size: inherit;
+  }
+  .link:hover {
+    text-decoration: underline;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 12px;
   }
   .about p {
     max-width: 70ch;

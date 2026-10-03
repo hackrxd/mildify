@@ -3,6 +3,7 @@ mod config;
 mod device;
 mod error;
 mod lyrics;
+mod mods;
 mod webapi;
 #[cfg(target_os = "linux")]
 mod webkit;
@@ -26,6 +27,8 @@ struct AppState {
     webapi: WebApi,
     device: Arc<ConnectDevice>,
     lyrics: LyricsClient,
+    /// Started with `--safe-mode`: no theme or extension loads.
+    safe_mode: bool,
     /// Cancels the browser sign-in currently waiting for its redirect, if any.
     sign_in_cancel: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -219,6 +222,32 @@ async fn lyrics_server_logout(state: State<'_, AppState>) -> Result<lyrics::Serv
     Ok(state.lyrics.status().await)
 }
 
+/// Installed themes and extensions, re-read from disk on every call.
+#[tauri::command]
+fn list_mods(state: State<'_, AppState>) -> mods::ModList {
+    let paths = &state.paths;
+    mods::ModList {
+        themes_dir: paths.themes_dir.clone(),
+        extensions_dir: paths.extensions_dir.clone(),
+        base_url: mods::base_url(),
+        safe_mode: state.safe_mode,
+        themes: mods::scan(&paths.themes_dir, mods::Kind::Theme),
+        extensions: mods::scan(&paths.extensions_dir, mods::Kind::Extension),
+    }
+}
+
+/// Opens the themes or extensions folder in the file manager, creating it first.
+#[tauri::command]
+fn open_mods_folder(state: State<'_, AppState>, kind: String) -> Result<()> {
+    let dir = match kind.as_str() {
+        "themes" => &state.paths.themes_dir,
+        "extensions" => &state.paths.extensions_dir,
+        _ => return Err(AppError::Other(format!("unknown mods folder {kind}"))),
+    };
+    std::fs::create_dir_all(dir)?;
+    tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|e| AppError::Other(e.to_string()))
+}
+
 #[tauri::command]
 fn device_command(state: State<'_, AppState>, command: DeviceCommand) -> Result<()> {
     state.device.command(command)
@@ -240,6 +269,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .register_uri_scheme_protocol(mods::SCHEME, |ctx, request| {
+            let state = ctx.app_handle().state::<AppState>();
+            mods::serve(&state.paths.themes_dir, &state.paths.extensions_dir, &request)
+        })
         .setup(|app| {
             let path = app.path();
             let paths = Paths::new(path.app_config_dir()?, path.app_data_dir()?, path.app_cache_dir()?);
@@ -257,6 +290,7 @@ pub fn run() {
                 webapi,
                 device,
                 lyrics,
+                safe_mode: mods::safe_mode(std::env::args()),
                 sign_in_cancel: Mutex::new(None),
             });
 
@@ -288,6 +322,8 @@ pub fn run() {
             lyrics_server_logout,
             device_command,
             restart_device,
+            list_mods,
+            open_mods_folder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

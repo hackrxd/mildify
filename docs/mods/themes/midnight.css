@@ -1,0 +1,25 @@
+/**
+ * @name Midnight
+ * @description Deep blue panels with a cool cyan accent instead of brass.
+ * @author Native Spotify
+ * @version 1.0
+ */
+
+:root {
+  --graphite: #0f1420;
+  --panel: #141b2b;
+  --raised: #1d2740;
+  --line: #26314d;
+  --paper: #e6ecf7;
+  --smoke: #8a97b3;
+  --brass: #6fd3f7;
+  --brass-ink: #04202b;
+}
+
+/* Rounder buttons and cover art. */
+.btn {
+  border-radius: 10px;
+}
+img {
+  border-radius: 6px;
+}
