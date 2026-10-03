@@ -108,6 +108,10 @@ require.
 When the window is wide enough, the player bar also shows the current line next to the song title
 (hover it for the credit, click it for the lyrics view). Turn it off under Settings → Lyrics.
 
+The animated cover background fills the whole window while the lyrics view is open, with the
+sidebar, top bar, player bar and queue dimming it a little. Settings → Lyrics turns the dimming off
+(the panels go see-through), or keeps the background behind the lyrics only.
+
 The options button in the lyrics view (the sliders) holds:
 
 - **This song's timing**: when one song's sync is off, nudge it earlier or later. It's remembered

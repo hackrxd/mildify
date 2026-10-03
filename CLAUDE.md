@@ -60,7 +60,9 @@ service (`lyrics.rs`; the URL is fixed in the backend), which may require its ow
 The lyrics clock is shifted by `lyrics.totalOffsetMs`: the global offset plus the playing song's own nudge
 (`songOffsets`, by track id). Anything that times lines against `player.positionNow()` must subtract it, as the
 host and `DeckLyric` do. The text size scales the renderer's `--DefaultLyricsSize` from `Lyrics.svelte`'s styles,
-not from the vendored CSS.
+not from the vendored CSS. The renderer's Kawarp background normally sits in its `.ContentBox`; with
+`lyrics.backdrop` on, `mount(host, backdrop)` paints it into `App.svelte`'s fixed `.backdrop` behind the whole shell,
+whose panels then turn transparent (or tinted, `lyrics.backdropDim`).
 
 **Themes and extensions.** `mods.rs` lists `themes/` and `extensions/` in the app config dir and serves them
 over the `nsmod` URI scheme (`nsmod://localhost/…`, `http://nsmod.localhost/…` on Windows; allowed in the CSP),
