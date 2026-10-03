@@ -1,7 +1,7 @@
 /**
  * @name Recently played
  * @description A sidebar page with the last 20 songs you played. Double-click one to play it.
- * @author Native Spotify
+ * @author Mildify
  * @version 1.0
  */
 

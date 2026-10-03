@@ -1,6 +1,6 @@
 # Themes and extensions
 
-Native Spotify loads CSS themes and JavaScript extensions from two folders in its config directory:
+Mildify loads CSS themes and JavaScript extensions from two folders in its config directory:
 
 | OS | Folder |
 | --- | --- |
@@ -134,7 +134,7 @@ files next to the extension (`fetch(new URL("./data.json", ns.extension.url))`).
 If a theme or extension leaves the app unusable, start it once with `--safe-mode`: no theme,
 Quick CSS or extension loads, and you can turn the culprit off or clear Quick CSS in Settings. Or just delete it from its folder.
 
-On macOS: `open -a "Native Spotify" --args --safe-mode`. On Linux, run the app from a terminal with
+On macOS: `open -a "Mildify" --args --safe-mode`. On Linux, run the app from a terminal with
 the flag. On Windows, add it to the end of the shortcut's Target (right-click the shortcut →
 Properties).
 

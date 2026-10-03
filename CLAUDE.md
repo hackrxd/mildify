@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Native Spotify is a desktop Spotify client: Tauri 2 (Rust) backend, Svelte 5 + TypeScript frontend. It browses
+Mildify is a desktop Spotify client: Tauri 2 (Rust) backend, Svelte 5 + TypeScript frontend. It browses
 through the Spotify Web API and plays through an embedded librespot Spotify Connect device.
 
 ## Commands
@@ -54,7 +54,7 @@ per-frame for lyrics.
 **Lyrics.** `src/spicy-lyrics/` is a vendored port of the Spicy Lyrics renderer (AGPL-3.0), aliased as the
 `spicy-lyrics-renderer` module in `vite.config.ts`. The app plugs into it through `setHost()`
 (`compat/host.ts`, implemented in `src/lib/lyrics.svelte.ts`). The rendering core is kept verbatim so it can be
-diffed against upstream. Any upstream file you modify needs a `Modified for Native Spotify` note at the top
+diffed against upstream. Any upstream file you modify needs a `Modified for Mildify` note at the top
 (AGPL §5(a)) and an entry in `src/spicy-lyrics/README.md`. Lyrics are fetched only from the Nativify lyrics
 service (`lyrics.rs`; the URL is fixed in the backend), which may require its own account login.
 The lyrics clock is shifted by `lyrics.totalOffsetMs`: the global offset plus the playing song's own nudge

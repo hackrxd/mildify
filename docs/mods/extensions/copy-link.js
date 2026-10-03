@@ -1,7 +1,7 @@
 /**
  * @name Copy song link
  * @description Adds "Copy song link" to the track menu.
- * @author Native Spotify
+ * @author Mildify
  * @version 1.0
  */
 

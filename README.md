@@ -1,4 +1,4 @@
-# Native Spotify
+# Mildify
 
 A custom desktop Spotify client. It browses your music through the **Spotify Web API** and plays it
 locally through **Spotify Connect**, using an embedded [librespot](https://github.com/librespot-org/librespot)
@@ -9,7 +9,7 @@ Built with Tauri 2 (Rust) and Svelte 5.
 ## How it works
 
 ```
-┌──────────────────────────── Native Spotify ─────────────────────────────┐
+┌──────────────────────────────── Mildify ────────────────────────────────┐
 │  Svelte UI ──invoke──▶ Rust backend                                     │
 │                         ├─ webapi.rs   Web API proxy (your client ID,   │
 │                         │              token never reaches the UI)      │
@@ -22,7 +22,7 @@ Built with Tauri 2 (Rust) and Svelte 5.
 
 - **Selection and metadata**: the UI calls the Web API (through the backend) for search, albums,
   playlists and your library, and starts playback with `PUT /me/player/play?device_id=…`.
-- **Playback**: the backend runs librespot in-process as a Connect device named "Native Spotify".
+- **Playback**: the backend runs librespot in-process as a Connect device named "Mildify".
   Spotify streams to it like any other speaker. When it's the active device, play/pause/seek/volume
   go straight to it without a network round-trip, and its player events update the UI live.
 - You can also pick any other Connect device (phone, speaker, desktop app) from the device menu
@@ -70,7 +70,7 @@ Tauri can't build for another operating system, so the GitHub Actions workflow i
 Pushing a `v*` tag builds the installers and publishes a release with them attached once the tests
 and all four builds pass; starting the workflow by hand (Actions → build → Run workflow) builds
 them for any branch as workflow artifacts. The macOS builds aren't
-signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Native Spotify.app"`).
+signed, so the first launch needs right-click → Open (or `xattr -cr "/Applications/Mildify.app"`).
 
 ## Updates
 
