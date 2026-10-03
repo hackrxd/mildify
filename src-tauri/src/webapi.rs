@@ -285,7 +285,7 @@ mod tests {
 
     fn scratch() -> PathBuf {
         std::env::temp_dir()
-            .join(format!("nativespotify-test-{}", crate::config::random_hex(8)))
+            .join(format!("mildify-test-{}", crate::config::random_hex(8)))
             .join("webapi_token.json")
     }
 

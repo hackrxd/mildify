@@ -310,7 +310,7 @@ pub fn run() {
             let paths = Paths::new(path.app_config_dir()?, path.app_data_dir()?, path.app_cache_dir()?);
             let config = Config::load(&paths.config_file);
             let http = reqwest::Client::builder()
-                .user_agent(concat!("NativeSpotify/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
                 .build()?;
             let webapi = WebApi::new(http.clone(), paths.token_file.clone());
             let device = Arc::new(ConnectDevice::new(paths.clone(), http.clone(), &config));

@@ -292,7 +292,7 @@ mod tests {
 
     impl Scratch {
         fn new() -> Self {
-            let dir = std::env::temp_dir().join(format!("nativespotify-mods-{}", random_hex(8)));
+            let dir = std::env::temp_dir().join(format!("mildify-mods-{}", random_hex(8)));
             fs::create_dir_all(dir.join("themes")).unwrap();
             fs::create_dir_all(dir.join("extensions")).unwrap();
             Self(dir)
