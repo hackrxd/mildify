@@ -25,7 +25,7 @@ rewritten (same path and exports, new implementation) to run on Native Spotify's
 | Module | Replacement |
 | --- | --- |
 | `src/components/Global/SpotifyPlayer.ts` | Backed by Native Spotify's player store |
-| `src/components/Pages/PageView.ts` | Builds the same page DOM inside the app's Lyrics view; can paint the dynamic background into a backdrop element the app puts behind its whole window |
+| `src/components/Pages/PageView.ts` | Builds the same page DOM inside the app's Lyrics view; can paint the dynamic background into a backdrop element the app puts behind its whole window, and keep it running after the page closes while the app fades it out |
 | `src/components/Utils/{Fullscreen,CompactMode,PopupLyrics}.ts` | Minimal state only; the app has no PiP/NPV card |
 | `src/utils/Lyrics/fetchLyrics.ts` | Fetches through the Rust backend from the Nativify lyrics service, which proxies the public Spicy Lyrics v1 API |
 | `src/utils/Lyrics/ProcessLyrics.ts` | Empty-line pruning only (see below) |
