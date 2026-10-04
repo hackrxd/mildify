@@ -513,6 +513,75 @@ describe("between sets", () => {
     expect(backend.device).toHaveBeenLastCalledWith({ action: "play" });
   });
 
+  it("starts talking once the finishing song's last moments are heard", async () => {
+    dj.setOverEnd(false);
+    const first = await started();
+    const next = dj.upNext!;
+    await lastSong(first);
+    // The silence at the end is timed 1.2 s ahead: heard 2 s after this.
+    player.pos = DURATION - 2000;
+    await tick();
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    // Spotify moves on while the song's last half second is still to be heard.
+    voice.played = [];
+    await playing(next.songs[0].uri, 0);
+    expect(backend.device).toHaveBeenCalledWith({ action: "pause" });
+    expect(voice.played).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(voice.played).toHaveLength(1);
+    expect(dj.onAir?.name).toBe(next.name);
+  });
+
+  it("doesn't talk over a song that's paused, wherever it's moved to", async () => {
+    const first = await started();
+    await lastSong(first);
+    const talkAt = DURATION - (speechMs - (3000 - timing.VOCAL_GAP_MS));
+    player.isPlaying = false;
+    player.pos = talkAt + 500;
+    await tick();
+    await tick();
+    expect(dj.speaking).toBe(false);
+    expect(dj.onAir).toBeNull();
+    player.isPlaying = true;
+    await tick();
+    expect(dj.speaking).toBe(true);
+  });
+
+  it("times the silence at a song's end again when the song pauses or moves a little", async () => {
+    dj.setOverEnd(false);
+    const first = await started();
+    await lastSong(first);
+    player.pos = DURATION - 2000;
+    await tick();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    // Paused from the player bar, with no DJ item up yet, and played on a while later.
+    player.isPlaying = false;
+    const at = player.positionNow();
+    await vi.advanceTimersByTimeAsync(5000);
+    backend.djDuck.mockClear();
+    dj.togglePause();
+    expect(player.togglePlay).toHaveBeenCalled();
+    expect(backend.djDuck.mock.calls).toEqual([
+      [1, 0, 0],
+      [0, Math.round(DURATION - at - mod.MUTE_RAMP_MS), mod.MUTE_RAMP_MS],
+    ]);
+    player.isPlaying = true;
+    backend.djDuck.mockClear();
+    await tick();
+    expect(backend.djDuck).not.toHaveBeenCalled();
+    // A step back too small to plan again: the silence moves with the song.
+    player.pos = player.positionNow() - 500;
+    await tick();
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    // Timed from where the song was at that tick, at most a tick ago.
+    const left = DURATION - player.positionNow() - mod.MUTE_RAMP_MS;
+    const [, delay] = backend.djDuck.mock.lastCall as unknown as number[];
+    expect(delay).toBeGreaterThanOrEqual(left - 5);
+    expect(delay).toBeLessThanOrEqual(left + mod.TICK_MS + 5);
+  });
+
   it("brings the next song in from its start once it's done when talking over beginnings is off", async () => {
     dj.setOverStart(false);
     const first = await started();

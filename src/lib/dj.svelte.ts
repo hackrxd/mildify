@@ -69,6 +69,8 @@ export const EARLY_TOLERANCE_MS = 300;
 /** Music playing when the DJ starts fades out over this long, from when the player's output queue has played. */
 export const OPENING_FADE_MS = 400;
 const OUTPUT_QUEUE_MS = 600;
+/** The song drifting this far from when its end's silence was timed (a pause, a small seek) times it again. */
+const RETIME_MS = 250;
 /** The player lifts a duck on its own after 90 s, in case the window went away; the DJ renews its own sooner. */
 const GAIN_REFRESH_MS = 30_000;
 /** How long a request to turn shuffle or repeat off gets before it's sent again. */
@@ -335,6 +337,8 @@ class Dj {
   #holdFor: { set: DjSet; musicAt: number } | null = null;
   /** The music goes silent when this song reaches this position. */
   #muteAtEnd: { uri: string; at: number } | null = null;
+  /** When that silence is heard, on performance.now()'s clock. */
+  #silentAt = 0;
   /** The music's gain the DJ last asked the player for. */
   #level = 1;
   #gainSentAt = -Infinity;
@@ -435,7 +439,11 @@ class Dj {
 
   /** Play/pause while the DJ's item is up pauses the DJ, and any music under it. */
   togglePause() {
-    if (!this.onAir) return player.togglePlay();
+    if (!this.onAir) {
+      // Playing on toward a song's end that goes silent: the silence is timed anew from where it resumes.
+      if (!player.isPlaying) this.#refreshGain();
+      return player.togglePlay();
+    }
     if (!this.paused) {
       this.paused = true;
       this.#voice.pause();
@@ -561,6 +569,7 @@ class Dj {
     this.#musicAsked = false;
     this.#holdFor = null;
     this.#muteAtEnd = null;
+    this.#silentAt = 0;
     this.#stalledSince = null;
     this.#foreignSince = null;
     this.#remoteSince = null;
@@ -769,8 +778,10 @@ class Dj {
 
   /** Silences the music as `uri` reaches `at` (its end), so whatever Spotify starts next isn't heard. */
   #muteAt(uri: string, at: number) {
-    this.#gainTo(0, at - player.positionNow() - MUTE_RAMP_MS, MUTE_RAMP_MS);
+    const left = at - player.positionNow();
+    this.#gainTo(0, left - MUTE_RAMP_MS, MUTE_RAMP_MS);
     this.#muteAtEnd = { uri, at };
+    this.#silentAt = performance.now() + left;
   }
 
   /** Says the gain again: after a pause, the silence at a song's end has to be timed anew, and the player
@@ -838,6 +849,12 @@ class Dj {
     // Sent back in the song a transition was planned on: plan it again from there.
     if (uri && uri === this.#lastUri && uri === this.#plannedOn && pos < this.#lastPos - 1500) this.#replan();
     if (uri !== this.#lastUri) this.#trackChanged(run, uri);
+    // The silence at the song's end is timed by the clock: after a pause, or a step too small to plan again, time
+    // it anew from where the song is.
+    const mute = this.#muteAtEnd;
+    if (mute?.uri === uri && player.isPlaying && Math.abs(mute.at - pos - (this.#silentAt - now)) > RETIME_MS) {
+      this.#refreshGain();
+    }
     this.#lastUri = uri;
     this.#lastPos = pos;
     this.#lastDuration = t?.durationMs ?? 0;
@@ -882,7 +899,8 @@ class Dj {
     }
     if (this.#queued !== "done") return;
     if (this.#plannedOn !== uri) this.#plan(run, next, t.durationMs, pos, uri);
-    this.#runCues(run, this.#cues, pos, () => player.positionNow(), player.isPlaying);
+    // Paused, the song's cues wait: a seek while paused only moves where they'll fire from.
+    if (player.isPlaying) this.#runCues(run, this.#cues, pos, () => player.positionNow(), true);
   }
 
   /** Keeps shuffle and repeat off while a DJ song plays: shuffle would play a set out of order, and repeat
@@ -961,7 +979,11 @@ class Dj {
       const plan = this.#planFor(set.speech, set.firstVocals, null, 0, 0);
       if (plan.musicAt > 0) this.#holdSong(run, plan.musicAt);
     }
-    this.#announce(run, set);
+    // Spotify moves on once the finishing song is decoded, before its last moments have left the player's
+    // output: the DJ starts once they're heard.
+    const wait = Math.min(OUTPUT_QUEUE_MS, this.#silentAt - performance.now());
+    if (wait > 0) this.#after(wait, () => this.current === set && this.#announce(run, set));
+    else this.#announce(run, set);
   }
 
   /** Holds the song that just came in at its start, and brings it in from the top `musicAt` into the line. */
@@ -998,6 +1020,7 @@ class Dj {
     this.#bringIn = null;
     this.#holdFor = null;
     this.#muteAtEnd = null;
+    this.#silentAt = 0;
     this.#plannedOn = null;
     this.#unduck();
   }
