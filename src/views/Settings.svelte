@@ -272,7 +272,7 @@
     <label class="row">
       <span>
         <span class="label">Audio-responsive Effects</span>
-        <span class="muted small">The cover beside the lyrics pulses with the beat. Only for music playing on this computer.</span>
+        <span class="muted small">The glow from the cover in the player bar pulses with the beat. Only for music playing on this computer.</span>
       </span>
       <input type="checkbox" class="switch" checked={audioFx.on} onchange={(e) => audioFx.setOn(e.currentTarget.checked)} />
     </label>
