@@ -119,7 +119,7 @@
     font-weight: 500;
     line-height: 1.35;
     text-align: left;
-    color: var(--paper);
+    color: var(--text);
     opacity: 0.85;
   }
   .line:hover {
@@ -135,8 +135,8 @@
     color: transparent;
     background: linear-gradient(
       90deg,
-      var(--paper) calc(var(--sung) * (100% + var(--edge)) - var(--edge)),
-      color-mix(in srgb, var(--paper) 45%, transparent) calc(var(--sung) * (100% + var(--edge)))
+      var(--text) calc(var(--sung) * (100% + var(--edge)) - var(--edge)),
+      color-mix(in srgb, var(--text) 45%, transparent) calc(var(--sung) * (100% + var(--edge)))
     );
     -webkit-background-clip: text;
     background-clip: text;

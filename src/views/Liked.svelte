@@ -71,7 +71,7 @@
 </script>
 
 {#if loaded}
-  <ViewHeader image={null} kind="Playlist" title="Liked songs" tint="color-mix(in srgb, var(--brass) 55%, var(--graphite))">
+  <ViewHeader image={null} kind="Playlist" title="Liked songs" tint="color-mix(in srgb, var(--highlight) 55%, var(--bg))">
     {#snippet art()}
       <div class="tile"><Icon name="heart" size={72} filled /></div>
     {/snippet}
@@ -109,12 +109,12 @@
     place-items: center;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, var(--brass), color-mix(in srgb, var(--brass) 45%, #5a2a14));
-    color: var(--brass-ink);
+    background: linear-gradient(135deg, var(--highlight), color-mix(in srgb, var(--highlight) 45%, #5a2a14));
+    color: var(--on-highlight);
   }
   .strong {
     font-weight: 700;
-    color: var(--paper);
+    color: var(--text);
   }
   .sentinel {
     height: 1px;

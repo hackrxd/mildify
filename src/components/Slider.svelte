@@ -101,7 +101,7 @@
     width: 100%;
     height: 4px;
     border-radius: 2px;
-    background: color-mix(in srgb, var(--paper) 18%, transparent);
+    background: color-mix(in srgb, var(--text) 18%, transparent);
   }
   /* Glides between updates (the position ticks four times a second; seeks and arrow keys jump),
      but follows the pointer exactly while dragging. */
@@ -109,7 +109,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     border-radius: 2px;
-    background: var(--paper);
+    background: var(--text);
     transition: width 250ms linear, background 120ms;
   }
   .thumb {
@@ -118,7 +118,7 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: var(--paper);
+    background: var(--text);
     transform: translate(-50%, -50%) scale(0);
     transition: transform 100ms, left 250ms linear;
   }
@@ -131,7 +131,7 @@
   .slider:hover:not(.disabled) .fill,
   .slider.dragging .fill,
   .slider:focus-visible .fill {
-    background: var(--brass);
+    background: var(--highlight);
   }
   .slider:hover:not(.disabled) .thumb,
   .slider.dragging .thumb,

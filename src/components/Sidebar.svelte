@@ -85,7 +85,7 @@
     flex-direction: column;
     min-height: 0;
     border-radius: var(--panel-radius);
-    background: var(--graphite);
+    background: var(--bg);
     padding: 12px 8px 8px;
   }
 
@@ -104,19 +104,19 @@
     height: 40px;
     padding: 0 12px;
     border-radius: 8px;
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-md);
     font-weight: 600;
     text-align: left;
     transition: color 120ms, background 120ms;
   }
   .nav-item:hover {
-    color: var(--paper);
-    background: color-mix(in srgb, var(--paper) 4%, transparent);
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 4%, transparent);
   }
   .nav-item.active {
-    color: var(--paper);
-    background: var(--raised);
+    color: var(--text);
+    background: var(--surface-raised);
   }
   /* A lit tick on the dial: marks where you are. */
   .nav-item.active::before {
@@ -127,8 +127,8 @@
     bottom: 10px;
     width: 3px;
     border-radius: 0 3px 3px 0;
-    background: var(--brass);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--brass) 60%, transparent);
+    background: var(--highlight);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--highlight) 60%, transparent);
     animation: marker-in 320ms var(--ease-out);
   }
   @keyframes marker-in {
@@ -138,19 +138,19 @@
     }
   }
   .nav-item.active :global(svg) {
-    color: var(--brass);
+    color: var(--highlight);
   }
 
   .heading {
     font-size: var(--t-xs);
-    color: var(--smoke);
+    color: var(--text-muted);
     font-family: var(--font-ui);
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     padding: 22px 12px 8px;
     margin-top: 10px;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--border);
   }
 
   .playlists {
@@ -185,16 +185,16 @@
     border-radius: 8px;
     text-align: left;
     font-size: var(--t-md);
-    color: color-mix(in srgb, var(--paper) 88%, var(--smoke));
+    color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
     transition: background 120ms;
   }
   .pl:hover {
-    background: color-mix(in srgb, var(--paper) 5%, transparent);
-    color: var(--paper);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
   }
   .pl.active {
-    background: var(--raised);
-    color: var(--paper);
+    background: var(--surface-raised);
+    color: var(--text);
   }
   .pl img,
   .ph {
@@ -203,7 +203,7 @@
     border-radius: 5px;
     flex: none;
     object-fit: cover;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .name {
@@ -215,7 +215,7 @@
   }
   .name.playing,
   .eq {
-    color: var(--brass);
+    color: var(--highlight);
   }
   .eq {
     display: grid;
@@ -234,14 +234,14 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--brass);
+    background: var(--highlight);
     margin-left: auto;
     animation: attention 2.2s ease-out infinite;
   }
   /* A slow ripple, so the dot is noticed without nagging. */
   @keyframes attention {
     0% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass) 60%, transparent);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--highlight) 60%, transparent);
     }
     60%,
     100% {

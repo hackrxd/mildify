@@ -1,16 +1,17 @@
 :root {
-  /* Palette: a listening room at night, lit by a brass amplifier dial. */
-  --graphite: #191a1f;
-  --panel: #202228;
-  --raised: #2a2d35;
-  --line: #33363f;
-  --paper: #ecebe6;
-  --smoke: #8f929c;
-  --brass: #e8b04b;
-  --brass-ink: #241a06;
+  /* Palette: a listening room at night, lit by a brass amplifier dial. Each falls back to the name it had up to
+     1.1 (--graphite, --panel, …), so themes written for older versions still apply. */
+  --bg: var(--graphite, #191a1f);
+  --surface: var(--panel, #202228);
+  --surface-raised: var(--raised, #2a2d35);
+  --border: var(--line, #33363f);
+  --text: var(--paper, #ecebe6);
+  --text-muted: var(--smoke, #8f929c);
+  --highlight: var(--brass, #e8b04b);
+  --on-highlight: var(--brass-ink, #241a06);
   --danger: #f07a6a;
-  /* Behind the panels, a shade below them; follows a theme's --graphite unless it sets its own. */
-  --frame: color-mix(in srgb, var(--graphite), black 35%);
+  /* Behind the panels, a shade below them; follows a theme's --bg unless it sets its own. */
+  --frame: color-mix(in srgb, var(--bg), black 35%);
 
   /* Overridden per view from cover art. */
   --ambient: hsl(225 12% 26%);
@@ -75,7 +76,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: var(--frame);
-  color: var(--paper);
+  color: var(--text);
   font-family: var(--font-ui);
   font-size: 16px;
   line-height: 1.45;
@@ -133,13 +134,13 @@ img {
 }
 
 :focus-visible {
-  outline: 2px solid var(--brass);
+  outline: 2px solid var(--highlight);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--brass) 40%, transparent);
+  background: color-mix(in srgb, var(--highlight) 40%, transparent);
 }
 
 /* Thin, quiet scrollbars. */
@@ -148,13 +149,13 @@ img {
   height: 12px;
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--paper) 16%, transparent);
+  background: color-mix(in srgb, var(--text) 16%, transparent);
   border: 3px solid transparent;
   background-clip: padding-box;
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--paper) 28%, transparent);
+  background-color: color-mix(in srgb, var(--text) 28%, transparent);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -171,29 +172,29 @@ img {
   border-radius: 18px;
   font-size: var(--t-md);
   font-weight: 600;
-  background: var(--raised);
+  background: var(--surface-raised);
   transition: background 120ms, transform 120ms, box-shadow 120ms;
 }
 .btn:active:not(:disabled) {
   transform: scale(0.97);
 }
 .btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--raised), var(--paper) 10%);
+  background: color-mix(in srgb, var(--surface-raised), var(--text) 10%);
 }
 .btn.primary {
-  background: var(--brass);
-  color: var(--brass-ink);
+  background: var(--highlight);
+  color: var(--on-highlight);
 }
 .btn.primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--brass), white 14%);
+  background: color-mix(in srgb, var(--highlight), white 14%);
 }
 .btn.quiet {
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .btn.quiet:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--paper) 6%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper) 30%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 30%, transparent);
 }
 
 .icon-btn {
@@ -202,22 +203,22 @@ img {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  color: var(--smoke);
+  color: var(--text-muted);
   transition: color 120ms, background 120ms, transform 100ms;
 }
 .icon-btn:hover:not(:disabled) {
-  color: var(--paper);
-  background: color-mix(in srgb, var(--paper) 7%, transparent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 .icon-btn:active:not(:disabled) {
   transform: scale(0.92);
 }
 .icon-btn.on {
-  color: var(--brass);
+  color: var(--highlight);
 }
-/* Stays brass under the pointer, so a heart you just liked pops in its liked colour. */
+/* Stays highlighted under the pointer, so a heart you just liked pops in its liked colour. */
 .icon-btn.on:hover:not(:disabled) {
-  color: color-mix(in srgb, var(--brass), white 18%);
+  color: color-mix(in srgb, var(--highlight), white 18%);
 }
 
 /* The big round play button used in headers and on covers. */
@@ -227,14 +228,14 @@ img {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: var(--brass);
-  color: var(--brass-ink);
+  background: var(--highlight);
+  color: var(--on-highlight);
   box-shadow: 0 8px 22px rgb(0 0 0 / 0.35);
   transition: transform 120ms, background 120ms, opacity 140ms;
 }
 .play-fab:hover:not(:disabled) {
   transform: scale(1.05);
-  background: color-mix(in srgb, var(--brass), white 14%);
+  background: color-mix(in srgb, var(--highlight), white 14%);
 }
 .play-fab:active:not(:disabled) {
   transform: scale(0.97);
@@ -245,27 +246,27 @@ img {
   height: 38px;
   padding: 0 12px;
   border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--graphite);
+  border: 1px solid var(--border);
+  background: var(--bg);
   user-select: text;
   transition: border-color 120ms, box-shadow 120ms;
 }
 .field:hover {
-  border-color: color-mix(in srgb, var(--paper) 22%, var(--line));
+  border-color: color-mix(in srgb, var(--text) 22%, var(--border));
 }
 .field:focus {
   outline: none;
-  border-color: var(--brass);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent);
+  border-color: var(--highlight);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--highlight) 22%, transparent);
 }
 
 .muted {
-  color: var(--smoke);
+  color: var(--text-muted);
 }
 
 .link:hover {
   text-decoration: underline;
-  color: var(--paper);
+  color: var(--text);
 }
 
 .num {
@@ -278,8 +279,8 @@ img {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--paper) 22%, transparent);
-  color: var(--paper);
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  color: var(--text);
   font-size: 10px;
   font-weight: 700;
   flex: none;

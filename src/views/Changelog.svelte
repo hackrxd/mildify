@@ -58,11 +58,11 @@
     gap: 6px;
     padding: 18px 20px;
     border-radius: var(--panel-radius);
-    background: var(--panel);
-    box-shadow: inset 0 0 0 1px var(--line);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
   section.new {
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brass) 55%, var(--line));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--highlight) 55%, var(--border));
   }
   header {
     display: flex;
@@ -83,19 +83,19 @@
   .tag {
     padding: 2px 8px;
     border-radius: 999px;
-    background: var(--brass);
-    color: var(--brass-ink);
+    background: var(--highlight);
+    color: var(--on-highlight);
     font-size: var(--t-xs);
     font-weight: 600;
   }
   .tag.quiet {
     background: none;
-    color: var(--smoke);
-    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--text-muted);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
   h3 {
     margin-top: 6px;
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-sm);
     font-weight: 600;
     text-transform: uppercase;
@@ -111,7 +111,7 @@
   code {
     padding: 1px 5px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--paper) 8%, transparent);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
     font-size: 0.92em;
   }
 </style>

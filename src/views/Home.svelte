@@ -93,7 +93,7 @@
     gap: 44px;
     margin-top: -60px;
     padding: 80px var(--gutter) 48px;
-    background: radial-gradient(70% 520px at 0% 0%, color-mix(in srgb, var(--brass) 11%, transparent), transparent);
+    background: radial-gradient(70% 520px at 0% 0%, color-mix(in srgb, var(--highlight) 11%, transparent), transparent);
   }
   h1 {
     font-family: var(--font-display);

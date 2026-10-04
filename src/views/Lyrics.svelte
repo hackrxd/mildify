@@ -302,7 +302,7 @@
     /* Spotify theme variables the renderer's CSS reads, mapped to this app. */
     --spice-sidebar: #000;
     --spice-text: #fff;
-    --spice-button: var(--brass);
+    --spice-button: var(--highlight);
     --spice-rgb-selected-row: 255, 255, 255;
     --background-tinted-base: rgb(255 255 255 / 0.07);
     --encore-graphic-size-decorative-base: 24px;
@@ -341,7 +341,7 @@
     background: rgb(0 0 0 / 0.45);
   }
   .ctl.on {
-    color: var(--brass);
+    color: var(--highlight);
   }
 
   .options-anchor {
@@ -416,7 +416,7 @@
     font-size: var(--t-xs);
   }
   .link {
-    color: var(--brass);
+    color: var(--highlight);
     font-size: var(--t-xs);
   }
   .link:hover {
@@ -480,7 +480,7 @@
     font-size: var(--t-md);
   }
   .panel p {
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   .panel .field {
     max-width: none;

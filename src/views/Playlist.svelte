@@ -118,11 +118,11 @@
   .desc {
     flex-basis: 100%;
     max-width: 70ch;
-    color: color-mix(in srgb, var(--paper) 70%, transparent);
+    color: color-mix(in srgb, var(--text) 70%, transparent);
   }
   .strong {
     font-weight: 700;
-    color: var(--paper);
+    color: var(--text);
   }
   .big {
     width: 44px;
@@ -134,7 +134,7 @@
     max-width: 62ch;
     padding: 18px 20px;
     border-radius: 8px;
-    background: var(--panel);
+    background: var(--surface);
     font-size: var(--t-md);
   }
   .empty {

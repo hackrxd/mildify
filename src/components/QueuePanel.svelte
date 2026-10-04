@@ -78,7 +78,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: var(--graphite);
+    background: var(--bg);
     border-radius: var(--panel-radius);
     animation: panel-in 320ms var(--ease-out) backwards;
   }
@@ -106,7 +106,7 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   ul {
     list-style: none;
@@ -122,10 +122,10 @@
     transition: background 120ms;
   }
   .item:hover {
-    background: color-mix(in srgb, var(--paper) 5%, transparent);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
   }
   .item.current {
-    background: color-mix(in srgb, var(--brass) 10%, transparent);
+    background: color-mix(in srgb, var(--highlight) 10%, transparent);
   }
   .cover {
     position: relative;
@@ -134,7 +134,7 @@
     flex: none;
     border-radius: 5px;
     overflow: hidden;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .cover img {
@@ -147,7 +147,7 @@
     display: grid;
     place-items: center;
     background: rgb(0 0 0 / 0.5);
-    color: var(--brass);
+    color: var(--highlight);
   }
   /* The lists fade in once they load; later reloads update them in place. */
   .scroll > * {
@@ -168,7 +168,7 @@
     font-size: var(--t-md);
   }
   .current .name {
-    color: var(--brass);
+    color: var(--highlight);
   }
   .artists,
   .dur {

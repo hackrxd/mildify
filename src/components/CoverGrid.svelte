@@ -83,7 +83,7 @@
   }
   .item:hover,
   .item:focus-within {
-    background: color-mix(in srgb, var(--paper) 5%, transparent);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
   }
 
   .art {
@@ -97,7 +97,7 @@
     height: 100%;
     border-radius: 6px;
     overflow: hidden;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
     /* Keeps the rounded clip while the image inside scales. */
     isolation: isolate;
@@ -120,7 +120,7 @@
     place-items: center;
     width: 100%;
     height: 100%;
-    color: var(--smoke);
+    color: var(--text-muted);
   }
 
   .play-fab {
@@ -154,7 +154,7 @@
     white-space: nowrap;
   }
   .here .title {
-    color: var(--brass);
+    color: var(--highlight);
   }
   .eq {
     display: inline-block;

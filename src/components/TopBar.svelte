@@ -84,14 +84,14 @@
     height: 38px;
     padding: 0 10px 0 14px;
     border-radius: 19px;
-    background: var(--panel);
-    color: var(--smoke);
+    background: var(--surface);
+    color: var(--text-muted);
     box-shadow: inset 0 0 0 1px transparent;
     transition: box-shadow 120ms;
   }
   .search:focus-within {
-    box-shadow: inset 0 0 0 1.5px var(--brass);
-    color: var(--paper);
+    box-shadow: inset 0 0 0 1.5px var(--highlight);
+    color: var(--text);
   }
   input {
     flex: 1;
@@ -103,11 +103,11 @@
     user-select: text;
   }
   input::placeholder {
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   .clear {
     display: grid;
-    color: var(--smoke);
+    color: var(--text-muted);
   }
 
   .me {

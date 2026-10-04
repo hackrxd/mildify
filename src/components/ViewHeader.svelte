@@ -37,7 +37,7 @@
   const size = $derived(title.length > 48 ? "s" : title.length > 22 ? "m" : "l");
 </script>
 
-<header class="hero" style:--ambient={ambient ?? tint ?? "var(--raised)"}>
+<header class="hero" style:--ambient={ambient ?? tint ?? "var(--surface-raised)"}>
   <div class="art" class:round>
     {#if art}{@render art()}{:else if image}<img src={image} alt="" />{/if}
   </div>
@@ -48,7 +48,7 @@
   </div>
 </header>
 {#if actions}
-  <div class="actions" style:--ambient={ambient ?? tint ?? "var(--raised)"}>{@render actions()}</div>
+  <div class="actions" style:--ambient={ambient ?? tint ?? "var(--surface-raised)"}>{@render actions()}</div>
 {/if}
 
 <style>
@@ -68,7 +68,7 @@
     aspect-ratio: 1;
     border-radius: 6px;
     overflow: hidden;
-    background: color-mix(in srgb, var(--graphite) 40%, transparent);
+    background: color-mix(in srgb, var(--bg) 40%, transparent);
     box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
     animation: art-in 560ms var(--ease-out) backwards;
   }
@@ -147,7 +147,7 @@
     align-items: center;
     gap: 6px 14px;
     font-size: var(--t-md);
-    color: color-mix(in srgb, var(--paper) 80%, transparent);
+    color: color-mix(in srgb, var(--text) 80%, transparent);
   }
 
   /* Picks up where the hero's wash ends and fades it out behind the top of the list, so there's no seam.

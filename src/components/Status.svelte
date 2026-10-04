@@ -41,6 +41,6 @@
     gap: 10px;
   }
   .loading :global(.eq) {
-    color: var(--brass);
+    color: var(--highlight);
   }
 </style>

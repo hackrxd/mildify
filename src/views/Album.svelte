@@ -96,7 +96,7 @@
   }
   .strong {
     font-weight: 700;
-    color: var(--paper);
+    color: var(--text);
   }
   .big {
     width: 44px;

@@ -93,8 +93,8 @@
     align-items: center;
     padding: 64px clamp(32px, 7vw, 112px);
     background:
-      radial-gradient(60% 70% at 0% 100%, color-mix(in srgb, var(--brass) 14%, transparent), transparent 70%),
-      var(--graphite);
+      radial-gradient(60% 70% at 0% 100%, color-mix(in srgb, var(--highlight) 14%, transparent), transparent 70%),
+      var(--bg);
   }
 
   h1 {
@@ -165,8 +165,8 @@
     font-family: var(--font-display);
     font-weight: 700;
     font-size: var(--t-md);
-    color: var(--brass);
-    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--brass) 55%, transparent);
+    color: var(--highlight);
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--highlight) 55%, transparent);
   }
 
   h3 {
@@ -188,7 +188,7 @@
   code {
     padding: 8px 12px;
     border-radius: 8px;
-    background: var(--panel);
+    background: var(--surface);
     font-size: var(--t-md);
     user-select: all;
   }
@@ -208,7 +208,7 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: var(--brass);
+    background: var(--highlight);
     animation: pulse 1.2s ease-in-out infinite;
   }
 

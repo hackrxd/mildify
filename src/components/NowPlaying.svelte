@@ -226,7 +226,7 @@
     height: 60px;
     border-radius: 6px;
     overflow: hidden;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: 0 6px 18px rgb(0 0 0 / 0.45);
     transition: transform 140ms;
   }
@@ -280,8 +280,8 @@
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    background: var(--paper);
-    color: var(--graphite);
+    background: var(--text);
+    color: var(--bg);
     box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
     transition: transform 100ms, background 120ms;
   }
@@ -306,7 +306,7 @@
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background: var(--brass);
+    background: var(--highlight);
     transform: translateX(-50%);
   }
 
@@ -320,7 +320,7 @@
   }
   .time {
     font-size: var(--t-xs);
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   .time:first-child {
     text-align: right;
@@ -340,7 +340,7 @@
     margin-right: 6px;
     font-size: var(--t-xs);
     font-weight: 600;
-    color: var(--brass);
+    color: var(--highlight);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;

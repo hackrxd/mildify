@@ -95,7 +95,7 @@
     width: 300px;
     padding: 14px 8px 8px;
     border-radius: 12px;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: var(--shadow-pop);
     z-index: 20;
     transform-origin: bottom right;
@@ -130,11 +130,11 @@
     text-align: left;
   }
   .dev:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--paper) 7%, transparent);
+    background: color-mix(in srgb, var(--text) 7%, transparent);
   }
   .dev.active {
-    color: var(--brass);
-    background: color-mix(in srgb, var(--brass) 10%, transparent);
+    color: var(--highlight);
+    background: color-mix(in srgb, var(--highlight) 10%, transparent);
   }
 
   .label {
@@ -151,7 +151,7 @@
   }
   .sub {
     font-size: var(--t-xs);
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   /* Device types can arrive lowercase; "Playing here" and "This computer" are already in sentence case. */
   .sub::first-letter {
@@ -167,6 +167,6 @@
     font-size: var(--t-sm);
   }
   .warn {
-    color: var(--brass);
+    color: var(--highlight);
   }
 </style>

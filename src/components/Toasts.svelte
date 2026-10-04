@@ -28,8 +28,8 @@
     max-width: min(560px, 90vw);
     padding: 10px 18px;
     border-radius: 10px;
-    background: var(--paper);
-    color: var(--graphite);
+    background: var(--text);
+    color: var(--bg);
     font-size: var(--t-md);
     font-weight: 600;
     box-shadow: 0 10px 28px rgb(0 0 0 / 0.4);

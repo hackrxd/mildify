@@ -233,7 +233,7 @@
 <style>
   .boot {
     height: 100%;
-    background: var(--graphite);
+    background: var(--bg);
   }
 
   /* Sidebar, main pane and queue float as rounded panels on a darker frame; the deck sits on the frame. */
@@ -275,7 +275,7 @@
     --backdrop-tint: transparent;
   }
   .shell.dim {
-    --backdrop-tint: color-mix(in srgb, var(--graphite) 45%, transparent);
+    --backdrop-tint: color-mix(in srgb, var(--bg) 45%, transparent);
   }
   .shell,
   .shell main,
@@ -325,7 +325,7 @@
     overflow-x: hidden;
     min-width: 0;
     border-radius: var(--panel-radius);
-    background: var(--graphite);
+    background: var(--bg);
   }
 
   /* Sticky top bar; transparent over headers, solid once content scrolls under it. */
@@ -336,7 +336,7 @@
     transition: background 160ms;
   }
   .bar.scrolled {
-    background: color-mix(in srgb, var(--graphite) 92%, transparent);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
     backdrop-filter: blur(12px);
   }
 
@@ -371,7 +371,7 @@
     margin: 0 var(--gutter) 16px;
     padding: 12px 12px 12px 18px;
     border-radius: 8px;
-    background: color-mix(in srgb, var(--brass) 16%, var(--panel));
+    background: color-mix(in srgb, var(--highlight) 16%, var(--surface));
     font-size: var(--t-md);
     animation: drop-in 360ms var(--ease-out) backwards;
   }

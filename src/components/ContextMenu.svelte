@@ -68,7 +68,7 @@
     padding: 5px;
     list-style: none;
     border-radius: 10px;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: var(--shadow-pop);
     transform-origin: top left;
     animation: pop-in 120ms ease-out;
@@ -88,7 +88,7 @@
   }
   button:hover:not(:disabled),
   button:focus-visible {
-    background: color-mix(in srgb, var(--paper) 8%, transparent);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
     outline: none;
   }
 </style>

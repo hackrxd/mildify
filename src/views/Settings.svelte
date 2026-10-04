@@ -377,7 +377,7 @@
         class="field code"
         rows="5"
         spellcheck="false"
-        placeholder={":root {\n  --brass: #7aa2f7;\n}"}
+        placeholder={":root {\n  --highlight: #7aa2f7;\n}"}
         value={mods.quickCss}
         oninput={(e) => mods.setQuickCss(e.currentTarget.value)}
       ></textarea>
@@ -522,8 +522,8 @@
     padding: 14px 16px;
     margin-bottom: 8px;
     border-radius: 10px;
-    background: var(--panel);
-    box-shadow: inset 0 0 0 1px var(--line);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--border);
     font-size: var(--t-md);
   }
   .status > div {
@@ -534,11 +534,11 @@
     height: 10px;
     border-radius: 50%;
     flex: none;
-    background: var(--smoke);
+    background: var(--text-muted);
   }
   .dot.state-ready {
-    background: var(--brass);
-    box-shadow: 0 0 10px var(--brass);
+    background: var(--highlight);
+    box-shadow: 0 0 10px var(--highlight);
   }
   .dot.state-error,
   .dot.state-needs_login,
@@ -551,7 +551,7 @@
     justify-content: space-between;
     gap: 24px;
     padding: 12px 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--border);
     font-size: var(--t-md);
   }
   .row > span {
@@ -588,7 +588,7 @@
     height: 22px;
     margin: 0;
     border-radius: 11px;
-    background: color-mix(in srgb, var(--paper) 18%, transparent);
+    background: color-mix(in srgb, var(--text) 18%, transparent);
     cursor: pointer;
     transition: background 160ms;
   }
@@ -600,16 +600,16 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: var(--paper);
+    background: var(--text);
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
     transition: transform 160ms;
   }
   .switch:checked {
-    background: var(--brass);
+    background: var(--highlight);
   }
   .switch:checked::before {
     transform: translateX(18px);
-    background: var(--brass-ink);
+    background: var(--on-highlight);
   }
   .switch:disabled {
     cursor: default;
@@ -622,7 +622,7 @@
   }
   .timing input {
     width: 200px;
-    accent-color: var(--brass);
+    accent-color: var(--highlight);
   }
   .timing .hidden {
     visibility: hidden;
@@ -659,7 +659,7 @@
     display: block;
     margin-top: 4px;
     padding: 0;
-    color: var(--brass);
+    color: var(--highlight);
     font-size: inherit;
   }
   .link:hover {

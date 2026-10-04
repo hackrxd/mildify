@@ -166,19 +166,19 @@
     contain-intrinsic-size: auto 56px;
   }
   .row.current {
-    background: color-mix(in srgb, var(--brass) 8%, transparent);
+    background: color-mix(in srgb, var(--highlight) 8%, transparent);
   }
   .row:not(.head):hover,
   .row:focus-within {
-    background: color-mix(in srgb, var(--paper) 7%, transparent);
+    background: color-mix(in srgb, var(--text) 7%, transparent);
   }
 
   .head {
     min-height: 36px;
     margin-bottom: 6px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--border);
     border-radius: 0;
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -190,7 +190,7 @@
     align-items: center;
     gap: 10px;
     padding: 18px 12px 6px;
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-sm);
     font-weight: 600;
   }
@@ -199,14 +199,14 @@
     position: relative;
     display: grid;
     place-items: center;
-    color: var(--smoke);
+    color: var(--text-muted);
   }
   .n .play {
     position: absolute;
     inset: 0;
     display: none;
     place-items: center;
-    color: var(--paper);
+    color: var(--text);
   }
   .row:hover .n .play,
   .n .play:focus-visible {
@@ -217,7 +217,7 @@
   }
   .current .n,
   .current .name {
-    color: var(--brass);
+    color: var(--highlight);
   }
 
   .title {
@@ -231,7 +231,7 @@
     height: 40px;
     border-radius: 5px;
     flex: none;
-    background: var(--raised);
+    background: var(--surface-raised);
     box-shadow: 0 2px 6px rgb(0 0 0 / 0.3);
   }
   .title-text {
@@ -255,11 +255,11 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-sm);
   }
   .album {
-    color: var(--smoke);
+    color: var(--text-muted);
     font-size: var(--t-sm);
   }
 
