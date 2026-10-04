@@ -77,10 +77,12 @@ signed, so the first launch needs right-click → Open (or `xattr -cr "/Applicat
 
 ## Updates
 
-Installed copies check this repo's latest GitHub release on launch and every 6 hours, download a
-newer version in the background, and install it when you click **Restart now** (or under
-Settings → Updates). Windows, macOS and the Linux AppImage update themselves; `.deb` and `.rpm`
-installs don't, so reinstall those by hand.
+Installed copies check this repo's latest GitHub release on launch and every 6 hours and download a
+newer version in the background. A release that only changes the interface applies when you click
+**Reload now**, and the music keeps playing. A release that changes anything in `src-tauri` needs the full
+update, which installs when you click **Restart and stop music** (or under Settings → Updates): the app
+restarts, so playback stops. Windows, macOS and the Linux AppImage take full updates themselves; `.deb` and
+`.rpm` installs only take interface updates, so reinstall those by hand for the rest.
 
 Updates are signed, and the app only installs bundles signed with the key matching the `pubkey` in
 [tauri.conf.json](src-tauri/tauri.conf.json). The private key lives outside the repo

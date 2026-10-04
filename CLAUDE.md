@@ -87,6 +87,15 @@ replies with the value that script returns in Spotify; anything else gets a Java
 Settings turns it on (port 9222) or the app is started with `--remote-debugging-port=N`; loopback only, and it
 refuses requests with an Origin or a non-IP, non-localhost Host, as Chromium does.
 
+**Updates.** `src/lib/updater.svelte.ts` asks the backend first (`ui_update`, `src-tauri/src/ui.rs`): each
+release also ships its built UI as a signed `ui-X.tar.gz`, announced by `ui.json` beside `latest.json`. Every build
+writes `dist/build.json` (`scripts/build-info.ts`): the version and a hash of everything under `src-tauri` plus the
+`@tauri-apps` JS package versions, the backend id. When the release's backend id matches the binary's, the bundle
+is unpacked into `<app data>/ui/` and `ui.rs` serves it through the `tauri://` asset provider instead of the
+embedded UI; a webview reload switches to it, and playback carries on. Any difference goes to the full updater,
+whose restart stops the music, and the UI says so. A downloaded UI is ignored once the binary's own is as new, and
+under `--safe-mode`.
+
 **Vendored librespot-core.** librespot is pinned to a dev-branch commit (`Cargo.toml`), and `librespot-core` is
 patched from `src-tauri/vendor/librespot-core` so free accounts log an error instead of exiting the process. That
 error is surfaced as the `premium_required` device state. See `vendor/librespot-core/PATCHED.md`.
@@ -115,8 +124,9 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
 2. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 3. `.github/workflows/build.yml` fails early if the tag doesn't match `tauri.conf.json`. It builds Windows, macOS
    (arm64 and x64) and Linux (on ubuntu-22.04) into a draft release, then publishes it once all four builds
-   and the test job pass. Installed apps update from that release's `latest.json`. Update bundles are signed
-   with `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
+   and the test job pass. Installed apps update from that release's `ui.json` (reload only, when `src-tauri` is
+   unchanged) or `latest.json`. Update bundles are signed with `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is
+   in `tauri.conf.json`.
 
 Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
 starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
