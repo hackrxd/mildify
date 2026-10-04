@@ -1,11 +1,18 @@
 <script lang="ts">
-  import Equalizer from "../components/Equalizer.svelte";
+  import { flip } from "svelte/animate";
+  import { cubicOut } from "svelte/easing";
+  import DjSongs from "../components/DjSongs.svelte";
   import Icon from "../components/Icon.svelte";
-  import { dj } from "../lib/dj.svelte";
+  import OnAirLamp from "../components/OnAirLamp.svelte";
+  import { dj, type DjSet } from "../lib/dj.svelte";
   import { INSTRUCTIONS_MAX } from "../lib/djPicks";
-  import { player } from "../lib/player.svelte";
+  import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
+
+  // The page moves only when the show does: a card rises in when the DJ reaches a new stage of getting ready, the
+  // set that was up next glides into Now as the finished one lifts away, and a new line drops in on top of what
+  // it said. Nothing is keyed on `status` itself: download progress replaces it four times a second.
 
   dj.refresh();
 
@@ -15,24 +22,50 @@
   const toDownload = $derived(missing.reduce((n, c) => n + c.bytes, 0));
   const share = $derived(install?.running && install.total ? Math.min(1, install.received / install.total) : null);
   const said = $derived([...dj.said].reverse());
-</script>
+  const ready = $derived(!!status?.supported && dj.enabled && !missing.length && !status.setup);
+  const lamp = $derived(
+    dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
+  );
 
-{#snippet songs(list: { uri: string; name: string; artists: string[] }[])}
-  <ol class="songs">
-    {#each list as s (s.uri)}
-      {@const playing = player.track?.uri === s.uri}
-      <li class:playing>
-        <span class="mark">{#if playing && player.isPlaying}<Equalizer label="Playing" />{/if}</span>
-        <span class="name">{s.name}</span>
-        <span class="muted">{s.artists.join(", ")}</span>
-      </li>
-    {/each}
-  </ol>
-{/snippet}
+  /** The running order below the card, keyed so a set keeps its place in the page as it moves up. */
+  type Block = { key: DjSet; kind: "set"; set: DjSet } | { key: string; kind: "said" | "tell" };
+  const blocks = $derived.by(() => {
+    const out: Block[] = [];
+    if (ready) {
+      if (dj.current) out.push({ key: dj.current, kind: "set", set: dj.current });
+      if (dj.upNext && dj.upNext !== dj.current) out.push({ key: dj.upNext, kind: "set", set: dj.upNext });
+      if (said.length) out.push({ key: "said", kind: "said" });
+    }
+    if (status?.supported && dj.enabled) out.push({ key: "tell", kind: "tell" });
+    return out;
+  });
+
+  /** Blocks arriving wait this long, while the ones below slide out of their way. */
+  const MAKE_ROOM_MS = 220;
+
+  /** Svelte's flip, at the app's pace, and still for reduced motion (it doesn't go by the CSS rule). */
+  function settle(node: Element, rects: { from: DOMRect; to: DOMRect }, { duration = 420 } = {}) {
+    return reducedMotion() ? { duration: 0 } : flip(node, rects, { duration, easing: cubicOut });
+  }
+  /** A new line's list drops in, once the blocks below have mostly made room; the sets bring their own rows'
+   * entrance. */
+  function enter(node: Element, kind: Block["kind"]) {
+    return kind === "said" ? rise(node, { y: -8, delay: MAKE_ROOM_MS }) : { duration: 0 };
+  }
+  /** A finished set lifts away. Through `translate`, not `transform`: Svelte holds a leaving block in place with an
+   * inline transform while the blocks below close up. */
+  function leave(_node: Element, kind: Block["kind"]) {
+    if (kind !== "set" || reducedMotion()) return { duration: 0 };
+    return { duration: 260, easing: cubicOut, css: (t: number, u: number) => `translate: 0 ${-8 * u}px; opacity: ${t}` };
+  }
+</script>
 
 <div class="page">
   <header>
-    <h1>DJ</h1>
+    <div class="title-row">
+      <h1>DJ</h1>
+      {#if ready}<OnAirLamp mode={lamp} />{/if}
+    </div>
     <p class="muted lead">
       Your own radio DJ, running on this computer. It plays songs from your listening and talks between them, in a
       voice made here rather than in the cloud.
@@ -40,13 +73,13 @@
   </header>
 
   {#if !status}
-    <p class="muted">Checking on your DJ…</p>
+    <p class="muted checking">Checking on your DJ…</p>
   {:else if !status.supported}
-    <section class="card">
+    <section class="card" in:rise>
       <p>The DJ can't run on this computer: its model and voice aren't built for this kind of processor.</p>
     </section>
   {:else if !dj.enabled}
-    <section class="card">
+    <section class="card" in:rise>
       <p>
         The DJ is off. Turning it on downloads what it runs on, about {formatBytes(toDownload)}: a language model, a
         voice and the programs for them. Nothing is downloaded until then, and you can remove it all again in
@@ -57,95 +90,106 @@
         <button class="btn quiet" onclick={() => router.go({ name: "settings" })}>Choose a model and voice</button>
       </div>
     </section>
-  {:else if missing.length}
-    <section class="card">
-      {#if install?.running}
-        <p>Downloading {lowerFirst(install.component ?? "your DJ")}…</p>
-        <div class="bar" role="progressbar" aria-valuenow={share === null ? undefined : Math.round(share * 100)}>
-          <div style:width="{(share ?? 0) * 100}%"></div>
+  {:else if missing.length && install?.running}
+    <section class="card" in:rise>
+      {#key install.component}
+        <div class="step" in:rise={{ y: 4, duration: 300 }}>
+          <p>Downloading {lowerFirst(install.component ?? "your DJ")}…</p>
+          <div class="bar" role="progressbar" aria-valuenow={share === null ? undefined : Math.round(share * 100)}>
+            <div style:transform="scaleX({share ?? 0})"></div>
+          </div>
         </div>
-        <p class="muted small">
-          {formatBytes(install.received)}{install.total ? ` of ${formatBytes(install.total)}` : ""}. {missing.length === 1
-            ? "This is the last download."
-            : `${missing.length} downloads left, ${formatBytes(toDownload)} in all.`} It keeps going if you leave this page.
-        </p>
-        <div class="actions"><button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause download</button></div>
-      {:else}
-        {#if install?.error}<p class="error">{install.error}</p>{/if}
-        <p class="muted">{formatBytes(toDownload)} left to download before the DJ can play.</p>
-        <div class="actions"><button class="btn primary" onclick={() => dj.retry()}>Download</button></div>
-      {/if}
+      {/key}
+      <p class="muted small">
+        {formatBytes(install.received)}{install.total ? ` of ${formatBytes(install.total)}` : ""}. {missing.length === 1
+          ? "This is the last download."
+          : `${missing.length} downloads left, ${formatBytes(toDownload)} in all.`} It keeps going if you leave this page.
+      </p>
+      <div class="actions"><button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause download</button></div>
+    </section>
+  {:else if missing.length}
+    <section class="card" in:rise>
+      {#if install?.error}<p class="error">{install.error}</p>{/if}
+      <p class="muted">{formatBytes(toDownload)} left to download before the DJ can play.</p>
+      <div class="actions"><button class="btn primary" onclick={() => dj.retry()}>Download</button></div>
     </section>
   {:else if status.setup}
-    <section class="card">
+    <section class="card" in:rise>
       <p>The DJ is set to use your own model server, and it isn't set up yet: {status.setup.toLowerCase()}.</p>
       <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
     </section>
   {:else}
-    <section class="card start">
+    <section class="card start" in:rise>
       {#if dj.phase === "off"}
-        <button class="btn primary big" onclick={() => dj.start()}><Icon name="play" size={18} /> Start the DJ</button>
-        <p class="muted small">It plays on this computer, and talks over the ends and starts of songs, never over the singing.</p>
+        <button class="btn primary big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.start()}>
+          <Icon name="play" size={18} /> Start the DJ
+        </button>
+        <p class="muted small" in:rise={{ y: 4, delay: 60, duration: 300 }}>
+          It plays on this computer, and talks over the ends and starts of songs, never over the singing.
+        </p>
       {:else}
-        <button class="btn quiet big" onclick={() => dj.stop()}><Icon name="close" size={18} /> Stop the DJ</button>
-        {#if dj.activity}<p class="muted small busy">{dj.activity}</p>{/if}
+        <button class="btn quiet big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.stop()}>
+          <Icon name="close" size={18} /> Stop the DJ
+        </button>
+        {#if dj.activity}{#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}{/if}
       {/if}
     </section>
+  {/if}
 
-    {#if dj.current}
-      <section>
-        <h2>Now: {dj.current.name}</h2>
-        {@render songs(dj.current.songs)}
-      </section>
-    {/if}
-    {#if dj.upNext}
-      <section>
-        <h2>Up next: {dj.upNext.name}</h2>
-        {@render songs(dj.upNext.songs)}
-      </section>
-    {/if}
-    {#if said.length}
-      <section>
+  {#each blocks as b (b.key)}
+    <section class:set={b.kind === "set"} animate:settle in:enter={b.kind} out:leave={b.kind}>
+      {#if b.kind === "set"}
+        {@const now = b.set === dj.current}
+        <h2>
+          {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
+          {b.set.name}
+        </h2>
+        <DjSongs songs={b.set.songs} />
+      {:else if b.kind === "said"}
         <h2>What your DJ said</h2>
         <ul class="said">
           {#each said as line, i (said.length - i)}
-            <li>
+            <li class:live={i === 0 && dj.speaking} in:rise={{ y: -8, delay: 60 }} animate:settle={{ duration: 320 }}>
               <span class="segment">{line.name}</span>
               <p>{line.talk}</p>
               {#if !line.byModel}<span class="muted small">From a template: the model didn't answer in time.</span>{/if}
             </li>
           {/each}
         </ul>
-      </section>
-    {/if}
-  {/if}
-
-  {#if status?.supported && dj.enabled}
-    <section>
-      <h2>Tell your DJ</h2>
-      <p class="muted small">
-        How it should talk and what to play from your listening: a mood, a persona, things to avoid. It reads this every
-        time it picks songs, so changes apply from its next set.
-      </p>
-      <textarea
-        class="field"
-        rows="4"
-        maxlength={INSTRUCTIONS_MAX}
-        placeholder={"Talk like a late-night radio host. Keep it short.\nNo explicit songs.\nMention the year a song came out."}
-        value={dj.instructions}
-        oninput={(e) => dj.setInstructions(e.currentTarget.value)}
-      ></textarea>
-      <span class="muted small count">{dj.instructions.length} / {INSTRUCTIONS_MAX}</span>
+      {:else}
+        <h2>Tell your DJ</h2>
+        <p class="muted small">
+          How it should talk and what to play from your listening: a mood, a persona, things to avoid. It reads this
+          every time it picks songs, so changes apply from its next set.
+        </p>
+        <textarea
+          class="field"
+          rows="4"
+          maxlength={INSTRUCTIONS_MAX}
+          placeholder={"Talk like a late-night radio host. Keep it short.\nNo explicit songs.\nMention the year a song came out."}
+          value={dj.instructions}
+          oninput={(e) => dj.setInstructions(e.currentTarget.value)}
+        ></textarea>
+        <span class="muted small count">{dj.instructions.length} / {INSTRUCTIONS_MAX}</span>
+      {/if}
     </section>
-  {/if}
+  {/each}
 </div>
 
 <style>
   .page {
+    /* A set lifting away is held in place against the page while the rest close up. */
+    position: relative;
     display: grid;
     gap: 28px;
     max-width: 780px;
     padding: 20px var(--gutter) 48px;
+  }
+  .title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 18px;
   }
   h1 {
     font-family: var(--font-display);
@@ -189,13 +233,24 @@
     padding: 0 22px;
     font-size: var(--t-lg);
   }
+  /* Each step of the DJ's work rises in, then breathes until the next. */
   .busy {
-    animation: breathe 1.6s ease-in-out infinite;
+    animation:
+      rise 300ms var(--ease-out) backwards,
+      breathe 1.6s ease-in-out 300ms infinite;
   }
   @keyframes breathe {
     50% {
-      opacity: 0.5;
+      opacity: 0.55;
     }
+  }
+  /* Only shown when checking takes a moment. */
+  .checking {
+    animation: fade-in 300ms ease-out 250ms backwards;
+  }
+  .step {
+    display: grid;
+    gap: 10px;
   }
   .bar {
     height: 6px;
@@ -203,41 +258,26 @@
     background: color-mix(in srgb, var(--text) 12%, transparent);
     overflow: hidden;
   }
+  /* Scaled, not resized: each progress report glides into the next without laying out the page. */
   .bar div {
+    width: 100%;
     height: 100%;
     background: var(--highlight);
-    transition: width 250ms linear;
+    transform-origin: left;
+    transition: transform 250ms linear;
   }
   .error {
     color: var(--danger);
   }
-  .songs {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+  /* Waits for the blocks below to make room (MAKE_ROOM_MS). */
+  .set {
+    animation: fade-in 240ms ease-out 220ms backwards;
   }
-  .songs li {
-    display: grid;
-    grid-template-columns: 20px minmax(0, auto) minmax(0, 1fr);
-    align-items: baseline;
-    gap: 10px;
-    padding: 6px 10px;
-    border-radius: 8px;
-    font-size: var(--t-md);
-  }
-  .songs li > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .songs li.playing {
-    background: color-mix(in srgb, var(--highlight) 10%, transparent);
-  }
-  .songs li.playing .name,
-  .mark {
+  .when.now {
     color: var(--highlight);
+  }
+  .when {
+    display: inline-block;
   }
   .said {
     display: grid;
@@ -247,11 +287,28 @@
     list-style: none;
   }
   .said li {
+    position: relative;
     display: grid;
     gap: 4px;
     padding: 12px 16px;
     border-radius: 10px;
     background: var(--surface);
+  }
+  /* The line on air is lit, and cools off once it's said. */
+  .said li::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--highlight) 8%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--highlight) 55%, var(--border));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 1200ms var(--ease-out);
+  }
+  .said li.live::after {
+    opacity: 1;
+    transition-duration: 200ms;
   }
   .said p {
     font-size: var(--t-lg);
