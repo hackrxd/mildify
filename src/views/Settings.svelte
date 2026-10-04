@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { audioFx } from "../lib/audiofx.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
@@ -266,6 +267,14 @@
         disabled={!lyrics.backdrop}
         onchange={(e) => lyrics.setBackdropDim(e.currentTarget.checked)}
       />
+    </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Audio-responsive Effects</span>
+        <span class="muted small">The cover beside the lyrics pulses with the beat. Only for music playing on this computer.</span>
+      </span>
+      <input type="checkbox" class="switch" checked={audioFx.on} onchange={(e) => audioFx.setOn(e.currentTarget.checked)} />
     </label>
 
     <label class="row">
