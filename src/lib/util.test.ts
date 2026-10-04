@@ -3,9 +3,11 @@ import type { Queue, Track } from "./types";
 import {
   copyText,
   debounce,
+  formatBytes,
   formatDuration,
   formatRuntime,
   idFromUri,
+  lowerFirst,
   pickImage,
   plainText,
   plural,
@@ -115,6 +117,23 @@ describe("year", () => {
     expect(year("1997-05")).toBe("1997");
     expect(year("1997")).toBe("1997");
     expect(year(undefined)).toBe("");
+  });
+});
+
+describe("formatBytes", () => {
+  it("rounds to what a person reads", () => {
+    expect(formatBytes(1_120_000_000)).toBe("1.1 GB");
+    expect(formatBytes(103_248_205)).toBe("103 MB");
+    expect(formatBytes(26_586)).toBe("27 KB");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(-3)).toBe("0 B");
+  });
+});
+
+describe("lowerFirst", () => {
+  it("lowers only the first letter", () => {
+    expect(lowerFirst("Voices (Kokoro)")).toBe("voices (Kokoro)");
+    expect(lowerFirst("")).toBe("");
   });
 });
 
