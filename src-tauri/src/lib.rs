@@ -6,6 +6,7 @@ mod error;
 mod lyrics;
 mod meter;
 mod mods;
+mod ui;
 mod webapi;
 #[cfg(target_os = "linux")]
 mod webkit;
@@ -30,6 +31,9 @@ struct AppState {
     webapi: WebApi,
     device: Arc<ConnectDevice>,
     lyrics: LyricsClient,
+    http: reqwest::Client,
+    /// Downloaded interface updates, and which UI the window is served.
+    ui: Arc<ui::UiStore>,
     devtools: Arc<DevTools>,
     /// Started with `--remote-debugging-port=N`: serve DevTools there whatever the setting says.
     devtools_flag: Option<u16>,
@@ -292,6 +296,20 @@ fn audio_meter(app: AppHandle, state: State<'_, AppState>, on: bool) {
     state.device.meter().set_on(&app, on);
 }
 
+/// Looks for a newer UI, downloading it when this binary can run it; otherwise the release needs the
+/// full updater and a restart.
+#[tauri::command]
+async fn ui_update(app: AppHandle, state: State<'_, AppState>) -> Result<ui::UiUpdate> {
+    let source = ui::Source::from_updater(app.config().plugins.0.get("updater"))?;
+    state.ui.check(&state.http, &source).await
+}
+
+/// Serves the downloaded UI from now on; the window reloads right after, and playback carries on.
+#[tauri::command]
+fn apply_ui_update(state: State<'_, AppState>) -> bool {
+    state.ui.apply()
+}
+
 #[tauri::command]
 fn restart_device(app: AppHandle, state: State<'_, AppState>) {
     let config = state.config();
@@ -304,6 +322,10 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     webkit::configure();
 
+    let safe_mode = mods::safe_mode(std::env::args());
+    let mut context = tauri::generate_context!();
+    let ui = ui::serve(&mut context, safe_mode);
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -312,7 +334,7 @@ pub fn run() {
             let state = ctx.app_handle().state::<AppState>();
             mods::serve(&state.paths.themes_dir, &state.paths.extensions_dir, &request)
         })
-        .setup(|app| {
+        .setup(move |app| {
             let path = app.path();
             let paths = Paths::new(path.app_config_dir()?, path.app_data_dir()?, path.app_cache_dir()?);
             let config = Config::load(&paths.config_file);
@@ -321,7 +343,7 @@ pub fn run() {
                 .build()?;
             let webapi = WebApi::new(http.clone(), paths.token_file.clone());
             let device = Arc::new(ConnectDevice::new(paths.clone(), http.clone(), &config));
-            let lyrics = LyricsClient::new(http, paths.lyrics_session_file.clone());
+            let lyrics = LyricsClient::new(http.clone(), paths.lyrics_session_file.clone());
             let devtools = DevTools::new();
             let devtools_flag = devtools::port_flag(std::env::args());
 
@@ -331,9 +353,11 @@ pub fn run() {
                 webapi,
                 device,
                 lyrics,
+                http,
+                ui,
                 devtools,
                 devtools_flag,
-                safe_mode: mods::safe_mode(std::env::args()),
+                safe_mode,
                 sign_in_cancel: Mutex::new(None),
             });
 
@@ -373,11 +397,13 @@ pub fn run() {
             device_command,
             restart_device,
             audio_meter,
+            ui_update,
+            apply_ui_update,
             devtools_answer,
             list_mods,
             open_mods_folder,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|handle, event| {
