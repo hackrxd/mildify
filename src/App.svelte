@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
+  import Icon from "./components/Icon.svelte";
   import NowPlaying from "./components/NowPlaying.svelte";
   import QueuePanel from "./components/QueuePanel.svelte";
   import Setup from "./components/Setup.svelte";
@@ -13,6 +14,7 @@
   import { session } from "./lib/session.svelte";
   import { toasts } from "./lib/toasts.svelte";
   import { updater } from "./lib/updater.svelte";
+  import { whatsNew } from "./lib/whatsnew.svelte";
   import Album from "./views/Album.svelte";
   import Albums from "./views/Albums.svelte";
   import Artist from "./views/Artist.svelte";
@@ -26,6 +28,7 @@
   import ExtensionPage from "./views/ExtensionPage.svelte";
   import Search from "./views/Search.svelte";
   import Settings from "./views/Settings.svelte";
+  import Changelog from "./views/Changelog.svelte";
 
   let main: HTMLElement | undefined = $state();
   let backdrop: HTMLElement | undefined = $state();
@@ -36,6 +39,7 @@
 
   session.init().catch((e) => toasts.error(e));
   updater.start();
+  whatsNew.start();
   mods.init();
   startDevtools();
 
@@ -151,6 +155,18 @@
         </div>
       {/if}
 
+      {#if whatsNew.banner && route.name !== "changelog"}
+        <div class="banner">
+          <p>Mildify is now version {whatsNew.current}.</p>
+          <div class="actions">
+            <button class="btn primary" onclick={() => whatsNew.open()}>See what's new</button>
+            <button class="icon-btn" onclick={() => whatsNew.dismiss()} title="Dismiss" aria-label="Dismiss">
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+        </div>
+      {/if}
+
       {#if updater.state === "ready" || updater.state === "installing"}
         <div class="banner">
           {#if updater.needsRestart}
@@ -192,6 +208,8 @@
             <Lyrics {backdrop} />
           {:else if route.name === "settings"}
             <Settings />
+          {:else if route.name === "changelog"}
+            <Changelog />
           {:else if route.name === "extension"}
             <ExtensionPage id={route.id} />
           {/if}
@@ -337,6 +355,11 @@
     }
   }
 
+  .banner .actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
   .banner {
     display: flex;
     align-items: center;
