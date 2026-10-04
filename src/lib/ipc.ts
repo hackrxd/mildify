@@ -111,7 +111,20 @@ export interface DjSentence {
   end_ms: number;
 }
 
-/** A line `dj_speak` read aloud; `djSpeech(id)` fetches its audio. */
+export type DjVoiceCommand =
+  | { action: "play"; id: number; gain: number }
+  | { action: "pause" }
+  | { action: "resume" }
+  | { action: "gain"; gain: number }
+  | { action: "stop" };
+
+/** A `dj-voice` event: the line playing this far in (as it starts, then a few times a second), done, or unplayable. */
+export type DjVoiceEvent =
+  | { state: "playing"; id: number; position_ms: number }
+  | { state: "ended"; id: number }
+  | { state: "failed"; id: number; error: string };
+
+/** A line `dj_speak` read aloud; `djVoice` plays it. */
 export interface DjSpeech {
   id: number;
   duration_ms: number;
@@ -257,8 +270,8 @@ export const backend = {
   djGenerate: (messages: DjMessage[], schema?: object, maxTokens?: number) =>
     invoke<unknown>("dj_generate", { messages, schema, maxTokens }),
   djSpeak: (text: string) => invoke<DjSpeech>("dj_speak", { text }),
-  /** A spoken line's WAV audio. */
-  djSpeech: (id: number) => invoke<ArrayBuffer>("dj_speech", { id }),
+  /** Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes. */
+  djVoice: (command: DjVoiceCommand) => invoke<void>("dj_voice", { command }),
   /** Turns the embedded player's music down to `level` (0-1), `delayMs` from now in heard time, or back up. */
   djDuck: (level: number, delayMs = 0, rampMs = 400) => invoke<void>("dj_duck", { level, delayMs, rampMs }),
   /** Unloads the model. */

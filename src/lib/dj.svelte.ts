@@ -26,7 +26,7 @@ import {
   type SegmentId,
 } from "./djPicks";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
-import { backend, type DjConfig, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
+import { backend, errorMessage, type DjConfig, type DjInstall, type DjStatus, type DjVoiceEvent, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { lyrics } from "./lyrics.svelte";
 import { player } from "./player.svelte";
@@ -77,10 +77,10 @@ const GAIN_REFRESH_MS = 30_000;
 const MODES_RETRY_MS = 3000;
 
 export interface Spoken {
+  /** The line's id in the backend, which plays it. */
   id: number;
   durationMs: number;
   lines: LyricLine[];
-  buffer: AudioBuffer;
 }
 
 export interface DjSet {
@@ -178,77 +178,100 @@ async function songVocals(uri: string): Promise<Vocals | null> {
   }
 }
 
-/** Plays the DJ's lines through the window's audio, at the music's volume. */
+/** The line's clock and the backend's drift apart by this much before the backend's wins. */
+const VOICE_RESYNC_MS = 80;
+
+/** Plays the DJ's lines on this computer's audio output, as the music plays (src-tauri/src/dj/speaker.rs), at
+ * the music's volume. Not through the window's own audio: on Linux that needs GStreamer plugins that may not be
+ * there. The line's clock runs here, set right by the backend's reports a few times a second. */
 export class Voice {
-  #ctx: AudioContext | null = null;
-  #source: AudioBufferSourceNode | null = null;
-  #gain: GainNode | null = null;
-  #startedAt = 0;
-  #paused = false;
+  #id: number | null = null;
+  #onEnd: ((error?: string) => void) | null = null;
+  /** ms into the line at `#since`, running from there unless paused. */
+  #at = 0;
+  #since = 0;
+  #running = false;
+  #gain = -1;
+  #listening = false;
 
-  /** Call from a click: the window only lets audio start from one. */
-  ensure(): AudioContext | null {
-    if (!this.#ctx && typeof AudioContext !== "undefined") this.#ctx = new AudioContext();
-    if (!this.#paused) this.#ctx?.resume().catch(() => {});
-    return this.#ctx;
+  #listen() {
+    if (this.#listening) return;
+    this.#listening = true;
+    listen<DjVoiceEvent>("dj-voice", (e) => this.#heard(e.payload)).catch(() => (this.#listening = false));
   }
 
-  decode(wav: ArrayBuffer): Promise<AudioBuffer> {
-    const ctx = this.ensure();
-    if (!ctx) return Promise.reject(new Error("This window can't play audio"));
-    return ctx.decodeAudioData(wav);
+  #heard(ev: DjVoiceEvent) {
+    if (ev.id !== this.#id) return;
+    if (ev.state === "playing") {
+      if (this.#running && Math.abs(this.now() - ev.position_ms) > VOICE_RESYNC_MS) this.#anchor(ev.position_ms);
+    } else {
+      this.#finish(ev.state === "failed" ? ev.error : undefined);
+    }
   }
 
-  play(buffer: AudioBuffer, gain: number, onEnd: () => void) {
-    this.#paused = false;
-    const ctx = this.ensure();
-    if (!ctx) return onEnd();
-    this.stop();
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    this.#gain = ctx.createGain();
-    this.#gain.gain.value = gain;
-    source.connect(this.#gain).connect(ctx.destination);
-    source.onended = () => {
-      if (this.#source === source) this.#source = null;
-      onEnd();
-    };
-    this.#source = source;
-    this.#startedAt = ctx.currentTime;
-    source.start();
+  #anchor(at: number) {
+    this.#at = at;
+    this.#since = performance.now();
+  }
+
+  #finish(error?: string) {
+    const onEnd = this.#onEnd;
+    this.#clear();
+    onEnd?.(error);
+  }
+
+  #clear() {
+    this.#id = null;
+    this.#onEnd = null;
+    this.#running = false;
+    this.#at = 0;
+  }
+
+  /** Plays the line `dj_speak` made as `id`, in place of any line playing; `onEnd` gets why when it couldn't. */
+  play(id: number, gain: number, onEnd: (error?: string) => void) {
+    this.#listen();
+    this.#id = id;
+    this.#onEnd = onEnd;
+    this.#gain = gain;
+    this.#running = true;
+    this.#anchor(0);
+    backend.djVoice({ action: "play", id, gain }).catch((e) => {
+      if (this.#id === id) this.#finish(errorMessage(e));
+    });
   }
 
   /** Holds the line where it is: `now()` stands still until `resume()`. */
   pause() {
-    this.#paused = true;
-    this.#ctx?.suspend().catch(() => {});
+    if (this.#id === null || !this.#running) return;
+    this.#anchor(this.now());
+    this.#running = false;
+    backend.djVoice({ action: "pause" }).catch(() => {});
   }
 
   resume() {
-    this.#paused = false;
-    this.#ctx?.resume().catch(() => {});
+    if (this.#id === null || this.#running) return;
+    this.#anchor(this.#at);
+    this.#running = true;
+    backend.djVoice({ action: "resume" }).catch(() => {});
   }
 
   setGain(gain: number) {
-    if (this.#gain) this.#gain.gain.value = gain;
+    if (this.#id === null || Math.abs(gain - this.#gain) < 0.001) return;
+    this.#gain = gain;
+    backend.djVoice({ action: "gain", gain }).catch(() => {});
   }
 
   /** ms into the line playing now. */
   now(): number {
-    return this.#ctx && this.#source ? (this.#ctx.currentTime - this.#startedAt) * 1000 : 0;
+    if (this.#id === null) return 0;
+    return this.#running ? this.#at + performance.now() - this.#since : this.#at;
   }
 
+  /** Stops the line; its `onEnd` isn't called. */
   stop() {
-    const source = this.#source;
-    this.#source = null;
-    if (source) {
-      source.onended = null;
-      try {
-        source.stop();
-      } catch {
-        // Already ended.
-      }
-    }
+    if (this.#id === null) return;
+    this.#clear();
+    backend.djVoice({ action: "stop" }).catch(() => {});
   }
 }
 
@@ -349,6 +372,8 @@ class Dj {
   /** The listener's pause stopped music that was playing under the voice. */
   #pausedMusic = false;
   #outOfSongs = false;
+  /** The listener has been told the voice isn't working, this session. */
+  #voiceWarned = false;
   /** Shuffle and repeat as they were before the DJ turned them off, to put back when it stops. */
   #modes: { shuffle: boolean; repeat: RepeatMode } | null = null;
   #modesSentAt = -Infinity;
@@ -365,8 +390,9 @@ class Dj {
       if (e.payload.component !== was) this.refresh();
     });
     await listen("dj-installed", () => this.refresh());
-    // A reload in the middle of a line mustn't leave the music turned down.
+    // A reload in the middle of a line mustn't leave the music turned down, or the line playing on.
     backend.djDuck(1, 0, 0).catch(() => {});
+    backend.djVoice({ action: "stop" }).catch(() => {});
     await this.refresh();
   }
 
@@ -479,7 +505,7 @@ class Dj {
     this.#talkEnded(run);
   }
 
-  /** Starts a session. Call from a click, so the DJ's voice is allowed to play. */
+  /** Starts a session. */
   async start() {
     if (this.phase !== "off") return;
     if (!this.ready) {
@@ -490,8 +516,8 @@ class Dj {
       toasts.show("The DJ plays on this computer, and its player isn't running. Check the built-in player in Settings.", "error");
       return;
     }
-    this.#voice.ensure();
     const run = ++this.#run;
+    this.#voiceWarned = false;
     this.phase = "starting";
     this.said = [];
     this.current = null;
@@ -647,12 +673,19 @@ class Dj {
   async #speak(text: string): Promise<Spoken | null> {
     try {
       const s = await backend.djSpeak(text);
-      const buffer = await this.#voice.decode(await backend.djSpeech(s.id));
-      return { id: s.id, durationMs: s.duration_ms, lines: captionLines(s.sentences), buffer };
+      return { id: s.id, durationMs: s.duration_ms, lines: captionLines(s.sentences) };
     } catch (e) {
-      console.warn("DJ: couldn't voice the line:", e);
+      this.#voiceTrouble(errorMessage(e));
       return null;
     }
+  }
+
+  /** The DJ plays on without its voice, and says why, once a session. */
+  #voiceTrouble(why: string) {
+    console.warn("DJ: no voice:", why);
+    if (this.#voiceWarned) return;
+    this.#voiceWarned = true;
+    toasts.show(`Your DJ lost its voice, so it plays on without talking. ${why}`, "error", 8000);
   }
 
   /** Starts a set with a play request: the opening, or after a song that had to wait. The DJ's item comes
@@ -729,7 +762,10 @@ class Dj {
     this.talkMs = 0;
     this.caption = speech.lines;
     this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0] };
-    this.#voice.play(speech.buffer, volumeGain(player.volume), () => this.#talkEnded(run));
+    this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
+      if (error) this.#voiceTrouble(error);
+      this.#talkEnded(run);
+    });
   }
 
   /** The line is over, or skipped: whatever waited on it happens now, and the music comes back up. */

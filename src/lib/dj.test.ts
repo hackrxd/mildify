@@ -13,7 +13,7 @@ const backend = vi.hoisted(() => ({
   djWarm: vi.fn(async () => {}),
   djGenerate: vi.fn(),
   djSpeak: vi.fn(),
-  djSpeech: vi.fn(async () => new ArrayBuffer(8)),
+  djVoice: vi.fn(async (_command: unknown) => {}),
   djDuck: vi.fn(async () => {}),
   djRelease: vi.fn(async () => {}),
   lyrics: vi.fn(),
@@ -61,8 +61,14 @@ const player = vi.hoisted(() => ({
 }));
 const toasts = vi.hoisted(() => ({ show: vi.fn(), error: vi.fn() }));
 
-vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
-vi.mock("./ipc", () => ({ backend }));
+const events = vi.hoisted(() => ({ handlers: new Map<string, (e: { payload: unknown }) => void>() }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: async (name: string, fn: (e: { payload: unknown }) => void) => {
+    events.handlers.set(name, fn);
+    return () => {};
+  },
+}));
+vi.mock("./ipc", async (actual) => ({ ...(await actual<typeof import("./ipc")>()), backend }));
 vi.mock("./spotify", () => sp);
 vi.mock("./player.svelte", () => ({ player }));
 vi.mock("./session.svelte", () => ({
@@ -81,16 +87,12 @@ let timing: typeof import("./djTiming");
 
 /** A voice whose lines take real (fake-timer) time, and can be paused. */
 class FakeVoice {
-  played: { gain: number; onEnd: () => void }[] = [];
+  played: { id: number; gain: number; onEnd: (error?: string) => void }[] = [];
   startedAt = 0;
   pausedAt: number | null = null;
   sounding = false;
-  ensure() {
-    return {};
-  }
-  decode = vi.fn(async () => ({}) as AudioBuffer);
-  play(_buffer: AudioBuffer, gain: number, onEnd: () => void) {
-    this.played.push({ gain, onEnd });
+  play(id: number, gain: number, onEnd: (error?: string) => void) {
+    this.played.push({ id, gain, onEnd });
     this.startedAt = performance.now();
     this.pausedAt = null;
     this.sounding = true;
@@ -109,10 +111,10 @@ class FakeVoice {
   stop = vi.fn(() => {
     this.sounding = false;
   });
-  /** The line plays out. */
-  end() {
+  /** The line plays out, or fails to. */
+  end(error?: string) {
     this.sounding = false;
-    this.played.at(-1)?.onEnd();
+    this.played.at(-1)?.onEnd(error);
   }
 }
 
@@ -182,6 +184,7 @@ beforeEach(async () => {
   speechMs = 6000;
   answers = 0;
   lyricsState.songOffsets = {};
+  events.handlers.clear();
   sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
     items: range === "short_term" && offset === 0 ? Array.from({ length: 12 }, (_, i) => song(i + 1)) : [],
     next: null,
@@ -232,6 +235,81 @@ async function started() {
   expect(dj.upNext).not.toBeNull();
   return first;
 }
+
+describe("the voice", () => {
+  let v: InstanceType<typeof mod.Voice>;
+  const emit = (payload: unknown) => events.handlers.get("dj-voice")!({ payload });
+  beforeEach(() => {
+    v = new mod.Voice();
+  });
+
+  it("plays a line in the backend, and keeps its clock between reports", async () => {
+    const onEnd = vi.fn();
+    v.play(7, 0.5, onEnd);
+    expect(backend.djVoice).toHaveBeenCalledWith({ action: "play", id: 7, gain: 0.5 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(v.now()).toBe(1000);
+    // The output started later than asked: its position wins.
+    emit({ state: "playing", id: 7, position_ms: 700 });
+    expect(v.now()).toBe(700);
+    // A report within jitter of the clock leaves it be.
+    await vi.advanceTimersByTimeAsync(250);
+    emit({ state: "playing", id: 7, position_ms: 990 });
+    expect(v.now()).toBe(950);
+    // Another line's news isn't this one's.
+    emit({ state: "ended", id: 6 });
+    expect(onEnd).not.toHaveBeenCalled();
+    emit({ state: "ended", id: 7 });
+    expect(onEnd).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(v.now()).toBe(0);
+  });
+
+  it("holds its clock while paused, and pauses the line", async () => {
+    v.play(1, 1, vi.fn());
+    await vi.advanceTimersByTimeAsync(500);
+    v.pause();
+    expect(backend.djVoice).toHaveBeenLastCalledWith({ action: "pause" });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(v.now()).toBe(500);
+    v.resume();
+    expect(backend.djVoice).toHaveBeenLastCalledWith({ action: "resume" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(v.now()).toBe(600);
+  });
+
+  it("sends the gain only when it changes, and stops a line without ending it", () => {
+    const onEnd = vi.fn();
+    v.play(1, 0.5, onEnd);
+    v.setGain(0.5);
+    v.setGain(0.25);
+    expect(backend.djVoice.mock.calls.filter(([c]) => (c as { action: string }).action === "gain")).toEqual([
+      [{ action: "gain", gain: 0.25 }],
+    ]);
+    v.stop();
+    expect(backend.djVoice).toHaveBeenLastCalledWith({ action: "stop" });
+    emit({ state: "ended", id: 1 });
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(v.now()).toBe(0);
+    // Nothing playing: nothing to pause, resume or stop.
+    backend.djVoice.mockClear();
+    v.pause();
+    v.resume();
+    v.stop();
+    expect(backend.djVoice).not.toHaveBeenCalled();
+  });
+
+  it("ends a line it can't play, with the reason", async () => {
+    const onEnd = vi.fn();
+    v.play(3, 1, onEnd);
+    emit({ state: "failed", id: 3, error: "No audio output device" });
+    expect(onEnd).toHaveBeenCalledWith("No audio output device");
+    backend.djVoice.mockRejectedValueOnce({ kind: "other", message: "That line is gone" });
+    const gone = vi.fn();
+    v.play(4, 1, gone);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(gone).toHaveBeenCalledWith("That line is gone");
+  });
+});
 
 describe("settings", () => {
   it("keeps the listener's instructions, within the limit", async () => {
@@ -380,11 +458,28 @@ describe("starting", () => {
     expect(dj.said[0].talk).toMatch(/^Hey Sam, it's your DJ\./);
   });
 
-  it("plays on without a voice when the voice fails", async () => {
-    backend.djSpeak.mockRejectedValue(new Error("no voice"));
+  it("plays on without a voice when the voice fails, and says so once", async () => {
+    backend.djSpeak.mockRejectedValue(new Error("The DJ's voice failed: no espeak data"));
+    player.isPlaying = false;
     await dj.start();
     expect(voice.played).toHaveLength(0);
     expect(player.playUris).toHaveBeenCalledTimes(1);
+    // The next set's line fails too: still one message.
+    await playing(dj.upNext!.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext).not.toBeNull();
+    const told = toasts.show.mock.calls.filter(([m]) => String(m).includes("lost its voice"));
+    expect(told).toEqual([[expect.stringContaining("no espeak data"), "error", 8000]]);
+  });
+
+  it("hands over to the music when a line can't be played", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    expect(voice.played).toHaveLength(1);
+    voice.end("No audio output device");
+    expect(player.playUris).toHaveBeenCalled();
+    expect(dj.speaking).toBe(false);
+    expect(toasts.show).toHaveBeenCalledWith(expect.stringContaining("No audio output device"), "error", 8000);
   });
 
   it("gives up when its songs never start", async () => {
