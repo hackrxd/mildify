@@ -5,6 +5,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+## 1.1.4 - 2026-10-04
+
 ### Added
 
 - A Midnight (Dark) theme: Midnight with deeper blue-black panels.
