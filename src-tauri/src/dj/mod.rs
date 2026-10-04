@@ -95,6 +95,18 @@ impl DjConfig {
     fn own_server(&self) -> bool {
         self.model == OWN_SERVER
     }
+
+    /// What's missing from the own-server settings, if they're in use; servers refuse a request without
+    /// a model name.
+    fn server_problem(&self) -> Option<String> {
+        if !self.own_server() {
+            return None;
+        }
+        if let Err(e) = engine::chat_url(&self.server_url) {
+            return Some(e.to_string());
+        }
+        self.server_model.trim().is_empty().then(|| "Enter the model name your server uses".to_owned())
+    }
 }
 
 /// A download the current settings need.
@@ -131,8 +143,10 @@ pub struct DjStatus {
     /// Prebuilt runtimes exist for this computer.
     pub supported: bool,
     pub settings: DjConfig,
-    /// Everything the settings need is downloaded (or, for an own server, configured).
+    /// Everything the settings need is downloaded, and an own server is set up.
     pub ready: bool,
+    /// What the own-server settings still need, if anything.
+    pub setup: Option<String>,
     pub needed: Vec<Needed>,
     pub install: InstallState,
     /// Space the DJ's folder takes.
@@ -205,11 +219,12 @@ impl Dj {
                 installed: install::is_installed(&self.root, c),
             })
             .collect();
-        let configured = !cfg.own_server() || engine::chat_url(&cfg.server_url).is_ok();
+        let setup = cfg.server_problem();
         DjStatus {
             supported: self.runtime.is_some(),
             settings: cfg.clone(),
-            ready: self.runtime.is_some() && configured && needed.iter().all(|n| n.installed),
+            ready: self.runtime.is_some() && setup.is_none() && needed.iter().all(|n| n.installed),
+            setup,
             needed,
             install: self.install.lock().unwrap().clone(),
             disk_bytes: install::size_of(&self.root),
@@ -333,6 +348,9 @@ impl Dj {
     async fn target(&self, cfg: &DjConfig) -> Result<Target> {
         if !cfg.enabled {
             return Err(AppError::Other("The DJ is turned off".into()));
+        }
+        if let Some(problem) = cfg.server_problem() {
+            return Err(AppError::Other(problem));
         }
         if cfg.own_server() {
             return Ok(Target {
@@ -507,6 +525,35 @@ mod tests {
         assert_eq!(ids(&cfg), vec![rt.tts.id, voice, rt.llm.id, model]);
         let own = DjConfig { model: OWN_SERVER.into(), ..cfg };
         assert_eq!(ids(&own), vec![rt.tts.id, voice]);
+    }
+
+    #[test]
+    fn an_own_server_needs_an_address_and_a_model_name() {
+        let d = dj();
+        let own = DjConfig {
+            model: OWN_SERVER.into(),
+            server_url: "http://127.0.0.1:11434".into(),
+            ..DjConfig::default()
+        };
+        let status = d.status(&own);
+        assert!(!status.ready);
+        assert!(status.setup.as_deref().is_some_and(|s| s.contains("model name")), "{:?}", status.setup);
+        let bad_url = DjConfig { server_url: "localhost:11434".into(), server_model: "llama3.2".into(), ..own.clone() };
+        assert!(d.status(&bad_url).setup.is_some());
+        let named = DjConfig { server_model: " llama3.2 ".into(), ..own };
+        assert_eq!(d.status(&named).setup, None);
+        // A built-in model needs neither.
+        assert_eq!(d.status(&DjConfig::default()).setup, None);
+    }
+
+    #[tokio::test]
+    async fn wont_ask_an_own_server_without_a_model_name() {
+        let d = dj();
+        let cfg = DjConfig { enabled: true, model: OWN_SERVER.into(), ..DjConfig::default() };
+        match d.generate(&cfg, &[], None, 10).await {
+            Err(AppError::Other(m)) => assert!(m.contains("model name"), "{m}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
