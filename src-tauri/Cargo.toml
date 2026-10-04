@@ -30,6 +30,11 @@ thiserror = "2"
 log = "0.4"
 env_logger = "0.11"
 futures-util = "0.3"
+# Interface-only updates (ui.rs); all four are already in the tree through Tauri and its updater plugin.
+minisign-verify = "0.2"
+flate2 = "1"
+tar = "0.4"
+semver = "1"
 # Also in the tree through librespot-core; the DevTools endpoint (devtools.rs) speaks WebSocket with it.
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 
