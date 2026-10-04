@@ -189,10 +189,10 @@ describe("quick CSS", () => {
   it("applies as typed, after the theme, and persists", async () => {
     localStorage.setItem("nativify:theme", "Glass");
     await boot();
-    mods.setQuickCss(":root { --brass: blue; }");
-    expect(quickCss()?.textContent).toBe(":root { --brass: blue; }");
+    mods.setQuickCss(":root { --highlight: blue; }");
+    expect(quickCss()?.textContent).toBe(":root { --highlight: blue; }");
     expect(themeLink()?.compareDocumentPosition(quickCss()!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(localStorage.getItem("nativify:quickCss")).toBe(":root { --brass: blue; }");
+    expect(localStorage.getItem("nativify:quickCss")).toBe(":root { --highlight: blue; }");
 
     // A theme picked later still goes before it.
     mods.setTheme("plain.css");
