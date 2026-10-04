@@ -9,6 +9,7 @@ class Session {
   user = $state<User | null>(null);
   playlists = $state<SimplePlaylist[]>([]);
   signingIn = $state(false);
+  #retry: ReturnType<typeof setTimeout> | undefined;
 
   /** Web API is usable: a client ID is set and we hold a token for it. */
   ready = $derived(!!this.status?.config.client_id && !!this.status?.signed_in);
@@ -27,11 +28,17 @@ class Session {
   }
 
   async loadUser() {
+    clearTimeout(this.#retry);
     try {
       this.user = await me();
       await this.loadPlaylists();
     } catch (e) {
       toasts.error(e);
+      // Rate limited at launch: load once it's over rather than leave the sidebar empty.
+      if (isAppError(e) && e.kind === "rate_limited") {
+        const seconds = Number(e.message.match(/(\d+)s/)?.[1] ?? 30);
+        this.#retry = setTimeout(() => this.ready && this.loadUser(), (seconds + 1) * 1000);
+      }
     }
   }
 
@@ -58,6 +65,7 @@ class Session {
   }
 
   async signOut() {
+    clearTimeout(this.#retry);
     this.status = await backend.signOut();
     this.user = null;
     this.playlists = [];
