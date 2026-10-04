@@ -53,16 +53,16 @@ quiet right there, and the next song waits at its start until its time in the li
 singing.
 
 While it talks over music, the music is turned down inside the player's own output, not with the volume slider.
-Your volume and other Spotify apps see no change. The voice follows the volume slider, so it sits at the same
-loudness as the music.
+Your volume and other Spotify apps see no change. The voice plays on this computer's sound output, as the music
+does, and follows the volume slider, so it sits at the same loudness as the music.
 
 What it says shows up as captions: in the player bar where the current lyric line usually is, and over the
 lyrics view. Each word lights up as it's spoken, the same way synced lyrics do. The DJ page keeps a list of
 everything it said this session.
 
 If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template
-("That was … Up next, …"). If the voice fails, it plays on without talking. The DJ page marks lines that came
-from a template.
+("That was … Up next, …"). If the voice fails, it plays on without talking, and says why. The DJ page marks lines
+that came from a template.
 
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.

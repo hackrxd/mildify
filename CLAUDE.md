@@ -84,7 +84,9 @@ window focus re-reads the folders, so edits apply live. `--safe-mode` loads none
 while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, or the Hub's published hash for
 models, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
 port with an API key and `--offline`, or talks to the user's own OpenAI-style server; `voice.rs` reads lines to WAV
-and times each sentence from the program's per-sentence sample counts. The UI does the rest: `djPicks.ts` builds
+and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
+output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
+WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
 segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
 (llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates;
 `djTiming.ts` plans the talk around both songs' synced lyrics (shifted by the song's own `songOffsets` nudge): the
@@ -93,7 +95,8 @@ song's outro and of the next song's intro (under at most half the line), or none
 (`overEnd`/`overStart`). `dj.svelte.ts` plays a set with `playUris(…, here)` and queues the next during its last
 song; cues on the song's clock (`player.positionNow()`) start the talk and, when it outlasts both overlaps, silence
 the music right at the song's end. Spotify's queued song is caught as it comes up, paused, and brought in from its
-start by a cue on the line's clock (`Voice.now()`, which stands still while paused). While it talks, `dj_duck` lowers
+start by a cue on the line's clock (`Voice.now()`, kept in the page between the backend's reports, which stands still
+while paused). While it talks, `dj_duck` lowers
 the music in the sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again
 every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep.
 User guide: `docs/dj.md`.
