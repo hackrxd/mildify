@@ -10,6 +10,8 @@ export type Route =
   | { name: "artist"; id: string }
   | { name: "playlist"; id: string }
   | { name: "lyrics" }
+  /** The AI DJ. */
+  | { name: "dj" }
   /** A page an extension added; `id` is `<extension id>/<page id>`. */
   | { name: "extension"; id: string }
   | { name: "settings" }
