@@ -481,6 +481,18 @@
         <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
       </label>
 
+      <label class="row">
+        <span>
+          <span class="label">Pick songs as it goes</span>
+          <span class="muted small">
+            The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
+            plays more like it, skip one and that artist sits out, skip two and it moves on to something else. Off, it
+            picks a whole set ahead. Applies from its next set.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
+      </label>
+
       <label class="row stacked">
         <span>
           <span class="label">Tell your DJ</span>
