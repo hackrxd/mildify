@@ -6,6 +6,7 @@
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
+  import { whatsNew } from "../lib/whatsnew.svelte";
   import { plural } from "../lib/util";
   import { builtinThemes } from "../themes";
 
@@ -460,20 +461,23 @@
           {:else}Updates download in the background. Most apply with a reload and the music keeps playing; ones that change the app itself need a restart, which stops it.{/if}
         </span>
       </span>
-      {#if updater.state === "ready" || updater.state === "installing"}
-        <button class="btn primary" onclick={() => updater.apply()} disabled={updater.state === "installing"}>
-          {#if updater.needsRestart}{updater.state === "installing" ? "Installing…" : "Restart and stop music"}
-          {:else}{updater.state === "installing" ? "Reloading…" : "Reload now"}{/if}
-        </button>
-      {:else}
-        <button
-          class="btn quiet"
-          onclick={() => updater.check()}
-          disabled={import.meta.env.DEV || updater.state === "checking" || updater.state === "downloading"}
-        >
-          <Icon name="refresh" size={16} /> Check for updates
-        </button>
-      {/if}
+      <span class="buttons">
+        <button class="btn quiet" onclick={() => whatsNew.open()}>What's new</button>
+        {#if updater.state === "ready" || updater.state === "installing"}
+          <button class="btn primary" onclick={() => updater.apply()} disabled={updater.state === "installing"}>
+            {#if updater.needsRestart}{updater.state === "installing" ? "Installing…" : "Restart and stop music"}
+            {:else}{updater.state === "installing" ? "Reloading…" : "Reload now"}{/if}
+          </button>
+        {:else}
+          <button
+            class="btn quiet"
+            onclick={() => updater.check()}
+            disabled={import.meta.env.DEV || updater.state === "checking" || updater.state === "downloading"}
+          >
+            <Icon name="refresh" size={16} /> Check for updates
+          </button>
+        {/if}
+      </span>
     </div>
   </section>
 
@@ -666,6 +670,11 @@
     flex-wrap: wrap;
     gap: 8px;
     padding-top: 12px;
+  }
+  .buttons {
+    display: flex;
+    flex: none;
+    gap: 8px;
   }
   .about p {
     max-width: 70ch;
