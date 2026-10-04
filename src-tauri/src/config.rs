@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
+use crate::dj::DjConfig;
+
 /// User-editable settings, persisted as JSON in the app config dir.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,6 +24,8 @@ pub struct Config {
     pub normalisation: bool,
     /// Serve the Spotify app's DevTools endpoint on port 9222, for tools such as mild-lyrics (devtools.rs).
     pub devtools: bool,
+    /// The AI DJ (dj/mod.rs): off, and nothing of it downloaded, until turned on.
+    pub dj: DjConfig,
 }
 
 impl Default for Config {
@@ -34,6 +38,7 @@ impl Default for Config {
             initial_volume: 50,
             normalisation: false,
             devtools: false,
+            dj: DjConfig::default(),
         }
     }
 }
@@ -77,6 +82,10 @@ pub struct Paths {
     /// User CSS themes and JS extensions (see mods.rs).
     pub themes_dir: PathBuf,
     pub extensions_dir: PathBuf,
+    /// Everything the AI DJ downloads: runtimes, model and voice (see dj/install.rs).
+    pub dj_dir: PathBuf,
+    /// The DJ's logs and speech in the making.
+    pub dj_scratch_dir: PathBuf,
 }
 
 impl Paths {
@@ -89,6 +98,8 @@ impl Paths {
             audio_cache_dir: cache_dir.join("audio"),
             themes_dir: config_dir.join("themes"),
             extensions_dir: config_dir.join("extensions"),
+            dj_dir: data_dir.join("dj"),
+            dj_scratch_dir: cache_dir.join("dj"),
         }
     }
 }
@@ -127,6 +138,7 @@ mod tests {
         assert_eq!(c.initial_volume, 50);
         assert!(!c.normalisation);
         assert!(!c.devtools);
+        assert!(!c.dj.enabled, "the DJ is off until turned on");
     }
 
     #[test]
@@ -136,6 +148,7 @@ mod tests {
         assert_eq!(c.device_name, "Desk");
         assert_eq!(c.bitrate, 320);
         assert_eq!(c.device_id.len(), 40);
+        assert_eq!(c.dj, DjConfig::default());
     }
 
     #[test]
@@ -194,5 +207,7 @@ mod tests {
         assert!(p.audio_cache_dir.starts_with("/cache"));
         assert_eq!(p.themes_dir, Path::new("/cfg/themes"));
         assert_eq!(p.extensions_dir, Path::new("/cfg/extensions"));
+        assert!(p.dj_dir.starts_with("/data"));
+        assert!(p.dj_scratch_dir.starts_with("/cache"));
     }
 }

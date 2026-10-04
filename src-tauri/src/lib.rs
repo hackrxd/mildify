@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod device;
 mod devtools;
+mod dj;
 mod duck;
 mod error;
 mod lyrics;
@@ -13,6 +14,7 @@ mod webapi;
 mod webkit;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,6 +24,7 @@ use tokio::sync::oneshot;
 use config::{Config, Paths};
 use device::{ConnectDevice, DeviceCommand, DeviceState, DeviceStatus};
 use devtools::{DevTools, DevToolsStatus};
+use dj::Dj;
 use error::{AppError, Result};
 use lyrics::LyricsClient;
 use webapi::WebApi;
@@ -32,6 +35,8 @@ struct AppState {
     webapi: WebApi,
     device: Arc<ConnectDevice>,
     lyrics: LyricsClient,
+    /// The AI DJ's downloads, model and voice.
+    dj: Dj,
     http: reqwest::Client,
     /// Downloaded interface updates, and which UI the window is served.
     ui: Arc<ui::UiStore>,
@@ -286,6 +291,112 @@ fn window_asker(app: AppHandle) -> devtools::Asker {
     })
 }
 
+/// The AI DJ's settings, downloads and disk use.
+#[tauri::command]
+async fn dj_status(state: State<'_, AppState>) -> Result<dj::DjStatus> {
+    Ok(state.dj.status(&state.config().dj))
+}
+
+/// Changes the DJ's settings. Turning it on downloads what it needs; turning it off stops that, and
+/// unloads the model.
+#[tauri::command]
+async fn dj_configure(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: dj::DjSettingsInput,
+) -> Result<dj::DjStatus> {
+    let (old, new) = {
+        let mut cfg = state.config.lock().unwrap();
+        let old = cfg.dj.clone();
+        let mut next = old.clone();
+        next.apply(settings)?;
+        cfg.dj = next;
+        cfg.save(&state.paths.config_file)?;
+        (old, cfg.dj.clone())
+    };
+    if old != new {
+        // What's downloading may not be what's needed any more; partial downloads are kept.
+        state.dj.cancel_install();
+        state.dj.release().await;
+    }
+    if new.enabled {
+        state.dj.start_install(&app, new.clone())?;
+    }
+    Ok(state.dj.status(&new))
+}
+
+/// Retries the DJ's downloads after a failure.
+#[tauri::command]
+fn dj_install(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    state.dj.start_install(&app, state.config().dj)
+}
+
+#[tauri::command]
+fn dj_cancel(state: State<'_, AppState>) {
+    state.dj.cancel_install();
+}
+
+/// Turns the DJ off and deletes everything it downloaded.
+#[tauri::command]
+async fn dj_remove(state: State<'_, AppState>) -> Result<dj::DjStatus> {
+    let cfg = {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.dj.enabled = false;
+        cfg.save(&state.paths.config_file)?;
+        cfg.dj.clone()
+    };
+    state.dj.remove().await?;
+    Ok(state.dj.status(&cfg))
+}
+
+/// Loads the DJ's model ahead of its first request.
+#[tauri::command]
+async fn dj_warm(state: State<'_, AppState>) -> Result<()> {
+    state.dj.warm(&state.config().dj).await
+}
+
+/// Asks the DJ's model; with a JSON schema, the answer is JSON that fits it.
+#[tauri::command]
+async fn dj_generate(
+    state: State<'_, AppState>,
+    messages: Vec<dj::engine::Message>,
+    schema: Option<Value>,
+    max_tokens: Option<u32>,
+) -> Result<Value> {
+    let cfg = state.config().dj;
+    state.dj.generate(&cfg, &messages, schema.as_ref(), max_tokens.unwrap_or(400).min(2000)).await
+}
+
+/// Reads a line in the DJ's voice; `dj_speech` hands over the audio.
+#[tauri::command]
+async fn dj_speak(state: State<'_, AppState>, text: String) -> Result<dj::voice::Speech> {
+    state.dj.speak(&state.config().dj, &text).await
+}
+
+/// A spoken line's WAV audio, as raw bytes.
+#[tauri::command]
+fn dj_speech(state: State<'_, AppState>, id: u64) -> Result<tauri::ipc::Response> {
+    let wav = state.dj.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
+    Ok(tauri::ipc::Response::new(wav.as_ref().clone()))
+}
+
+/// Turns the music on the embedded player down to `level` (0-1) while the DJ talks, or back up.
+#[tauri::command]
+fn dj_duck(state: State<'_, AppState>, level: f32, delay_ms: u32, ramp_ms: u32) {
+    state.device.duck().set(
+        level,
+        Duration::from_millis(u64::from(delay_ms.min(10_000))),
+        Duration::from_millis(u64::from(ramp_ms.min(10_000))),
+    );
+}
+
+/// Unloads the DJ's model, freeing its memory.
+#[tauri::command]
+async fn dj_release(state: State<'_, AppState>) -> Result<()> {
+    state.dj.release().await;
+    Ok(())
+}
+
 #[tauri::command]
 fn device_command(state: State<'_, AppState>, command: DeviceCommand) -> Result<()> {
     state.device.command(command)
@@ -345,6 +456,10 @@ pub fn run() {
             let webapi = WebApi::new(http.clone(), paths.token_file.clone());
             let device = Arc::new(ConnectDevice::new(paths.clone(), http.clone(), &config));
             let lyrics = LyricsClient::new(http.clone(), paths.lyrics_session_file.clone());
+            let dj = Dj::new(paths.dj_dir.clone(), paths.dj_scratch_dir.clone(), http.clone());
+            dj.watch_idle();
+            // Downloads cut short by quitting carry on, but only while the DJ is on.
+            let resume_dj = config.dj.enabled.then(|| config.dj.clone());
             let devtools = DevTools::new();
             let devtools_flag = devtools::port_flag(std::env::args());
 
@@ -354,6 +469,7 @@ pub fn run() {
                 webapi,
                 device,
                 lyrics,
+                dj,
                 http,
                 ui,
                 devtools,
@@ -361,6 +477,13 @@ pub fn run() {
                 safe_mode,
                 sign_in_cancel: Mutex::new(None),
             });
+
+            if let Some(cfg) = resume_dj {
+                let state = app.state::<AppState>();
+                if let Err(e) = state.dj.start_install(app.handle(), cfg) {
+                    log::warn!("DJ: {e}");
+                }
+            }
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -403,6 +526,17 @@ pub fn run() {
             devtools_answer,
             list_mods,
             open_mods_folder,
+            dj_status,
+            dj_configure,
+            dj_install,
+            dj_cancel,
+            dj_remove,
+            dj_warm,
+            dj_generate,
+            dj_speak,
+            dj_speech,
+            dj_duck,
+            dj_release,
         ])
         .build(context)
         .expect("error while building tauri application");
@@ -411,6 +545,7 @@ pub fn run() {
         if let RunEvent::Exit = event {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.device.stop();
+                state.dj.shutdown();
             }
         }
     });
