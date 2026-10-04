@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod device;
 mod devtools;
+mod duck;
 mod error;
 mod lyrics;
 mod meter;

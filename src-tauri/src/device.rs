@@ -28,6 +28,7 @@ use tokio::sync::oneshot;
 
 use crate::auth::{self, LIBRESPOT_REDIRECT};
 use crate::config::{Config, Paths};
+use crate::duck::Duck;
 use crate::error::{AppError, Result};
 use crate::meter::{Analyser, Meter};
 
@@ -118,6 +119,8 @@ pub struct ConnectDevice {
     generation: AtomicU64,
     /// Levels of what's playing, for audio-responsive effects. Outlives restarts.
     meter: Meter,
+    /// The music's gain while the DJ talks. Outlives restarts.
+    duck: Duck,
 }
 
 impl ConnectDevice {
@@ -134,11 +137,16 @@ impl ConnectDevice {
             }),
             generation: AtomicU64::new(0),
             meter: Meter::default(),
+            duck: Duck::default(),
         }
     }
 
     pub fn meter(&self) -> &Meter {
         &self.meter
+    }
+
+    pub fn duck(&self) -> &Duck {
+        &self.duck
     }
 
     pub fn status(&self) -> DeviceStatus {
@@ -300,12 +308,14 @@ impl ConnectDevice {
         let clock = OutputClock::default();
         let sink_clock = clock.clone();
         let meter = self.meter.clone();
+        let duck = self.duck.clone();
         let player = Player::new(player_config, session.clone(), mixer.get_soft_volume(), move || {
             Box::new(ClockedSink {
                 inner: sink_builder(None, AudioFormat::default()),
                 clock: sink_clock,
                 meter,
                 analyser: Analyser::default(),
+                duck,
             }) as Box<dyn Sink>
         });
 
@@ -473,13 +483,14 @@ impl OutputClock {
     }
 }
 
-/// Passes audio through to the real output while keeping an [`OutputClock`], and measures it
-/// for the [`Meter`] when that's on.
+/// Passes audio through to the real output while keeping an [`OutputClock`], turns it down while the
+/// DJ talks ([`Duck`]), and measures it for the [`Meter`] when that's on.
 struct ClockedSink {
     inner: Box<dyn Sink>,
     clock: OutputClock,
     meter: Meter,
     analyser: Analyser,
+    duck: Duck,
 }
 
 impl Sink for ClockedSink {
@@ -494,9 +505,10 @@ impl Sink for ClockedSink {
         r
     }
 
-    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
-        if let Ok(samples) = packet.samples() {
+    fn write(&mut self, mut packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        if let AudioPacket::Samples(samples) = &mut packet {
             let starts = self.clock.queued(Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLES_PER_SECOND)));
+            self.duck.apply(starts, samples);
             if self.meter.is_on() {
                 self.meter.record(starts, self.analyser.measure(samples));
             }
