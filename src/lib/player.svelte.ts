@@ -176,7 +176,9 @@ class Player {
         break;
       case "loading":
         this.isLoading = true;
-        this.#setPosition(ev.position_ms);
+        // The next song loading (one that wasn't preloaded) comes before its track event: its start isn't the
+        // shown song's position.
+        if (ev.uri === this.track?.uri) this.#setPosition(ev.position_ms);
         break;
       case "seeked":
         this.#setPosition(ev.position_ms);
