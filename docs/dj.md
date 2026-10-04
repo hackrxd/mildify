@@ -32,16 +32,18 @@ With **Pick songs as it goes** on (Settings → AI DJ, off by default), the DJ s
 commits to one song at a time: while a song plays, it picks the next and lines it up in the player's queue. What
 you do changes what comes next:
 
-- **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it: more by that
-  artist, or from that album, even from outside the set. It can change the song it lined up until about 35
+- **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it for the rest of
+  the set: more by that artist, or from that album, even from outside the set. It can change the song it lined up until about 35
   seconds before the one playing ends, when the player starts loading it.
 - **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
-- The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped, so it can
-  mention it.
+- The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
+  last one, so it can mention it.
+- **Previous** goes back to the set's song before, as it would in an album, and that doesn't count as a skip.
 
 The DJ takes over the queue while it plays this way: songs you queue yourself are replaced by its next pick. If you
 skip a set's last song before the next set is ready, the music waits and the DJ starts it as soon as it can,
-talking from a template if the model is still working.
+talking from a template if the model is still working. When the DJ stops, or you play something else, the song it
+lined up comes out of the queue again.
 
 ## How it talks
 
