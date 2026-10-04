@@ -92,9 +92,11 @@ is lost, existing installs can't update anymore, and everyone has to reinstall a
 
 To ship a release:
 
-1. Bump `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
-2. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
-3. The workflow builds into a draft release and publishes it once all four builds succeed.
+1. In [CHANGELOG.md](CHANGELOG.md), rename **Unreleased** to `## 0.2.0 - <date>` and start a new, empty
+   **Unreleased** above it. That section becomes the release notes and the app's What's new page.
+2. Bump `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
+3. Commit, then tag and push: `git tag v0.2.0 && git push origin main v0.2.0`.
+4. The workflow builds into a draft release and publishes it once all four builds succeed.
    Installed apps pick it up from then on. If a build fails, the draft stays unpublished: fix it,
    delete the draft and the tag, and tag again. A tag that doesn't match the version in
    `tauri.conf.json` fails before anything builds.

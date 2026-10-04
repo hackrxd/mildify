@@ -96,6 +96,11 @@ embedded UI; a webview reload switches to it, and playback carries on. Any diffe
 whose restart stops the music, and the UI says so. A downloaded UI is ignored once the binary's own is as new, and
 under `--safe-mode`.
 
+**Changelog.** `CHANGELOG.md` is the one list of user-facing changes: `## X.Y.Z - date` sections of `### Added`/
+`Changed`/`Fixed` items, written for users, newest first. Add a line under `## Unreleased` with any change a user
+would notice. `src/lib/changelog.ts` parses it (imported `?raw`) for the What's new page (`src/views/Changelog.svelte`),
+which `src/lib/whatsnew.svelte.ts` offers in a banner on the first launch after the interface's version changes.
+
 **Vendored librespot-core.** librespot is pinned to a dev-branch commit (`Cargo.toml`), and `librespot-core` is
 patched from `src-tauri/vendor/librespot-core` so free accounts log an error instead of exiting the process. That
 error is surfaced as the `premium_required` device state. See `vendor/librespot-core/PATCHED.md`.
@@ -119,10 +124,14 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
 
 ## Releases
 
-1. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` (+ `Cargo.lock`) and `package.json`
+1. In `CHANGELOG.md`, rename `## Unreleased` to `## X.Y.Z - YYYY-MM-DD` and put a fresh `## Unreleased` above it
+   (commit: `docs(changelog): X.Y.Z`).
+2. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` (+ `Cargo.lock`) and `package.json`
    (+ `package-lock.json`).
-2. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
-3. `.github/workflows/build.yml` fails early if the tag doesn't match `tauri.conf.json`. It builds Windows, macOS
+3. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
+4. `.github/workflows/build.yml` fails early if the tag doesn't match `tauri.conf.json`, or if `CHANGELOG.md` has no
+   section for it (`scripts/release-notes.mjs`, also a test against `package.json`'s version). That section is the
+   GitHub release's notes, above GitHub's generated list. It builds Windows, macOS
    (arm64 and x64) and Linux (on ubuntu-22.04) into a draft release, then publishes it once all four builds
    and the test job pass. Installed apps update from that release's `ui.json` (reload only, when `src-tauri` is
    unchanged) or `latest.json`. Update bundles are signed with `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is
