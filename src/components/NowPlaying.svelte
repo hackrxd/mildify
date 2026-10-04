@@ -138,15 +138,19 @@
         max={air ? air.durationMs : (track?.durationMs ?? 0)}
         step={5000}
         disabled={!!air || !track || !player.deviceId}
-        onpreview={(v) => (seekPreview = v)}
-        oncommit={(v) => player.seek(v)}
+        onpreview={(v) => (seekPreview = air ? null : v)}
+        oncommit={(v) => {
+          // A drag begun on the song that ends after the DJ's item came up is for neither.
+          if (!dj.onAir) player.seek(v);
+          seekPreview = null;
+        }}
       />
       <span class="time num">{formatDuration(air ? air.durationMs : (track?.durationMs ?? 0))}</span>
     </div>
   </div>
 
   <div class="extras">
-    {#if dj.phase !== "off"}
+    {#if dj.phase !== "off" && !air}
       <button class="dj-chip" class:busy={dj.phase === "starting"} onclick={() => router.go({ name: "dj" })} title="Your DJ">
         <Icon name="dj" size={14} /><span>{dj.current?.name ?? dj.upNext?.name ?? "DJ"}</span>
       </button>
