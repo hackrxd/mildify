@@ -26,6 +26,23 @@ song before halfway, that artist sits out the rest of the session.
 
 The 2026 Web API has no recommendations, so the DJ plays only music you already listen to.
 
+### Picking as it goes
+
+With **Pick songs as it goes** on (Settings → AI DJ, off by default), the DJ still plans each set, but it only
+commits to one song at a time: while a song plays, it picks the next and lines it up in the player's queue. What
+you do changes what comes next:
+
+- **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it: more by that
+  artist, or from that album, even from outside the set. It can change the song it lined up until about 35
+  seconds before the one playing ends, when the player starts loading it.
+- **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
+- The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped, so it can
+  mention it.
+
+The DJ takes over the queue while it plays this way: songs you queue yourself are replaced by its next pick. If you
+skip a set's last song before the next set is ready, the music waits and the DJ starts it as soon as it can,
+talking from a template if the model is still working.
+
 ## How it talks
 
 The DJ plays one set at a time. While a set plays, it prepares the next one: the model writes the line, and the

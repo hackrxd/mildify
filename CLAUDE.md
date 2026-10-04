@@ -98,7 +98,11 @@ the music right at the song's end. Spotify's queued song is caught as it comes u
 start by a cue on the line's clock (`Voice.now()`, kept in the page between the backend's reports, which stands still
 while paused). While it talks, `dj_duck` lowers
 the music in the sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again
-every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep.
+every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. With `dj.live` (Settings: "Pick songs
+as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
+`#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
+lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
+picked only as the last song starts.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
