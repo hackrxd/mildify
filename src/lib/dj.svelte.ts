@@ -279,7 +279,10 @@ class Dj {
 
   async init() {
     await listen<DjInstall>("dj-progress", (e) => {
+      const was = this.status?.install.component;
       if (this.status) this.status = { ...this.status, install: e.payload };
+      // On to the next download: the one before it is in, so what's left changed.
+      if (e.payload.component !== was) this.refresh();
     });
     await listen("dj-installed", () => this.refresh());
     // A reload in the middle of a line mustn't leave the music turned down.
