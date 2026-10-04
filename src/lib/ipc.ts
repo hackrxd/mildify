@@ -135,6 +135,14 @@ export interface AudioLevel {
   bass: number;
 }
 
+/** What `ui_update` found (src-tauri/src/ui.rs). */
+export type UiUpdate =
+  | { status: "up_to_date" }
+  /** Downloaded: a reload loads it, and playback carries on. */
+  | { status: "ready"; version: string }
+  /** The release changes the app itself: the full updater, and a restart that stops playback. */
+  | { status: "restart"; version: string };
+
 type Query = Record<string, string | number | boolean | undefined | null>;
 
 export const backend = {
@@ -159,6 +167,10 @@ export const backend = {
   lyricsServerLogout: () => invoke<LyricsServerStatus>("lyrics_server_logout"),
   listMods: () => invoke<ModList>("list_mods"),
   openModsFolder: (kind: ModKind) => invoke<void>("open_mods_folder", { kind }),
+  /** Checks for a newer interface and downloads it if this build can load it without a restart. */
+  uiUpdate: () => invoke<UiUpdate>("ui_update"),
+  /** Serves the downloaded interface from the next page load; reload right after. */
+  applyUiUpdate: () => invoke<boolean>("apply_ui_update"),
   /** Answers a `devtools-ask` event. */
   devtoolsAnswer: (id: number, value: unknown) => invoke<void>("devtools_answer", { id, value }),
 };
