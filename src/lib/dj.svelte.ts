@@ -827,8 +827,8 @@ class Dj {
       }
     }
     if (player.isPlaying) this.#musicAsked = false;
-    // Music that came in after the listener paused the DJ is paused too.
-    if (this.paused && this.#pausedMusic && player.isPlaying && now - this.#repausedAt > 1000) {
+    // The DJ's music that came in after the listener paused it is paused too; music they picked themselves isn't.
+    if (this.paused && this.#pausedMusic && player.isPlaying && uri && this.#isDjSong(uri) && now - this.#repausedAt > 1000) {
       this.#repausedAt = now;
       backend.device({ action: "pause" }).catch(() => {});
     }
@@ -924,8 +924,17 @@ class Dj {
     if (!uri) return;
     const song = this.#isDjSong(uri);
     if (!song) {
-      // Before a set the DJ started comes in, whatever was playing plays on under the voice.
-      if (!this.#awaiting) this.#foreignSince ??= performance.now();
+      // The listener's own pick is heard, under the voice, not held silent for the DJ's talk.
+      if (this.#level === 0) {
+        this.#heldMusic = false;
+        this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, DUCK_UP_MS);
+      }
+      // Before a set the DJ started comes in, whatever was playing plays on under the voice. Otherwise the
+      // listener moved on, and nothing the DJ planned is to be done to their song.
+      if (!this.#awaiting) {
+        this.#foreignSince ??= performance.now();
+        this.#bringIn = null;
+      }
       return;
     }
     this.#foreignSince = null;

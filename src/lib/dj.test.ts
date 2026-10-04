@@ -332,6 +332,18 @@ describe("starting", () => {
     expect(player.playUris).toHaveBeenCalled();
   });
 
+  it("lets a song the listener picks during its greeting be heard", async () => {
+    player.track = { uri: "spotify:track:before", durationMs: DURATION };
+    await dj.start();
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, 600, mod.OPENING_FADE_MS);
+    await vi.advanceTimersByTimeAsync(300);
+    await playing("spotify:track:mine", 0);
+    // Up from the silence, under the voice, and not paused once the fade would have ended.
+    expect(backend.djDuck).toHaveBeenLastCalledWith(timing.DUCK_LEVEL, 0, timing.DUCK_UP_MS);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+  });
+
   it("keeps its song paused when the listener paused before it came in", async () => {
     player.isPlaying = false;
     await dj.start();
@@ -745,6 +757,20 @@ describe("the DJ's item", () => {
     // With no DJ item up, next is the player's again.
     dj.skipTalk();
     expect(player.next).toHaveBeenCalled();
+  });
+
+  it("leaves music the listener picks while it's paused alone, and steps out", async () => {
+    speechMs = 20_000;
+    const first = await started();
+    await lastSong2(first);
+    dj.togglePause();
+    expect(backend.device).toHaveBeenLastCalledWith({ action: "pause" });
+    player.isPlaying = false;
+    backend.device.mockClear();
+    await playing("spotify:track:mine", 0);
+    await vi.advanceTimersByTimeAsync(mod.FOREIGN_MS + mod.TICK_MS * 2);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+    expect(dj.phase).toBe("off");
   });
 
   it("pause holds the talk and the music under it", async () => {
