@@ -1,13 +1,26 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { buildInfo } from "./scripts/build-info.ts";
 
 const host = process.env.TAURI_DEV_HOST;
+const root = fileURLToPath(new URL(".", import.meta.url));
+const info = buildInfo(root);
+
+/** Writes dist/build.json, which tells the backend which binary this UI can run in (src-tauri/src/ui.rs). */
+const buildJson: Plugin = {
+  name: "mildify-build-json",
+  apply: "build",
+  generateBundle() {
+    this.emitFile({ type: "asset", fileName: "build.json", source: JSON.stringify(info) });
+  },
+};
 
 // https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), buildJson],
+  define: { __APP_VERSION__: JSON.stringify(info.version) },
   resolve: {
     // Svelte's default export condition is its server build, where runes don't react.
     conditions: process.env.VITEST ? ["browser"] : undefined,
@@ -26,7 +39,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     restoreMocks: true,
     // Built-in themes are imported as ?url; unprocessed CSS would give them an empty one.
     css: { include: [/src\/themes\//] },
