@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dj } from "../lib/dj.svelte";
   import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
   import { reveal } from "../lib/reveal";
@@ -33,6 +34,15 @@
         </button>
       </li>
     {/each}
+    {#if dj.enabled}
+      <li>
+        <button class="nav-item" class:active={current.name === "dj"} onclick={() => router.go({ name: "dj" })}>
+          <Icon name="dj" />
+          <span>DJ</span>
+          {#if dj.phase !== "off"}<span class="eq"><Equalizer label="Your DJ is on" /></span>{/if}
+        </button>
+      </li>
+    {/if}
     {#each mods.pages as page (page.key)}
       <li>
         <button

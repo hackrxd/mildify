@@ -4,6 +4,7 @@
 // Nothing sent to the port runs in the window.
 
 import { listen } from "@tauri-apps/api/event";
+import { dj } from "./dj.svelte";
 import { backend } from "./ipc";
 import { player } from "./player.svelte";
 
@@ -39,19 +40,21 @@ export async function act(ask: DevtoolsAsk): Promise<unknown> {
     case "snapshot":
       return snapshot();
     case "seek":
-      await player.seek(ask.position_ms);
+      // While the DJ talks between songs, the song under it isn't the listener's to move.
+      if (!dj.onAir) await player.seek(ask.position_ms);
       break;
     case "volume":
       player.setVolume(ask.fraction * 100);
       break;
+    // As the player bar's buttons do, these act on the DJ's talk while it's the item playing.
     case "toggle_play":
-      await player.togglePlay();
+      await dj.togglePause();
       break;
     case "next":
-      await player.next();
+      await dj.skipTalk();
       break;
     case "back":
-      await player.prev();
+      await dj.previous();
       break;
   }
   return null;

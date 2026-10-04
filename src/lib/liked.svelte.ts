@@ -6,10 +6,14 @@ import { libraryContains, removeFromLibrary, saveToLibrary } from "./spotify";
 import { toasts } from "./toasts.svelte";
 
 const BATCH = 40;
+/** After a failed lookup, how long before a URI is asked about again. */
+const RETRY_MS = 30_000;
 
 class Liked {
   #saved = new SvelteMap<string, boolean>();
   #queued = new Set<string>();
+  /** Queued, in flight, or failed lately: callers that ask again meanwhile (some ask every frame) send nothing. */
+  #asked = new Set<string>();
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   /** `undefined` while unknown. */
@@ -20,7 +24,10 @@ class Liked {
   /** Schedules a lookup for any URIs we don't know about yet. */
   ensure(uris: string[]) {
     for (const uri of uris) {
-      if (uri && !this.#saved.has(uri)) this.#queued.add(uri);
+      if (uri && !this.#saved.has(uri) && !this.#asked.has(uri)) {
+        this.#asked.add(uri);
+        this.#queued.add(uri);
+      }
     }
     if (this.#queued.size && !this.#timer) {
       this.#timer = setTimeout(() => this.#flush(), 60);
@@ -40,8 +47,10 @@ class Liked {
       try {
         const result = await libraryContains(chunk);
         chunk.forEach((uri, j) => this.#saved.set(uri, !!result[j]));
+        for (const uri of chunk) this.#asked.delete(uri);
       } catch {
-        // Leave unknown; hearts just stay hidden.
+        // Leave unknown; hearts just stay hidden, and it's asked again only after a while.
+        setTimeout(() => chunk.forEach((uri) => this.#asked.delete(uri)), RETRY_MS);
       }
     }
   }

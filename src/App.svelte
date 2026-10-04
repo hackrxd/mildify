@@ -9,6 +9,7 @@
   import Toasts from "./components/Toasts.svelte";
   import TopBar from "./components/TopBar.svelte";
   import { startDevtools } from "./lib/devtools";
+  import { dj } from "./lib/dj.svelte";
   import { player } from "./lib/player.svelte";
   import { router } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
@@ -29,6 +30,7 @@
   import Search from "./views/Search.svelte";
   import Settings from "./views/Settings.svelte";
   import Changelog from "./views/Changelog.svelte";
+  import Dj from "./views/Dj.svelte";
 
   let main: HTMLElement | undefined = $state();
   let backdrop: HTMLElement | undefined = $state();
@@ -42,6 +44,7 @@
   whatsNew.start();
   mods.init();
   startDevtools();
+  dj.init().catch((e) => console.warn("DJ:", e));
 
   // Start polling playback once the Web API is usable.
   $effect(() => {
@@ -49,6 +52,11 @@
       playerStarted = true;
       player.start();
     }
+  });
+
+  // Signed out: the DJ has nothing to play.
+  $effect(() => {
+    if (!session.ready) untrack(() => dj.stop());
   });
 
   // Extensions can add pages and menu items, so they wait for the app shell.
@@ -95,11 +103,12 @@
       return;
     } else if (e.key === " " && (e.target as HTMLElement).tagName !== "BUTTON") {
       e.preventDefault();
-      player.togglePlay();
+      // While the DJ talks between songs, these act on its talk (see NowPlaying).
+      dj.togglePause();
     } else if (mod && e.key === "ArrowRight") {
-      player.next();
+      dj.skipTalk();
     } else if (mod && e.key === "ArrowLeft") {
-      player.prev();
+      dj.previous();
     } else if (mod && e.key === "ArrowUp") {
       e.preventDefault();
       player.setVolume(player.volume + 10);
@@ -206,6 +215,8 @@
             <Playlist id={route.id} />
           {:else if route.name === "lyrics"}
             <Lyrics {backdrop} />
+          {:else if route.name === "dj"}
+            <Dj />
           {:else if route.name === "settings"}
             <Settings />
           {:else if route.name === "changelog"}

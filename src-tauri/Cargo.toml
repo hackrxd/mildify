@@ -37,6 +37,13 @@ tar = "0.4"
 semver = "1"
 # Also in the tree through librespot-core; the DevTools endpoint (devtools.rs) speaks WebSocket with it.
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+# The AI DJ's downloads (dj/install.rs): sherpa-onnx ships .tar.bz2 (pure-Rust bzip2), llama.cpp ships
+# Windows builds as .zip. zip is already in the tree through the updater, without deflate.
+bzip2 = "0.6"
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
+# The DJ's voice (dj/speaker.rs) plays natively, as the music does: already in the tree through librespot's
+# rodio backend, with the same features.
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
 
 # librespot is pinned to a dev-branch commit: the 0.8.0 release predates the
 # 2026 CDN fallback fix (#1722) that keeps playback working against current servers.

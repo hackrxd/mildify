@@ -315,6 +315,17 @@ describe("the embedded device", () => {
     expect(player.isLoading).toBe(false);
   });
 
+  it("keeps the shown song's position while the next one loads", async () => {
+    emit({ type: "playing", uri: "spotify:track:a", position_ms: 190_000 });
+    await vi.advanceTimersByTimeAsync(1000);
+    emit({ type: "loading", uri: "spotify:track:b", position_ms: 0 });
+    expect(player.isLoading).toBe(true);
+    expect(player.positionNow()).toBe(191_000);
+    // Loading the shown song again starts it where it says.
+    emit({ type: "loading", uri: "spotify:track:a", position_ms: 0 });
+    expect(player.positionNow()).toBe(0);
+  });
+
   it("takes a new track from a track event, then fills in the album link from a poll", async () => {
     emit({
       type: "track",

@@ -45,6 +45,90 @@ export interface Config {
   normalisation: boolean;
   /** Serve the Spotify app's DevTools endpoint for mild-lyrics (devtools.rs). */
   devtools: boolean;
+  dj: DjConfig;
+}
+
+/** The AI DJ's settings (src-tauri/src/dj/mod.rs). */
+export interface DjConfig {
+  /** Off until turned on; nothing is downloaded before. */
+  enabled: boolean;
+  /** A model id from `DjStatus.models`, or "own" for the server below. */
+  model: string;
+  voice: string;
+  server_url: string;
+  server_model: string;
+}
+
+/** A download the DJ's settings need. */
+export interface DjNeeded {
+  id: string;
+  label: string;
+  bytes: number;
+  installed: boolean;
+}
+
+export interface DjInstall {
+  running: boolean;
+  /** What's downloading now. */
+  component: string | null;
+  received: number;
+  total: number | null;
+  error: string | null;
+}
+
+export interface DjChoice {
+  id: string;
+  label: string;
+  detail: string | null;
+  bytes: number;
+}
+
+export interface DjStatus {
+  /** Prebuilt runtimes exist for this computer. */
+  supported: boolean;
+  settings: DjConfig;
+  /** Everything the settings need is downloaded, and an own server is set up. */
+  ready: boolean;
+  /** What the own-server settings still need, if anything. */
+  setup: string | null;
+  needed: DjNeeded[];
+  install: DjInstall;
+  disk_bytes: number;
+  folder: string;
+  models: DjChoice[];
+  voices: DjChoice[];
+}
+
+export interface DjMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** A sentence of a spoken line and when it's said, from the start of the audio. */
+export interface DjSentence {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export type DjVoiceCommand =
+  | { action: "play"; id: number; gain: number }
+  | { action: "pause" }
+  | { action: "resume" }
+  | { action: "gain"; gain: number }
+  | { action: "stop" };
+
+/** A `dj-voice` event: the line playing this far in (as it starts, then a few times a second), done, or unplayable. */
+export type DjVoiceEvent =
+  | { state: "playing"; id: number; position_ms: number }
+  | { state: "ended"; id: number }
+  | { state: "failed"; id: number; error: string };
+
+/** A line `dj_speak` read aloud; `djVoice` plays it. */
+export interface DjSpeech {
+  id: number;
+  duration_ms: number;
+  sentences: DjSentence[];
 }
 
 /** The DevTools endpoint: the port it's on, or why it isn't. */
@@ -105,7 +189,11 @@ export type DeviceCommand =
   | { action: "seek"; position_ms: number }
   | { action: "volume"; percent: number }
   | { action: "shuffle"; on: boolean }
-  | { action: "repeat"; mode: RepeatMode };
+  | { action: "repeat"; mode: RepeatMode }
+  /** A song after the one playing, ahead of the rest. */
+  | { action: "queue"; uri: string }
+  /** Takes out what was queued; the rest of what's playing stays. */
+  | { action: "clear_queue" };
 
 export type RepeatMode = "off" | "context" | "track";
 
@@ -173,6 +261,25 @@ export const backend = {
   applyUiUpdate: () => invoke<boolean>("apply_ui_update"),
   /** Answers a `devtools-ask` event. */
   devtoolsAnswer: (id: number, value: unknown) => invoke<void>("devtools_answer", { id, value }),
+  djStatus: () => invoke<DjStatus>("dj_status"),
+  /** Turning the DJ on starts its downloads; off stops them and unloads the model. */
+  djConfigure: (settings: Partial<DjConfig>) => invoke<DjStatus>("dj_configure", { settings }),
+  djInstall: () => invoke<void>("dj_install"),
+  djCancel: () => invoke<void>("dj_cancel"),
+  /** Turns the DJ off and deletes its downloads. */
+  djRemove: () => invoke<DjStatus>("dj_remove"),
+  /** Loads the model ahead of the first request. */
+  djWarm: () => invoke<void>("dj_warm"),
+  /** Asks the DJ's model; with a JSON schema, resolves to JSON that fits it. */
+  djGenerate: (messages: DjMessage[], schema?: object, maxTokens?: number) =>
+    invoke<unknown>("dj_generate", { messages, schema, maxTokens }),
+  djSpeak: (text: string) => invoke<DjSpeech>("dj_speak", { text }),
+  /** Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes. */
+  djVoice: (command: DjVoiceCommand) => invoke<void>("dj_voice", { command }),
+  /** Turns the embedded player's music down to `level` (0-1), `delayMs` from now in heard time, or back up. */
+  djDuck: (level: number, delayMs = 0, rampMs = 400) => invoke<void>("dj_duck", { level, delayMs, rampMs }),
+  /** Unloads the model. */
+  djRelease: () => invoke<void>("dj_release"),
 };
 
 let authLost: (() => void) | null = null;

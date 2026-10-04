@@ -135,6 +135,16 @@ leaves it.
 Romanization isn't included yet: upstream downloads and runs romanization packages from a CDN
 at runtime. Lyrics that ship their own romanization still get the toggle.
 
+## AI DJ
+
+A radio DJ for your own music, like Spotify's: it plays sets from your top tracks, recent plays and liked songs,
+and talks between them with a language model ([llama.cpp](https://github.com/ggml-org/llama.cpp)) and a voice
+([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with Kokoro) that run on your computer. It's off by
+default, and nothing of it ships with the app: turning it on (Settings → AI DJ) downloads about 1.3 GB, once.
+It times its talk with the songs' synced lyrics so it never talks over the singing, shows what it says as
+captions like a lyric line, turns the music down inside the player while it talks, and takes your own
+instructions. It can also use a model server you already run (Ollama, LM Studio). See [docs/dj.md](docs/dj.md).
+
 ## Lyrics service
 
 Lyrics are fetched only from the Nativify lyrics service at `https://nativify.hackrvt.xyz`

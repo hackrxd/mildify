@@ -6,7 +6,10 @@
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import { formatDuration } from "../lib/util";
+  import { dj } from "../lib/dj.svelte";
   import DeckLyric from "./DeckLyric.svelte";
+  import DjCaption from "./DjCaption.svelte";
+  import DjCover from "./DjCover.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
   import Pop from "./Pop.svelte";
@@ -15,6 +18,9 @@
   let { queueOpen, ontogglequeue }: { queueOpen: boolean; ontogglequeue: () => void } = $props();
 
   const track = $derived(player.track);
+  // While the DJ talks between songs, its talk is the item playing, with its own progress and controls.
+  const air = $derived(dj.onAir);
+  const playing = $derived(air ? !dj.paused : player.isPlaying);
   let ambient = $state<string | null>(null);
   let deck: HTMLElement | undefined = $state();
   let seekPreview = $state<number | null>(null);
@@ -53,7 +59,20 @@
 <footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"} style:--audio-intensity={audioFx.intensity}>
   {#if audioFx.on}<div class="flare" aria-hidden="true"><div></div></div>{/if}
   <div class="info">
-    {#if track}
+    {#if air}
+      {#key air}
+        <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => router.go({ name: "dj" })} title="Your DJ">
+          <DjCover size={60} />
+        </button>
+        <div class="text" in:rise={{ y: 6, delay: 60 }}>
+          <div class="title-row">
+            <button class="title link" onclick={() => router.go({ name: "dj" })}>{air.name}</button>
+          </div>
+          <div class="artists muted">Your DJ · next: {air.next.name}</div>
+        </div>
+      {/key}
+      {#if router.current.name !== "lyrics"}<DjCaption />{/if}
+    {:else if track}
       <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
       {#key track.uri}
         <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
@@ -76,7 +95,13 @@
           </button>
         {/if}
       {/key}
-      <DeckLyric />
+      {#if dj.speaking && router.current.name !== "lyrics"}
+        <DjCaption />
+      {:else}
+        <DeckLyric />
+      {/if}
+    {:else if dj.speaking}
+      <DjCaption />
     {:else}
       <p class="idle muted">Pick something to play.</p>
     {/if}
@@ -87,13 +112,13 @@
       <button class="icon-btn" class:on={player.shuffle} onclick={() => player.toggleShuffle()} title="Shuffle" aria-pressed={player.shuffle}>
         <Icon name="shuffle" size={18} />
       </button>
-      <button class="icon-btn" onclick={() => player.prev()} title="Previous">
+      <button class="icon-btn" onclick={() => dj.previous()} disabled={!!air} title="Previous">
         <Icon name="prev" size={18} />
       </button>
-      <button class="play" onclick={() => player.togglePlay()} title={player.isPlaying ? "Pause" : "Play"}>
-        <Pop key={player.isPlaying}><Icon name={player.isPlaying ? "pause" : "play"} size={18} /></Pop>
+      <button class="play" onclick={() => dj.togglePause()} title={playing ? "Pause" : "Play"}>
+        <Pop key={playing}><Icon name={playing ? "pause" : "play"} size={18} /></Pop>
       </button>
-      <button class="icon-btn" onclick={() => player.next()} title="Next">
+      <button class="icon-btn" onclick={() => dj.skipTalk()} title={air ? "Skip the DJ" : "Next"}>
         <Icon name="next" size={18} />
       </button>
       <button
@@ -106,21 +131,30 @@
       </button>
     </div>
     <div class="progress">
-      <span class="time num">{formatDuration(seekPreview ?? player.position)}</span>
+      <span class="time num">{formatDuration(air ? dj.talkMs : (seekPreview ?? player.position))}</span>
       <Slider
         label="Seek"
-        value={player.position}
-        max={track?.durationMs ?? 0}
+        value={air ? dj.talkMs : player.position}
+        max={air ? air.durationMs : (track?.durationMs ?? 0)}
         step={5000}
-        disabled={!track || !player.deviceId}
-        onpreview={(v) => (seekPreview = v)}
-        oncommit={(v) => player.seek(v)}
+        disabled={!!air || !track || !player.deviceId}
+        onpreview={(v) => (seekPreview = air ? null : v)}
+        oncommit={(v) => {
+          // A drag begun on the song that ends after the DJ's item came up is for neither.
+          if (!dj.onAir) player.seek(v);
+          seekPreview = null;
+        }}
       />
-      <span class="time num">{formatDuration(track?.durationMs ?? 0)}</span>
+      <span class="time num">{formatDuration(air ? air.durationMs : (track?.durationMs ?? 0))}</span>
     </div>
   </div>
 
   <div class="extras">
+    {#if dj.phase !== "off" && !air}
+      <button class="dj-chip" class:busy={dj.phase === "starting"} onclick={() => router.go({ name: "dj" })} title="Your DJ">
+        <Icon name="dj" size={14} /><span>{dj.current?.name ?? dj.upNext?.name ?? "DJ"}</span>
+      </button>
+    {/if}
     {#if player.deviceId && !player.isLocal}
       <span class="remote" title="Playing on another device">
         <Icon name="speaker" size={14} />{player.deviceName}
@@ -348,5 +382,36 @@
   .volume {
     width: 110px;
     flex: none;
+  }
+  /* The DJ is on: its segment, a click from the DJ page. */
+  .dj-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 180px;
+    height: 26px;
+    margin-right: 6px;
+    padding: 0 10px;
+    border-radius: 13px;
+    background: color-mix(in srgb, var(--highlight) 16%, transparent);
+    color: var(--highlight);
+    font-size: var(--t-xs);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .dj-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dj-chip :global(svg) {
+    flex: none;
+  }
+  .dj-chip.busy {
+    animation: breathe 1.6s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    50% {
+      opacity: 0.55;
+    }
   }
 </style>

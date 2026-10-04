@@ -2,12 +2,15 @@
   import Icon from "../components/Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
+  import { dj } from "../lib/dj.svelte";
+  import { INSTRUCTIONS_MAX } from "../lib/djPicks";
+  import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
   import { whatsNew } from "../lib/whatsnew.svelte";
-  import { plural } from "../lib/util";
+  import { formatBytes, lowerFirst, plural } from "../lib/util";
   import { builtinThemes } from "../themes";
 
   const config = $derived(session.status?.config);
@@ -60,6 +63,30 @@
     { length: Math.round((TEXT_SCALE_MAX - TEXT_SCALE_MIN) / TEXT_SCALE_STEP) + 1 },
     (_, i) => Math.round((TEXT_SCALE_MIN + i * TEXT_SCALE_STEP) * 100) / 100,
   );
+
+  dj.refresh();
+  const djStatus = $derived(dj.status);
+  const djSettings = $derived(djStatus?.settings);
+  const djMissing = $derived(djStatus?.needed.filter((n) => !n.installed) ?? []);
+  const djToDownload = $derived(djMissing.reduce((n, c) => n + c.bytes, 0));
+  const djInstall = $derived(djStatus?.install);
+  let serverUrl = $state(dj.status?.settings.server_url ?? "");
+  let serverModel = $state(dj.status?.settings.server_model ?? "");
+  // Fill the fields once the status arrives, without overwriting what's being typed afterwards.
+  let serverLoaded = false;
+  $effect(() => {
+    if (djSettings && !serverLoaded) {
+      serverLoaded = true;
+      serverUrl = djSettings.server_url;
+      serverModel = djSettings.server_model;
+    }
+  });
+
+  function saveServer() {
+    if (serverUrl.trim() !== djSettings?.server_url || serverModel.trim() !== djSettings?.server_model) {
+      dj.configure({ server_url: serverUrl.trim(), server_model: serverModel.trim() });
+    }
+  }
 
   function saveName() {
     const name = deviceName.trim();
@@ -324,6 +351,173 @@
         onchange={(e) => session.saveSettings({ devtools: e.currentTarget.checked })}
       />
     </label>
+  </section>
+
+  <section>
+    <h2>AI DJ</h2>
+
+    <label class="row">
+      <span>
+        <span class="label">Turn on the DJ</span>
+        <span class="muted small">
+          Plays songs from your listening and talks between them, like a radio host, with a language model and voice
+          that run on this computer. Turning it on downloads them{djToDownload ? `, about ${formatBytes(djToDownload)}` : ""};
+          nothing is downloaded before.
+        </span>
+      </span>
+      <input
+        type="checkbox"
+        class="switch"
+        checked={dj.enabled}
+        disabled={!djStatus?.supported}
+        onchange={(e) => dj.setEnabled(e.currentTarget.checked)}
+      />
+    </label>
+
+    {#if djStatus && !djStatus.supported}
+      <div class="row"><span class="muted small">The DJ's model and voice aren't built for this computer's processor.</span></div>
+    {:else if dj.enabled && djSettings}
+      <div class="row">
+        <span>
+          {#if djInstall?.running}
+            <span class="label">Downloading {lowerFirst(djInstall.component ?? "the DJ")}…</span>
+            <span class="muted small">
+              {formatBytes(djInstall.received)}{djInstall.total ? ` of ${formatBytes(djInstall.total)}` : ""}
+            </span>
+          {:else if djInstall?.error}
+            <span class="label">Download stopped</span>
+            <span class="small error">{djInstall.error}</span>
+          {:else if djMissing.length}
+            <span class="label">{formatBytes(djToDownload)} left to download</span>
+          {:else if djStatus?.setup}
+            <span class="label">Set up your model server</span>
+            <span class="small error">{djStatus.setup}</span>
+          {:else}
+            <span class="label">Ready</span>
+            <span class="muted small">Start it from the DJ page in the sidebar.</span>
+          {/if}
+        </span>
+        <span class="buttons">
+          {#if djInstall?.running}
+            <button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause</button>
+          {:else if djMissing.length}
+            <button class="btn primary" onclick={() => dj.retry()}>Download</button>
+          {:else if djStatus?.setup}
+            <!-- The fields are right below. -->
+          {:else}
+            <button class="btn quiet" onclick={() => router.go({ name: "dj" })}><Icon name="dj" size={16} /> Open the DJ</button>
+          {/if}
+        </span>
+      </div>
+
+      <label class="row">
+        <span>
+          <span class="label">Language model</span>
+          <span class="muted small">
+            {#if djSettings.model === "own"}
+              Any server with an OpenAI-style chat API: Ollama, LM Studio, llama.cpp. Nothing is downloaded for it.
+            {:else}
+              {djStatus?.models.find((m) => m.id === djSettings.model)?.detail ?? ""}
+            {/if}
+          </span>
+        </span>
+        <select class="field" value={djSettings.model} onchange={(e) => dj.configure({ model: e.currentTarget.value })}>
+          {#each djStatus?.models ?? [] as m (m.id)}
+            <option value={m.id}>{m.label} ({formatBytes(m.bytes)})</option>
+          {/each}
+          <option value="own">Your own model server</option>
+        </select>
+      </label>
+
+      {#if djSettings.model === "own"}
+        <label class="row">
+          <span>
+            <span class="label">Server address</span>
+            <span class="muted small">Ollama listens on http://127.0.0.1:11434, LM Studio on http://127.0.0.1:1234.</span>
+          </span>
+          <input class="field" bind:value={serverUrl} onblur={saveServer} onkeydown={(e) => e.key === "Enter" && saveServer()} />
+        </label>
+        <label class="row">
+          <span>
+            <span class="label">Model name</span>
+            <span class="muted small">As your server lists it, for example llama3.2 or qwen2.5:7b.</span>
+          </span>
+          <input class="field" bind:value={serverModel} onblur={saveServer} onkeydown={(e) => e.key === "Enter" && saveServer()} />
+        </label>
+      {/if}
+
+      <label class="row">
+        <span>
+          <span class="label">Voice</span>
+          <span class="muted small">The voices speak English.</span>
+        </span>
+        <select class="field" value={djSettings.voice} onchange={(e) => dj.configure({ voice: e.currentTarget.value })}>
+          {#each djStatus?.voices ?? [] as v (v.id)}
+            <option value={v.id}>{v.label}</option>
+          {/each}
+        </select>
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over beginning of track</span>
+          <span class="muted small">
+            The next song comes in under the last few seconds of the DJ's talk, and the DJ is done before anyone
+            sings. When the song's intro is too short, or its lyrics aren't synced, it starts after the DJ anyway.
+            Off, songs always start once the DJ is done.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.overStart} onchange={(e) => dj.setOverStart(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over end of track</span>
+          <span class="muted small">
+            The DJ starts over the last few seconds of a song, once nobody is singing. Off, it waits for the song to
+            finish.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Pick songs as it goes</span>
+          <span class="muted small">
+            The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
+            plays more like it, skip one and that artist sits out, skip two and it moves on to something else. Off, it
+            picks a whole set ahead. Applies from its next set.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row stacked">
+        <span>
+          <span class="label">Tell your DJ</span>
+          <span class="muted small">How it should talk and what to play from your listening. Applies from its next set.</span>
+        </span>
+        <textarea
+          class="field prose"
+          rows="3"
+          maxlength={INSTRUCTIONS_MAX}
+          placeholder="Talk like a late-night radio host. Keep it short."
+          value={dj.instructions}
+          oninput={(e) => dj.setInstructions(e.currentTarget.value)}
+        ></textarea>
+      </label>
+    {/if}
+
+    {#if djStatus?.disk_bytes}
+      <div class="row">
+        <span>
+          <span class="label">The DJ's files take {formatBytes(djStatus.disk_bytes)}</span>
+          <span class="muted small">Removing them turns the DJ off. They download again if you turn it back on.</span>
+        </span>
+        <button class="btn quiet" onclick={() => dj.remove()}>Remove the DJ's files</button>
+      </div>
+    {/if}
   </section>
 
   <section>
@@ -646,6 +840,16 @@
     resize: vertical;
     font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
     font-size: var(--t-sm);
+    user-select: text;
+  }
+  .row .prose {
+    width: 100%;
+    height: auto;
+    padding: 10px 12px;
+    color: inherit;
+    resize: vertical;
+    font: inherit;
+    font-size: var(--t-md);
     user-select: text;
   }
   .version {

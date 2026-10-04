@@ -42,6 +42,19 @@ export function year(releaseDate: string | undefined): string {
   return releaseDate?.slice(0, 4) ?? "";
 }
 
+/** For a label used mid-sentence: "Voices (Kokoro)" → "voices (Kokoro)". */
+export function lowerFirst(s: string): string {
+  return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
+/** Download and disk sizes: "1.1 GB", "103 MB". */
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+  return `${Math.max(0, Math.round(n))} B`;
+}
+
 export function plural(n: number, word: string): string {
   return `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 }

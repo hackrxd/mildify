@@ -5,6 +5,20 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Added
+
+- An AI DJ, off until you turn it on in Settings → AI DJ. It plays sets from your top tracks, recent plays and
+  liked songs, and talks between them like a radio host, with a language model and voice that run on your
+  computer. Turning it on downloads them once (about 1.3 GB); nothing is downloaded before, and Settings can
+  remove it all again. Its talk plays like a song of its own between sets, with its own progress, pause and skip,
+  and can start over the end of a song and run into the beginning of the next. It uses the songs' lyrics to
+  never talk over the singing. Settings can keep it off either song. It turns the music down while it talks,
+  and shows what it says as captions in the player bar and the lyrics view. Its page has an on-air light and moves
+  with the show: the next set glides up as it starts, and a highlight follows the song playing. Turn on "Pick songs
+  as it goes" and it picks each next song while one plays, so liking a song brings more like it and skipping moves
+  it on. Tell it how to talk and what to play under "Tell your DJ", or point it at a model server you already run,
+  like Ollama or LM Studio.
+
 ## 1.1.4 - 2026-10-04
 
 ### Added
