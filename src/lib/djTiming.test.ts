@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { captionLines, planTalk, UNKNOWN_OUTRO_MS, vocals, VOCAL_GAP_MS, volumeGain } from "./djTiming";
+import {
+  captionLines,
+  MAX_OVER_INTRO_MS,
+  MAX_OVER_OUTRO_MS,
+  MIN_OVER_INTRO_MS,
+  planTalk,
+  UNKNOWN_OUTRO_MS,
+  vocals,
+  VOCAL_GAP_MS,
+  volumeGain,
+} from "./djTiming";
 
 const lineSync = {
   Type: "Line",
@@ -23,42 +33,82 @@ describe("vocals", () => {
 
 describe("planTalk", () => {
   const old = { first: 10_000, last: 190_000 };
+  const base = { old, oldLeftMs: 30_000, oldDurationMs: 200_000 };
 
-  it("talks over the next song's intro when the line fits there", () => {
-    expect(planTalk({ speechMs: 5000, next: { first: 15_000, last: 1 }, old, oldLeftMs: 30_000, oldDurationMs: 200_000 })).toEqual({
+  it("brings the next song in under a line that fits its intro, done before the singer", () => {
+    expect(planTalk({ ...base, speechMs: 4000, next: { first: 15_000, last: 1 } })).toEqual({
       overOld: 0,
       hold: 0,
+      musicAt: 0,
+      overIntro: 4000,
     });
   });
 
-  it("starts over the end of the finishing song once its singer is done", () => {
-    // 12 s of talk, a 6 s intro: about 6.7 s go before the next song, inside the 9.3 s outro.
-    const plan = planTalk({ speechMs: 12_000, next: { first: 6000, last: 1 }, old, oldLeftMs: 30_000, oldDurationMs: 200_000 });
-    expect(plan).toEqual({ overOld: 12_000 - (6000 - VOCAL_GAP_MS), hold: 0 });
+  it("is an item of its own: at most a few seconds over either song", () => {
+    // 30 s of talk, long instrumental edges on both sides: 5 s over each, 20 s alone.
+    const plan = planTalk({
+      speechMs: 30_000,
+      next: { first: 40_000, last: 1 },
+      old: { first: 0, last: 100_000 },
+      oldLeftMs: 90_000,
+      oldDurationMs: 200_000,
+    });
+    expect(plan).toEqual({ overOld: MAX_OVER_OUTRO_MS, hold: 20_000, musicAt: 25_000, overIntro: MAX_OVER_INTRO_MS });
   });
 
-  it("holds the next song when the line is longer than both gaps", () => {
-    // 20 s of talk, a 2 s intro, a 3 s outro.
-    const plan = planTalk({ speechMs: 20_000, next: { first: 2000, last: 1 }, old: { first: 0, last: 197_000 }, oldLeftMs: 60_000, oldDurationMs: 200_000 });
+  it("starts over the end of the finishing song once its singer is done", () => {
+    // 7 s of talk, a 3 s intro: 2.3 s over the intro, the rest over the 9.3 s outro.
+    const plan = planTalk({ ...base, speechMs: 7000, next: { first: 3000, last: 1 } });
+    expect(plan).toEqual({ overOld: 7000 - 2300, hold: 0, musicAt: 7000 - 2300, overIntro: 2300 });
+  });
+
+  it("talks alone as long as it takes when the line is longer than both edges", () => {
+    // 20 s of talk, a 3 s intro, a 3 s outro.
+    const plan = planTalk({
+      ...base,
+      speechMs: 20_000,
+      next: { first: 3000, last: 1 },
+      old: { first: 0, last: 197_000 },
+    });
     expect(plan.overOld).toBe(3000 - VOCAL_GAP_MS);
-    expect(plan.overOld + plan.hold).toBe(20_000 - (2000 - VOCAL_GAP_MS));
+    expect(plan.overIntro).toBe(3000 - VOCAL_GAP_MS);
+    expect(plan.musicAt).toBe(20_000 - plan.overIntro);
+    expect(plan.overOld + plan.hold).toBe(plan.musicAt);
+  });
+
+  it("plays the next song after the line when its intro is too short to talk over", () => {
+    const plan = planTalk({ ...base, speechMs: 6000, next: { first: VOCAL_GAP_MS + MIN_OVER_INTRO_MS - 1, last: 1 } });
+    expect(plan.overIntro).toBe(0);
+    expect(plan.musicAt).toBe(6000);
   });
 
   it("assumes the singer starts at once, and a short outro, without lyrics", () => {
     const plan = planTalk({ speechMs: 8000, next: null, old: null, oldLeftMs: 60_000, oldDurationMs: 200_000 });
-    expect(plan).toEqual({ overOld: UNKNOWN_OUTRO_MS, hold: 8000 - UNKNOWN_OUTRO_MS });
+    expect(plan).toEqual({ overOld: UNKNOWN_OUTRO_MS, hold: 8000 - UNKNOWN_OUTRO_MS, musicAt: 8000, overIntro: 0 });
   });
 
   it("can't start in the past", () => {
     const plan = planTalk({ speechMs: 8000, next: null, old: null, oldLeftMs: 1200, oldDurationMs: 200_000 });
-    expect(plan).toEqual({ overOld: 1200, hold: 6800 });
+    expect(plan).toMatchObject({ overOld: 1200, hold: 6800 });
   });
 
-  it("with nothing playing, the whole line goes before the music", () => {
+  it("with nothing playing, the line comes first and the song near its end", () => {
     expect(planTalk({ speechMs: 9000, next: { first: 4700, last: 1 }, old: null, oldLeftMs: 0, oldDurationMs: 0 })).toEqual({
       overOld: 0,
       hold: 5000,
+      musicAt: 5000,
+      overIntro: 4000,
     });
+  });
+
+  it("keeps off the next song when talking over beginnings is off", () => {
+    const plan = planTalk({ ...base, speechMs: 8000, next: { first: 15_000, last: 1 }, overStart: false });
+    expect(plan).toMatchObject({ overIntro: 0, musicAt: 8000, overOld: MAX_OVER_OUTRO_MS, hold: 3000 });
+  });
+
+  it("waits for the finishing song when talking over ends is off", () => {
+    const plan = planTalk({ ...base, speechMs: 8000, next: { first: 3000, last: 1 }, overEnd: false });
+    expect(plan).toMatchObject({ overOld: 0, hold: 8000 - 2300, overIntro: 2300 });
   });
 });
 

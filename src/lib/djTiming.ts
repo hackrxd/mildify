@@ -1,7 +1,9 @@
-// When the AI DJ talks, worked out from the songs' lyrics: it talks over the end of the song that's
-// finishing and the start of the next, but not over anyone singing. A synced lyric's first line is where
-// the next song's vocals start; the last line's end is where the finishing song's stop. When a line is
-// longer than both gaps, the next song waits while the DJ finishes.
+// When the AI DJ talks, worked out from the songs' lyrics. The DJ's talk is an item of its own between two
+// songs, as long as the line takes. At its edges it can overlap the songs: it may start over the last few
+// seconds of the finishing song once its singer has stopped, and the next song may come in under its last
+// few seconds, early enough that the DJ is done before anyone sings. A synced lyric's first line is where the
+// next song's vocals start; the last line's end is where the finishing song's stop. Without a sync, or with
+// too short an intro, the next song starts after the DJ. Either overlap can be turned off.
 //
 // Also turns a spoken line's sentence timings into lyric lines, so the captions use the same lines and
 // syllable sweep as the lyrics.
@@ -13,6 +15,11 @@ import { lyricLines, type LyricLine } from "./lyricLines";
 export const VOCAL_GAP_MS = 700;
 /** Without a sync, the DJ assumes the finishing song's last few seconds are free to talk over. */
 export const UNKNOWN_OUTRO_MS = 3000;
+/** The most the DJ talks over either song: its talk stays an item of its own. */
+export const MAX_OVER_INTRO_MS = 5000;
+export const MAX_OVER_OUTRO_MS = 5000;
+/** The next song only comes in under the voice when at least this much of its intro is free to talk over. */
+export const MIN_OVER_INTRO_MS = 1500;
 /** The music under the DJ's voice. */
 export const DUCK_LEVEL = 0.22;
 export const DUCK_DOWN_MS = 450;
@@ -34,22 +41,44 @@ export function vocals(lyrics: unknown): Vocals | null {
 export interface TalkPlan {
   /** How long before the finishing song ends the DJ starts talking. */
   overOld: number;
-  /** How long the next song waits after the finishing one ends, while the DJ talks on. */
+  /** How long the DJ talks on its own between the two songs. */
   hold: number;
+  /** How far into the line the next song starts. */
+  musicAt: number;
+  /** How much of the line is said over the next song's intro. */
+  overIntro: number;
 }
 
-/**
- * Plans the talk between two songs. `oldLeftMs` is how much of the finishing song is left now (0 when
- * nothing is playing); the vocals are null when there's no synced lyric.
- */
-export function planTalk(p: { speechMs: number; next: Vocals | null; old: Vocals | null; oldLeftMs: number; oldDurationMs: number }): TalkPlan {
-  // Talk that fits over the next song's intro, before its singer comes in.
-  const overIntro = p.next ? Math.max(0, p.next.first - VOCAL_GAP_MS) : 0;
-  const needBefore = Math.max(0, p.speechMs - overIntro);
+export interface TalkAsk {
+  speechMs: number;
+  /** The songs' vocals; null without a synced lyric. */
+  next: Vocals | null;
+  old: Vocals | null;
+  /** How much of the finishing song is left now; 0 when nothing is playing. */
+  oldLeftMs: number;
+  oldDurationMs: number;
+  /** Settings → AI DJ: the next song may start under the end of the talk. */
+  overStart?: boolean;
+  /** Settings → AI DJ: the talk may start over the end of the finishing song. */
+  overEnd?: boolean;
+}
+
+/** Plans the DJ's talk between two songs. */
+export function planTalk(p: TalkAsk): TalkPlan {
+  // The end of the line that fits over the next song's intro, before its singer comes in.
+  const room = p.overStart !== false && p.next ? p.next.first - VOCAL_GAP_MS : 0;
+  const overIntro = room >= MIN_OVER_INTRO_MS ? Math.min(room, p.speechMs, MAX_OVER_INTRO_MS) : 0;
+  const musicAt = Math.max(0, p.speechMs - overIntro);
   // Room at the end of the finishing song, after its singer is done.
-  const outroRoom = p.old ? Math.max(0, p.oldDurationMs - p.old.last - VOCAL_GAP_MS) : UNKNOWN_OUTRO_MS;
-  const overOld = Math.round(Math.min(needBefore, outroRoom, Math.max(0, p.oldLeftMs)));
-  return { overOld, hold: Math.round(needBefore - overOld) };
+  const outroRoom =
+    p.overEnd === false ? 0 : p.old ? Math.max(0, p.oldDurationMs - p.old.last - VOCAL_GAP_MS) : UNKNOWN_OUTRO_MS;
+  const overOld = Math.round(Math.min(musicAt, outroRoom, MAX_OVER_OUTRO_MS, Math.max(0, p.oldLeftMs)));
+  return {
+    overOld,
+    hold: Math.round(musicAt - overOld),
+    musicAt: Math.round(musicAt),
+    overIntro: Math.round(p.speechMs - musicAt),
+  };
 }
 
 /** A spoken line's sentences as lyric lines, each word a syllable timed by its share of the letters. */
