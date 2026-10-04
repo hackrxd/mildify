@@ -85,6 +85,23 @@ describe("Pulse", () => {
     }
   });
 
+  it("hits hard on kicks over a bass line", () => {
+    const p = new mod.Pulse();
+    let onKick = 1;
+    let between = 0;
+    for (let i = 0; i < 300; i++) {
+      const kick = i % 30 < 4;
+      // A dense rock mix: the bass guitar never stops, the kick adds a little on top.
+      p.feed(kick ? 0.14 : 0.1);
+      p.step(16);
+      if (i < 120) continue;
+      if (i % 30 === 3) onKick = Math.min(onKick, p.value);
+      if (i % 30 === 29) between = Math.max(between, p.value);
+    }
+    expect(onKick).toBeGreaterThan(0.7);
+    expect(between).toBeLessThan(0.35);
+  });
+
   it("settles under sustained bass", () => {
     const p = new mod.Pulse();
     p.feed(0.2);

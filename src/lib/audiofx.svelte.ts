@@ -13,7 +13,10 @@ const PEAK_DECAY_MS = 4000;
 /** Below this the music is silent, not quiet: the pulse doesn't amplify it. */
 const PEAK_FLOOR = 0.002;
 /** How fast the running average follows the bass; a hit is what rises above it. */
-const AVERAGE_MS = 300;
+const AVERAGE_MS = 200;
+/** A hit is measured against the gap between the average and the peak, but never less than this
+ * share of the peak, so small wobbles in steady bass don't count as full hits. */
+const MIN_RANGE = 0.2;
 const ATTACK_MS = 25;
 const RELEASE_MS = 160;
 /** Longer frames than this (a hidden window) count as this long. */
@@ -24,9 +27,10 @@ function approach(from: number, to: number, dtMs: number, timeMs: number): numbe
 }
 
 /**
- * Turns bass levels into a pulse from 0 to 1. Levels are taken against the loudest lately, so
- * the volume and the song's mastering don't matter, and a hit above the running average counts
- * more than sustained bass. It rises fast and falls back slower.
+ * Turns bass levels into a pulse from 0 to 1. A hit is how far the bass jumps above its running
+ * average, against how far the loudest lately did: a kick reaches 1 even in a dense mix with a
+ * bass line under it, at any volume. Sustained bass adds only a little. It rises fast and falls
+ * back slower.
  */
 export class Pulse {
   value = 0;
@@ -45,8 +49,9 @@ export class Pulse {
     this.#peak = Math.max(PEAK_FLOOR, this.#bass, this.#peak * Math.exp(-dt / PEAK_DECAY_MS));
     this.#average = approach(this.#average, this.#bass, dt, AVERAGE_MS);
     const level = this.#bass / this.#peak;
-    const hit = Math.max(0, this.#bass - this.#average) / this.#peak;
-    const target = Math.min(1, 0.3 * level * level + 1.6 * hit);
+    const range = Math.max(this.#peak - this.#average, this.#peak * MIN_RANGE);
+    const hit = Math.max(0, this.#bass - this.#average) / range;
+    const target = Math.min(1, 0.25 * level * level + hit);
     this.value = approach(this.value, target, dt, target > this.value ? ATTACK_MS : RELEASE_MS);
     return this.value;
   }
