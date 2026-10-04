@@ -446,20 +446,24 @@
     <h2>Updates</h2>
     <div class="row">
       <span>
-        <span class="label">Mildify {updater.current}</span>
+        <span class="label">
+          Mildify {updater.current}{updater.app && updater.app !== updater.current ? ` (app ${updater.app})` : ""}
+        </span>
         <span class="muted small">
           {#if import.meta.env.DEV}Development builds don't update themselves.
           {:else if updater.state === "checking"}Checking for updates…
           {:else if updater.state === "up_to_date"}You're on the latest version.
           {:else if updater.state === "downloading"}Downloading {updater.available}{updater.progress === null ? "…" : ` (${Math.round(updater.progress * 100)}%)`}
-          {:else if updater.state === "ready" || updater.state === "installing"}Version {updater.available} is downloaded and ready.
+          {:else if (updater.state === "ready" || updater.state === "installing") && updater.needsRestart}Version {updater.available} is downloaded. Installing it restarts Mildify, which stops your music.
+          {:else if updater.state === "ready" || updater.state === "installing"}Version {updater.available} is downloaded. Reloading applies it without stopping your music.
           {:else if updater.state === "error"}Couldn't check for updates: {updater.error}
-          {:else}Updates download in the background and install when you restart.{/if}
+          {:else}Updates download in the background. Most apply with a reload and the music keeps playing; ones that change the app itself need a restart, which stops it.{/if}
         </span>
       </span>
       {#if updater.state === "ready" || updater.state === "installing"}
-        <button class="btn primary" onclick={() => updater.restart()} disabled={updater.state === "installing"}>
-          {updater.state === "installing" ? "Installing…" : "Restart now"}
+        <button class="btn primary" onclick={() => updater.apply()} disabled={updater.state === "installing"}>
+          {#if updater.needsRestart}{updater.state === "installing" ? "Installing…" : "Restart and stop music"}
+          {:else}{updater.state === "installing" ? "Reloading…" : "Reload now"}{/if}
         </button>
       {:else}
         <button
