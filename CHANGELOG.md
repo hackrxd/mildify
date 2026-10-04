@@ -5,10 +5,13 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+## 1.1.2 - 2026-10-04
+
 ### Added
 
-- Updates that only change the interface install with a reload, and your music keeps playing. Updates that
-  change the app itself still need a restart, and Mildify says beforehand that it will stop the music.
+- From the next update on, updates that only change the interface install with a reload, and your music keeps
+  playing. Updates that change the app itself still need a restart, and Mildify says beforehand that it will stop
+  the music.
 - A What's new page, in Settings → Updates and in a banner after an update.
 
 ## 1.1.1 - 2026-10-03
