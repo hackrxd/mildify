@@ -458,6 +458,29 @@
         </select>
       </label>
 
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over beginning of track</span>
+          <span class="muted small">
+            The next song comes in under the last few seconds of the DJ's talk, and the DJ is done before anyone
+            sings. When the song's intro is too short, or its lyrics aren't synced, it starts after the DJ anyway.
+            Off, songs always start once the DJ is done.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.overStart} onchange={(e) => dj.setOverStart(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over end of track</span>
+          <span class="muted small">
+            The DJ starts over the last few seconds of a song, once nobody is singing. Off, it waits for the song to
+            finish.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
+      </label>
+
       <label class="row stacked">
         <span>
           <span class="label">Tell your DJ</span>
