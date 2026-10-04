@@ -7,6 +7,10 @@ import { backend, type AudioLevel } from "./ipc";
 import { reducedMotion } from "./motion";
 
 const KEY = "nativify:audioFx";
+const INTENSITY_KEY = "nativify:audioFxIntensity";
+export const INTENSITY_MIN = 0.25;
+export const INTENSITY_MAX = 2;
+export const INTENSITY_STEP = 0.05;
 
 /** The loudest bass lately falls away over about this long, so quiet songs still move. */
 const PEAK_DECAY_MS = 4000;
@@ -65,9 +69,26 @@ function loadOn(): boolean {
   }
 }
 
+function clampIntensity(v: number): number {
+  const stepped = Math.round(v / INTENSITY_STEP) * INTENSITY_STEP;
+  // Rounded to hundredths so steps don't drift.
+  return Math.round(Math.max(INTENSITY_MIN, Math.min(INTENSITY_MAX, stepped)) * 100) / 100;
+}
+
+function loadIntensity(): number {
+  try {
+    const v = Number(localStorage.getItem(INTENSITY_KEY) ?? 1);
+    return Number.isFinite(v) && v > 0 ? clampIntensity(v) : 1;
+  } catch {
+    return 1;
+  }
+}
+
 class AudioFx {
   /** The "Audio-responsive Effects" setting. Off unless turned on. */
   on = $state(loadOn());
+  /** How strongly things pulse; 1 is the default. Applied by each effect's CSS as `--audio-intensity`. */
+  intensity = $state(loadIntensity());
   #users = 0;
 
   setOn(on: boolean) {
@@ -75,6 +96,16 @@ class AudioFx {
     try {
       if (on) localStorage.setItem(KEY, "true");
       else localStorage.removeItem(KEY);
+    } catch {
+      // Not persisted; still applies for this session.
+    }
+  }
+
+  setIntensity(v: number) {
+    this.intensity = clampIntensity(v);
+    try {
+      if (this.intensity === 1) localStorage.removeItem(INTENSITY_KEY);
+      else localStorage.setItem(INTENSITY_KEY, String(this.intensity));
     } catch {
       // Not persisted; still applies for this session.
     }

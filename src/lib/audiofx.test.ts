@@ -130,6 +130,23 @@ describe("audioFx", () => {
     expect(localStorage.getItem("nativify:audioFx")).toBeNull();
   });
 
+  it("keeps the intensity in range, in steps, and remembers it", async () => {
+    expect(mod.audioFx.intensity).toBe(1);
+    mod.audioFx.setIntensity(1.333);
+    expect(mod.audioFx.intensity).toBe(1.35);
+    mod.audioFx.setIntensity(9);
+    expect(mod.audioFx.intensity).toBe(mod.INTENSITY_MAX);
+    vi.resetModules();
+    expect((await import("./audiofx.svelte")).audioFx.intensity).toBe(mod.INTENSITY_MAX);
+    mod.audioFx.setIntensity(0);
+    expect(mod.audioFx.intensity).toBe(mod.INTENSITY_MIN);
+    mod.audioFx.setIntensity(1);
+    expect(localStorage.getItem("nativify:audioFxIntensity")).toBeNull();
+    localStorage.setItem("nativify:audioFxIntensity", "nonsense");
+    vi.resetModules();
+    expect((await import("./audiofx.svelte")).audioFx.intensity).toBe(1);
+  });
+
   it("pulses the element with the levels and cleans up after", async () => {
     const el = document.createElement("div");
     document.body.append(el);
