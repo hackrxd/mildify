@@ -52,7 +52,12 @@
   /** A new line's list drops in, once the blocks below have mostly made room; the sets bring their own rows'
    * entrance. */
   function enter(node: Element, kind: Block["kind"]) {
-    return kind === "said" ? rise(node, { y: -8, delay: MAKE_ROOM_MS }) : { duration: 0 };
+    if (kind === "said") return rise(node, { y: -8, delay: MAKE_ROOM_MS });
+    // A transition, not a CSS animation: nothing fades in when the page opens.
+    if (kind === "set" && !reducedMotion()) {
+      return { delay: MAKE_ROOM_MS, duration: 240, easing: cubicOut, css: (t: number) => `opacity: ${t}` };
+    }
+    return { duration: 0 };
   }
   /** A finished set lifts away. Through `translate`, not `transform`: Svelte holds a leaving block in place with an
    * inline transform while the blocks below close up. */
@@ -75,7 +80,7 @@
   </header>
 
   {#each blocks as b (b.key)}
-    <section class:set={b.kind === "set"} animate:settle={{ still: b.kind === "card" }} in:enter={b.kind} out:leave={b.kind}>
+    <section animate:settle={{ still: b.kind === "card" }} in:enter={b.kind} out:leave={b.kind}>
       {#if b.kind === "card"}
         {#if !status}
           <p class="muted checking">Checking on your DJ…</p>
@@ -273,10 +278,6 @@
   }
   .error {
     color: var(--danger);
-  }
-  /* Waits for the blocks below to make room (MAKE_ROOM_MS). */
-  .set {
-    animation: fade-in 240ms ease-out 220ms backwards;
   }
   .when.now {
     color: var(--highlight);
