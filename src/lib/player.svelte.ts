@@ -106,7 +106,7 @@ class Player {
   }
 
   async #refresh() {
-    let next = document.hidden ? 15000 : this.isLocal ? 5000 : 3000;
+    let failed = false;
     if (session.ready && Date.now() >= this.#backoffUntil) {
       try {
         this.#apply(await sp.playbackState());
@@ -115,10 +115,13 @@ class Player {
           const seconds = Number(e.message.match(/(\d+)s/)?.[1] ?? 30);
           this.#backoffUntil = Date.now() + seconds * 1000;
         }
-        next = Math.max(next, 10000);
+        failed = true;
       }
     }
-    this.refreshSoon(next);
+    // Our own device reports its changes as they happen, so polling only fills in the rest
+    // (the context, playback moving elsewhere); every request counts toward Spotify's rate limit.
+    const next = document.hidden ? 30000 : this.isLocal ? 10000 : 3000;
+    this.refreshSoon(failed ? Math.max(next, 10000) : next);
   }
 
   #apply(s: PlaybackState | null) {

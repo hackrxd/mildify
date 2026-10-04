@@ -204,7 +204,7 @@ describe("polling a remote device", () => {
     expect(player.track?.uri).toBe("spotify:track:b");
   });
 
-  it("polls every 3 s, and every 15 s while the window is hidden", async () => {
+  it("polls every 3 s, and every 30 s while the window is hidden", async () => {
     await start(state());
     expect(playbackState).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(3000);
@@ -213,7 +213,7 @@ describe("polling a remote device", () => {
     vi.spyOn(document, "hidden", "get").mockReturnValue(true);
     await vi.advanceTimersByTimeAsync(3000);
     expect(playbackState).toHaveBeenCalledTimes(3);
-    await vi.advanceTimersByTimeAsync(14_000);
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(playbackState).toHaveBeenCalledTimes(3);
     await vi.advanceTimersByTimeAsync(1000);
     expect(playbackState).toHaveBeenCalledTimes(4);
@@ -245,6 +245,14 @@ describe("the embedded device", () => {
 
   it("is recognised as local", () => {
     expect(player.isLocal).toBe(true);
+  });
+
+  it("is polled only every 10 s, since it reports its own changes", async () => {
+    expect(playbackState).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(playbackState).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(playbackState).toHaveBeenCalledTimes(2);
   });
 
   it("applies the first poll even when it lands right after launch", () => {
