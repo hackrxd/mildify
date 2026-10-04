@@ -102,7 +102,8 @@ every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. W
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
-picked only as the last song starts.
+picked only as the last song starts. Only songs a set was started with sit behind the player, so Next and
+Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
