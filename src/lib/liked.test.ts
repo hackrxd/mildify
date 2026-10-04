@@ -70,6 +70,37 @@ describe("ensure", () => {
     expect(liked.has("spotify:track:1")).toBeUndefined();
     expect(liked.has("spotify:track:40")).toBe(false);
   });
+
+  it("sends nothing more for a URI whose lookup is still on its way", async () => {
+    let answer!: (r: boolean[]) => void;
+    contains.mockReturnValueOnce(new Promise((r) => (answer = r)));
+    liked.ensure(["spotify:track:1"]);
+    await vi.advanceTimersByTimeAsync(60);
+    for (let i = 0; i < 10; i++) {
+      liked.ensure(["spotify:track:1"]);
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    expect(contains).toHaveBeenCalledOnce();
+    answer([true]);
+    await vi.runAllTimersAsync();
+    expect(liked.has("spotify:track:1")).toBe(true);
+  });
+
+  it("asks again after a failed lookup only once a while has passed", async () => {
+    contains.mockRejectedValueOnce(new Error("500"));
+    liked.ensure(["spotify:track:1"]);
+    await vi.advanceTimersByTimeAsync(60);
+    for (let i = 0; i < 10; i++) {
+      liked.ensure(["spotify:track:1"]);
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    expect(contains).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(30_000);
+    liked.ensure(["spotify:track:1"]);
+    await vi.runAllTimersAsync();
+    expect(contains).toHaveBeenCalledTimes(2);
+    expect(liked.has("spotify:track:1")).toBe(true);
+  });
 });
 
 describe("toggle", () => {
