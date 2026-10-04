@@ -2,11 +2,12 @@
 // this computer. The backend (src-tauri/src/dj/) downloads and runs the model and voice; this side picks
 // the songs (djPicks.ts), plans the talk around the songs' lyrics (djTiming.ts) and plays it all.
 //
-// A session plays one set at a time. The first starts after the DJ's greeting; each next one is prepared
-// while the current one plays and queued during its last song, so the music carries on without a gap.
-// The DJ starts talking over the end of that last song once its singer has finished, the music turned
-// down in the player's own output, and the next set's first song comes in under the voice. When the line
-// is too long for that, the next song waits until the DJ is nearly done, so it never talks over vocals.
+// A session plays one set at a time. Each next set is prepared while the current one plays, and queued
+// during its last song. Between sets the DJ's talk is an item of its own (`onAir`), as long as the line
+// takes: the finishing song stops, and the queued one comes in near the end of the talk, early enough that
+// the DJ is done before anyone sings, or after it. The talk may also start over the end of the finishing
+// song once its singer has stopped. Settings turn either overlap off. While the DJ talks over music, the
+// music is turned down in the player's own output.
 
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -34,6 +35,8 @@ import type { Paging, PlayHistory, SavedTrack, Track } from "./types";
 import { idFromUri } from "./util";
 
 const INSTRUCTIONS_KEY = "nativify:djInstructions";
+const OVER_START_KEY = "nativify:djOverStart";
+const OVER_END_KEY = "nativify:djOverEnd";
 const PLAYED_KEY = "nativify:djPlayed";
 /** Songs the DJ played this recently aren't picked again in a new session. */
 const PLAYED_MEMORY_MS = 3 * 24 * 60 * 60 * 1000;
@@ -162,11 +165,12 @@ export class Voice {
   #source: AudioBufferSourceNode | null = null;
   #gain: GainNode | null = null;
   #startedAt = 0;
+  #paused = false;
 
   /** Call from a click: the window only lets audio start from one. */
   ensure(): AudioContext | null {
     if (!this.#ctx && typeof AudioContext !== "undefined") this.#ctx = new AudioContext();
-    this.#ctx?.resume().catch(() => {});
+    if (!this.#paused) this.#ctx?.resume().catch(() => {});
     return this.#ctx;
   }
 
@@ -177,6 +181,7 @@ export class Voice {
   }
 
   play(buffer: AudioBuffer, gain: number, onEnd: () => void) {
+    this.#paused = false;
     const ctx = this.ensure();
     if (!ctx) return onEnd();
     this.stop();
@@ -192,6 +197,17 @@ export class Voice {
     this.#source = source;
     this.#startedAt = ctx.currentTime;
     source.start();
+  }
+
+  /** Holds the line where it is: `now()` stands still until `resume()`. */
+  pause() {
+    this.#paused = true;
+    this.#ctx?.suspend().catch(() => {});
+  }
+
+  resume() {
+    this.#paused = false;
+    this.#ctx?.resume().catch(() => {});
   }
 
   setGain(gain: number) {
@@ -217,7 +233,7 @@ export class Voice {
   }
 }
 
-/** Something to do when the finishing song reaches a position. */
+/** Something to do when a clock (the finishing song's, or the line's) reaches a point. */
 interface Cue {
   at: number;
   fire: () => void;
@@ -225,11 +241,24 @@ interface Cue {
   armed: boolean;
 }
 
+/** The DJ's talk as an item of its own in the player. */
+export interface OnAir {
+  /** The segment it introduces. */
+  name: string;
+  durationMs: number;
+  /** The song it leads into. */
+  next: Candidate;
+}
+
 class Dj {
   /** The backend's view: settings, downloads, disk use. */
   status = $state<DjStatus | null>(null);
   /** The listener's own instructions for the DJ. */
   instructions = $state(load(INSTRUCTIONS_KEY, "", (raw) => raw.slice(0, INSTRUCTIONS_MAX)));
+  /** Settings → AI DJ: the next song may come in under the end of the talk. */
+  overStart = $state(load(OVER_START_KEY, true, (raw) => raw !== "false"));
+  /** Settings → AI DJ: the talk may start over the end of the finishing song. */
+  overEnd = $state(load(OVER_END_KEY, true, (raw) => raw !== "false"));
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
@@ -237,11 +266,19 @@ class Dj {
   current = $state.raw<DjSet | null>(null);
   /** The set after it, once it's picked. */
   upNext = $state.raw<DjSet | null>(null);
+  /** The set whose talk the DJ has given, or is giving. */
+  announced = $state.raw<DjSet | null>(null);
   /** What the DJ has said this session, oldest first. */
   said = $state.raw<{ name: string; talk: string; byModel: boolean }[]>([]);
   speaking = $state(false);
   /** The line being spoken, as lyric lines timed from its start. */
   caption = $state.raw<LyricLine[] | null>(null);
+  /** The DJ's item, from its first word until it's done and the song it leads into has come in. */
+  onAir = $state.raw<OnAir | null>(null);
+  /** How far into its talk the DJ is, a few times a second, for the player bar. */
+  talkMs = $state(0);
+  /** The listener paused the DJ's item. */
+  paused = $state(false);
 
   enabled = $derived(!!this.status?.settings.enabled);
   ready = $derived(!!this.status?.settings.enabled && !!this.status?.ready);
@@ -257,7 +294,12 @@ class Dj {
   #preparing: Promise<void> | null = null;
   #rush: (() => void) | null = null;
   #queued: "no" | "pending" | "done" | "failed" = "no";
+  /** Cues on the finishing song's clock. */
   #cues: Cue[] = [];
+  /** Cues on the clock of the line being spoken. */
+  #speechCues: Cue[] = [];
+  /** Brings the announced set's music in now. Its cue calls it, and so does skipping the talk. */
+  #bringIn: (() => void) | null = null;
   /** The song a transition was planned on. */
   #plannedOn: string | null = null;
   #lastVocals: Vocals | null = null;
@@ -268,15 +310,17 @@ class Dj {
   #remoteSince: number | null = null;
   /** A set started with a play request, whose first song hasn't come up yet. */
   #awaiting: DjSet | null = null;
-  /** The finishing song is paused, waiting for the next set. */
-  #holding = false;
+  /** The DJ paused the music to talk on its own. */
+  #heldMusic = false;
+  /** The set's last song is paused at its end because the next set isn't ready yet. */
+  #waitingForSet = false;
+  /** The listener's pause stopped music that was playing under the voice. */
+  #pausedMusic = false;
   #ducked = false;
   #outOfSongs = false;
   /** Shuffle and repeat as they were before the DJ turned them off, to put back when it stops. */
   #modes: { shuffle: boolean; repeat: RepeatMode } | null = null;
   #modesSentAt = -Infinity;
-  /** The set whose talk the DJ has given. */
-  #announced: DjSet | null = null;
 
   constructor(voice?: Voice) {
     if (voice) this.#voice = voice;
@@ -347,9 +391,54 @@ class Dj {
     persist(INSTRUCTIONS_KEY, this.instructions.trim() ? this.instructions : null);
   }
 
+  setOverStart(on: boolean) {
+    this.overStart = on;
+    persist(OVER_START_KEY, on ? null : "false");
+  }
+
+  setOverEnd(on: boolean) {
+    this.overEnd = on;
+    persist(OVER_END_KEY, on ? null : "false");
+  }
+
   /** ms into the line the DJ is speaking, per frame, for captions. */
   speechNow(): number {
     return this.#voice.now();
+  }
+
+  /** Play/pause while the DJ's item is up pauses the DJ, and any music under it. */
+  togglePause() {
+    if (!this.onAir) return player.togglePlay();
+    if (!this.paused) {
+      this.paused = true;
+      this.#voice.pause();
+      if (player.isPlaying) {
+        this.#pausedMusic = true;
+        backend.device({ action: "pause" }).catch(() => {});
+      }
+    } else {
+      this.paused = false;
+      this.#voice.resume();
+      if (this.#pausedMusic) {
+        this.#pausedMusic = false;
+        backend.device({ action: "play" }).catch(() => {});
+      }
+    }
+  }
+
+  /** Next while the DJ's item is up skips the rest of its talk: the song it leads into comes in now. */
+  skipTalk() {
+    if (!this.onAir) return player.next();
+    const run = this.#run;
+    this.#voice.stop();
+    this.#voice.resume();
+    this.paused = false;
+    if (this.#pausedMusic) {
+      this.#pausedMusic = false;
+      backend.device({ action: "play" }).catch(() => {});
+    }
+    this.#bring();
+    this.#talkEnded(run);
   }
 
   /** Starts a session. Call from a click, so the DJ's voice is allowed to play. */
@@ -369,10 +458,10 @@ class Dj {
     this.said = [];
     this.current = null;
     this.upNext = null;
+    this.announced = null;
     this.#segments = [];
     this.#skippedArtists = new Set();
     this.#outOfSongs = false;
-    this.#announced = null;
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
     // The DJ plays here; music on another device would play on under its voice.
@@ -408,8 +497,10 @@ class Dj {
     for (const t of this.#timers) clearTimeout(t);
     this.#timers.clear();
     this.#voice.stop();
+    this.#voice.resume();
     this.#unduck();
-    if (this.#holding) backend.device({ action: "play" }).catch(() => {});
+    // Music the DJ held for its talk plays on; music the listener paused stays paused.
+    if (this.#heldMusic) backend.device({ action: "play" }).catch(() => {});
     const modes = this.#modes;
     this.#modes = null;
     if (modes && player.isLocal) {
@@ -420,16 +511,23 @@ class Dj {
     this.activity = null;
     this.speaking = false;
     this.caption = null;
+    this.onAir = null;
+    this.paused = false;
+    this.talkMs = 0;
     this.current = null;
     this.upNext = null;
+    this.announced = null;
     this.#preparing = null;
     this.#rush = null;
     this.#queued = "no";
     this.#cues = [];
+    this.#speechCues = [];
+    this.#bringIn = null;
     this.#plannedOn = null;
     this.#awaiting = null;
-    this.#holding = false;
-    this.#announced = null;
+    this.#heldMusic = false;
+    this.#waitingForSet = false;
+    this.#pausedMusic = false;
     this.#foreignSince = null;
     this.#remoteSince = null;
     backend.djRelease().catch(() => {});
@@ -441,6 +539,22 @@ class Dj {
       fn();
     }, Math.max(0, ms));
     this.#timers.add(t);
+  }
+
+  #cue(at: number, fire: () => void): Cue {
+    return { at, fire, fired: false, armed: false };
+  }
+
+  #planFor(speech: Spoken, next: Vocals | null, old: Vocals | null, oldLeftMs: number, oldDurationMs: number) {
+    return planTalk({
+      speechMs: speech.durationMs,
+      next,
+      old,
+      oldLeftMs,
+      oldDurationMs,
+      overStart: this.overStart,
+      overEnd: this.overEnd,
+    });
   }
 
   /** Picks a set, asks the model for its talk (or uses a template), and reads it aloud. */
@@ -498,15 +612,16 @@ class Dj {
     }
   }
 
-  /** Starts a set with a play request: the opening, or after a song that had to wait. The DJ talks first,
-   * and the music comes in when what's left of the line fits the first song's intro. */
+  /** Starts a set with a play request: the opening, or after a song that had to wait. The DJ's item comes
+   * first, and the set's first song comes in near its end, or after it. */
   async #playSet(run: number, set: DjSet) {
     this.upNext = set;
     this.#awaiting = set;
     const startMusic = async () => {
       // Already under way (the listener started it), or the session moved on.
       if (run !== this.#run || this.#awaiting !== set) return;
-      this.#holding = false;
+      // The play request replaces whatever the DJ was holding.
+      this.#heldMusic = false;
       const ok = await player.playUris(
         set.songs.map((s) => s.uri),
         0,
@@ -520,33 +635,68 @@ class Dj {
         this.stop();
       });
     };
-    const speech = set.speech;
-    this.#announce(run, set, true);
-    if (!speech) return startMusic();
-    const plan = planTalk({ speechMs: speech.durationMs, next: set.firstVocals, old: null, oldLeftMs: 0, oldDurationMs: 0 });
-    this.#after(plan.hold - PLAY_LATENCY_MS, startMusic);
+    this.#bringIn = () => void startMusic();
+    if (!set.speech) {
+      this.#announce(run, set);
+      return this.#bring();
+    }
+    const plan = this.#planFor(set.speech, set.firstVocals, null, 0, 0);
+    // A play request takes a moment to be heard: when the song comes in under the voice, ask early.
+    const lead = plan.overIntro > 0 ? PLAY_LATENCY_MS : 0;
+    this.#speechCues = [this.#cue(Math.max(0, plan.musicAt - lead), () => this.#bring())];
+    this.#announce(run, set);
+  }
+
+  #bring() {
+    const bringIn = this.#bringIn;
+    this.#bringIn = null;
+    bringIn?.();
   }
 
   /** Gives a set's talk, once: the line (if it was voiced) and an entry in what the DJ said. */
-  #announce(run: number, set: DjSet, duckNow: boolean) {
-    if (run !== this.#run || this.#announced === set) return;
-    this.#announced = set;
+  #announce(run: number, set: DjSet) {
+    if (run !== this.#run || this.announced === set) return;
+    this.announced = set;
     this.said = [...this.said, { name: set.name, talk: set.talk, byModel: set.byModel }];
-    if (!set.speech) return;
-    if (duckNow) this.#duck(0);
-    this.#talk(run, set.speech);
+    if (set.speech) this.#talk(run, set, set.speech);
   }
 
-  #talk(run: number, speech: Spoken) {
+  #talk(run: number, set: DjSet, speech: Spoken) {
     if (run !== this.#run) return;
+    if (!this.#ducked) this.#duck(0);
     this.speaking = true;
+    this.paused = false;
+    this.talkMs = 0;
     this.caption = speech.lines;
-    this.#voice.play(speech.buffer, volumeGain(player.volume), () => {
-      if (run !== this.#run) return;
-      this.speaking = false;
-      this.caption = null;
-      this.#unduck();
-    });
+    this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0] };
+    this.#voice.play(speech.buffer, volumeGain(player.volume), () => this.#talkEnded(run));
+  }
+
+  /** The line is over, or skipped: whatever waited on it happens now, and the music comes back up. */
+  #talkEnded(run: number) {
+    if (run !== this.#run) return;
+    this.speaking = false;
+    this.caption = null;
+    this.talkMs = this.onAir?.durationMs ?? 0;
+    const due = this.#speechCues;
+    this.#speechCues = [];
+    for (const c of due) {
+      if (!c.fired) {
+        c.fired = true;
+        c.fire();
+      }
+    }
+    this.#unduck();
+    this.#endOnAir();
+  }
+
+  /** The DJ's item ends once it's done talking and the song it leads into has come in. */
+  #endOnAir() {
+    if (!this.onAir || this.speaking || this.#heldMusic) return;
+    if (this.upNext && this.announced === this.upNext) return;
+    this.onAir = null;
+    this.paused = false;
+    this.#pausedMusic = false;
   }
 
   /** Turns the music down so it's low `delayMs` from now. */
@@ -571,7 +721,6 @@ class Dj {
     const t = player.track;
     const uri = t?.uri ?? null;
     const pos = player.positionNow();
-    if (this.speaking) this.#voice.setGain(volumeGain(player.volume));
 
     // Music moved to another device: the voice and the ducking can't follow it there.
     if (!this.#awaiting && player.deviceId && !player.isLocal) {
@@ -583,6 +732,16 @@ class Dj {
     } else {
       this.#remoteSince = null;
     }
+
+    if (this.speaking) {
+      this.#voice.setGain(volumeGain(player.volume));
+      if (!this.paused) {
+        const said = this.#voice.now();
+        this.talkMs = Math.round(said);
+        this.#runCues(run, this.#speechCues, said, () => this.#voice.now(), true);
+      }
+    }
+    this.#endOnAir();
 
     if (uri && this.#isDjSong(uri) && player.isLocal) this.#plainModes(now);
     if (uri !== this.#lastUri) this.#trackChanged(run, uri);
@@ -613,11 +772,14 @@ class Dj {
       if (!next && !this.#preparing) this.#prepareNext(run);
       if (left < RUSH_MS) this.#rush?.();
       // Nothing to follow yet: hold the music rather than let something else start.
-      if (left < HOLD_EARLY_MS + TICK_MS && player.isPlaying && !this.#holding) {
-        this.#holding = true;
+      if (left < HOLD_EARLY_MS + TICK_MS && player.isPlaying && !this.#heldMusic) {
+        this.#heldMusic = true;
         backend.device({ action: "pause" }).catch(() => {});
         if (next) this.#playSet(run, next);
-        else this.activity = "Your DJ is still picking what's next…";
+        else {
+          this.#waitingForSet = true;
+          this.activity = "Your DJ is still picking what's next…";
+        }
       }
       return;
     }
@@ -627,7 +789,7 @@ class Dj {
     }
     if (this.#queued !== "done") return;
     if (this.#plannedOn !== uri) this.#plan(run, next, t.durationMs, pos, uri);
-    this.#runCues(run, pos);
+    this.#runCues(run, this.#cues, pos, () => player.positionNow(), player.isPlaying);
   }
 
   /** Keeps shuffle and repeat off while a DJ song plays: shuffle would play a set out of order, and repeat
@@ -645,7 +807,7 @@ class Dj {
   #trackChanged(run: number, uri: string | null) {
     const prev = this.#lastUri ? this.#isDjSong(this.#lastUri) : undefined;
     // A DJ song left early, not by the DJ: the listener skipped it, so its artist sits out a while.
-    if (prev && this.#lastDuration > 0 && this.#lastPos < this.#lastDuration * SKIP_SHARE && !this.#holding) {
+    if (prev && this.#lastDuration > 0 && this.#lastPos < this.#lastDuration * SKIP_SHARE && !this.#heldMusic) {
       for (const a of prev.artists) this.#skippedArtists.add(a);
     }
     if (!uri) return;
@@ -664,24 +826,49 @@ class Dj {
   /** A new set's song came up: it's the current set now, and the next one gets picked. */
   #advance(run: number, set: DjSet) {
     this.#awaiting = null;
-    this.#holding = false;
+    this.#heldMusic = false;
+    this.#waitingForSet = false;
+    this.#bringIn = null;
     this.current = set;
     this.upNext = null;
     this.#queued = "no";
     this.#plannedOn = null;
     this.#cues = [];
-    // Skipped into the new set before the DJ got to talk: say it now, over the intro, cutting short
-    // whatever it was still saying.
-    if (this.#announced !== set) {
-      this.#voice.stop();
-      this.#announce(run, set, true);
-    }
+    if (this.announced !== set) this.#talkFirst(run, set);
+    else this.#endOnAir();
     this.#lastVocals = null;
     const last = set.songs[set.songs.length - 1].uri;
     songVocals(last).then((v) => {
       if (run === this.#run && this.current === set) this.#lastVocals = v;
     });
     this.#prepareNext(run);
+  }
+
+  /** The set's song came up before the DJ introduced it (the listener skipped ahead, or the whole line fits
+   * the song's intro). The DJ's item still comes first: the song waits at its start until the rest of the
+   * line fits over its intro. */
+  #talkFirst(run: number, set: DjSet) {
+    // Cut short whatever the DJ was still saying.
+    this.#voice.stop();
+    this.speaking = false;
+    this.caption = null;
+    this.#speechCues = [];
+    if (set.speech) {
+      const plan = this.#planFor(set.speech, set.firstVocals, null, 0, 0);
+      if (plan.musicAt > 0) {
+        this.#heldMusic = true;
+        backend.device({ action: "pause" }).catch(() => {});
+        this.#bringIn = () => {
+          if (run !== this.#run) return;
+          this.#heldMusic = false;
+          backend.device({ action: "seek", position_ms: 0 }).catch(() => {});
+          backend.device({ action: "play" }).catch(() => {});
+          this.#endOnAir();
+        };
+        this.#speechCues = [this.#cue(plan.musicAt, () => this.#bring())];
+      }
+    }
+    this.#announce(run, set);
   }
 
   #prepareNext(run: number) {
@@ -698,11 +885,14 @@ class Dj {
       }
       this.upNext = set;
       // The finishing song is waiting for this set.
-      if (this.#holding) this.#playSet(run, set);
+      if (this.#waitingForSet) {
+        this.#waitingForSet = false;
+        this.#playSet(run, set);
+      }
     });
   }
 
-  /** Adds the next set to Spotify's queue, so it follows the last song without a gap. */
+  /** Adds the next set to Spotify's queue, so it can follow the last song without a gap. */
   async #queue(run: number, set: DjSet) {
     this.#queued = "pending";
     const device = session.device?.device_id;
@@ -718,55 +908,70 @@ class Dj {
     }
   }
 
-  /** Plans the talk into `next` on the finishing song, from both songs' vocals. */
+  /** Plans the DJ's item between the finishing song and the queued set, from both songs' vocals. */
   #plan(run: number, next: DjSet, durationMs: number, pos: number, uri: string) {
     this.#plannedOn = uri;
+    // The queued set is Spotify's next song: skipping to it brings it in, whatever the finishing one is doing.
+    this.#bringIn = () => {
+      if (run !== this.#run) return;
+      for (const c of this.#cues) c.fired = true;
+      backend.device({ action: "next" }).catch(() => {});
+      backend.device({ action: "play" }).catch(() => {});
+    };
     const speech = next.speech;
     if (!speech) {
-      this.#cues = [{ at: durationMs - 1000, fire: () => this.#announce(run, next, false), fired: false, armed: false }];
+      this.#cues = [this.#cue(durationMs - 1000, () => this.#announce(run, next))];
       return;
     }
-    const plan = planTalk({
-      speechMs: speech.durationMs,
-      next: next.firstVocals,
-      old: this.#lastVocals,
-      oldLeftMs: durationMs - pos,
-      oldDurationMs: durationMs,
-    });
-    const talkAt = durationMs - plan.overOld;
-    const cue = (at: number, fire: () => void): Cue => ({ at, fire, fired: false, armed: false });
-    this.#cues = [
-      cue(talkAt - 1000, () => this.#duck(Math.max(0, talkAt - player.positionNow() - DUCK_DOWN_MS))),
-      cue(talkAt, () => this.#announce(run, next, false)),
-    ];
-    if (plan.hold > 0) {
-      this.#cues.push(
-        cue(durationMs - HOLD_EARLY_MS, () => {
-          this.#holding = true;
+    const plan = this.#planFor(speech, next.firstVocals, this.#lastVocals, durationMs - pos, durationMs);
+    // A wait shorter than the pause would cut isn't worth one when the song comes in under the voice anyway:
+    // the DJ still finishes inside the gap before the singer.
+    const hold = plan.hold < HOLD_EARLY_MS && plan.overIntro > 0 ? 0 : plan.hold;
+    const cues: Cue[] = [];
+    if (hold > 0) {
+      // The DJ talks on its own between the songs: the finishing song stops just short of its end (where
+      // Spotify would start the queued one), and the queued one comes in on the line's own clock.
+      const pauseAt = durationMs - HOLD_EARLY_MS;
+      const talkAt = Math.min(durationMs - plan.overOld, pauseAt);
+      if (talkAt < pauseAt) {
+        cues.push(this.#cue(talkAt - 1000, () => this.#duck(Math.max(0, talkAt - player.positionNow() - DUCK_DOWN_MS))));
+      }
+      cues.push(
+        this.#cue(pauseAt, () => {
+          this.#heldMusic = true;
           backend.device({ action: "pause" }).catch(() => {});
-          this.#after(plan.hold, () => {
-            if (run !== this.#run || !this.#holding) return;
-            this.#holding = false;
-            backend.device({ action: "play" }).catch(() => {});
-          });
         }),
       );
+      cues.push(this.#cue(talkAt, () => this.#announce(run, next)));
+      this.#speechCues = [this.#cue(plan.musicAt, () => this.#bring())];
+    } else if (plan.overOld > 0) {
+      // The DJ starts over the end of the finishing song, and the queued one follows it on its own.
+      const talkAt = durationMs - plan.overOld;
+      cues.push(this.#cue(talkAt - 1000, () => this.#duck(Math.max(0, talkAt - player.positionNow() - DUCK_DOWN_MS))));
+      cues.push(this.#cue(talkAt, () => this.#announce(run, next)));
     }
+    // With neither, the whole line fits the next song's intro: the DJ starts with it (#advance).
+    this.#cues = cues;
   }
 
-  /** Fires cues that are due, and arms a timer for ones about to be, between ticks. */
-  #runCues(run: number, pos: number) {
-    for (const c of this.#cues) {
+  /** Fires the cues that are due on a clock, and arms a timer for ones about to be, between ticks. */
+  #runCues(run: number, cues: Cue[], now: number, clock: () => number, running: boolean) {
+    for (const c of cues) {
       if (c.fired) continue;
       const fire = () => {
         if (run !== this.#run || c.fired) return;
+        // Armed ahead, then the clock stopped (a pause): not due after all.
+        if (clock() < c.at - 5) {
+          c.armed = false;
+          return;
+        }
         c.fired = true;
         c.fire();
       };
-      if (pos >= c.at - 5) fire();
-      else if (!c.armed && c.at - pos < TICK_MS * 2 && player.isPlaying) {
+      if (now >= c.at - 5) fire();
+      else if (!c.armed && running && c.at - now < TICK_MS * 2) {
         c.armed = true;
-        this.#after(c.at - pos, fire);
+        this.#after(c.at - now, fire);
       }
     }
   }
