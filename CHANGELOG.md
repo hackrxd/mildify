@@ -14,8 +14,10 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and can start over the end of a song and run into the beginning of the next. It uses the songs' lyrics to
   never talk over the singing. Settings can keep it off either song. It turns the music down while it talks,
   and shows what it says as captions in the player bar and the lyrics view. Its page has an on-air light and moves
-  with the show: the next set glides up as it starts, and a highlight follows the song playing. Tell it how to talk
-  and what to play under "Tell your DJ", or point it at a model server you already run, like Ollama or LM Studio.
+  with the show: the next set glides up as it starts, and a highlight follows the song playing. Turn on "Pick songs
+  as it goes" and it picks each next song while one plays, so liking a song brings more like it and skipping moves
+  it on. Tell it how to talk and what to play under "Tell your DJ", or point it at a model server you already run,
+  like Ollama or LM Studio.
 
 ## 1.1.4 - 2026-10-04
 
