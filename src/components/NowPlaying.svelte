@@ -50,7 +50,7 @@
   }
 </script>
 
-<footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"}>
+<footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"} style:--audio-intensity={audioFx.intensity}>
   {#if audioFx.on}<div class="flare" aria-hidden="true"><div></div></div>{/if}
   <div class="info">
     {#if track}
@@ -184,7 +184,7 @@
     background: linear-gradient(90deg, var(--deck-ambient), transparent);
     opacity: calc(0.8 + var(--audio-pulse, 0) * 0.2);
     transform-origin: left;
-    scale: calc(1 + var(--audio-pulse, 0) * 0.3) 1;
+    scale: calc(1 + var(--audio-pulse, 0) * var(--audio-intensity, 1) * 0.3) 1;
   }
   /* Above the flare. */
   .deck > :not(.flare) {
@@ -192,7 +192,7 @@
   }
 
   /* Audio-responsive Effects: a lighter, wider copy of the glow that flares up with each hit
-     (--audio-pulse, 0-1, set every frame by audioFx). Only its opacity and scale change, which
+     (--audio-pulse, 0-1, set every frame by audioFx), times the intensity setting. Only its opacity and scale change, which
      the compositor animates without repainting. */
   .flare {
     position: absolute;
@@ -209,8 +209,8 @@
       transparent 70%
     );
     transform-origin: 0% 100%;
-    opacity: calc(var(--audio-pulse, 0) * 0.6);
-    scale: calc(1 + var(--audio-pulse, 0) * 0.15);
+    opacity: calc(var(--audio-pulse, 0) * var(--audio-intensity, 1) * 0.6);
+    scale: calc(1 + var(--audio-pulse, 0) * var(--audio-intensity, 1) * 0.15);
     will-change: opacity, scale;
   }
 
