@@ -76,6 +76,11 @@
         <div class="actions"><button class="btn primary" onclick={() => dj.retry()}>Download</button></div>
       {/if}
     </section>
+  {:else if status.setup}
+    <section class="card">
+      <p>The DJ is set to use your own model server, and it isn't set up yet: {status.setup.toLowerCase()}.</p>
+      <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
+    </section>
   {:else}
     <section class="card start">
       {#if dj.phase === "off"}

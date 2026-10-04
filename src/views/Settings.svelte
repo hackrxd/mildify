@@ -389,6 +389,9 @@
             <span class="small error">{djInstall.error}</span>
           {:else if djMissing.length}
             <span class="label">{formatBytes(djToDownload)} left to download</span>
+          {:else if djStatus?.setup}
+            <span class="label">Set up your model server</span>
+            <span class="small error">{djStatus.setup}</span>
           {:else}
             <span class="label">Ready</span>
             <span class="muted small">Start it from the DJ page in the sidebar.</span>
@@ -399,6 +402,8 @@
             <button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause</button>
           {:else if djMissing.length}
             <button class="btn primary" onclick={() => dj.retry()}>Download</button>
+          {:else if djStatus?.setup}
+            <!-- The fields are right below. -->
           {:else}
             <button class="btn quiet" onclick={() => router.go({ name: "dj" })}><Icon name="dj" size={16} /> Open the DJ</button>
           {/if}

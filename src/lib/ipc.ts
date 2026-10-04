@@ -87,8 +87,10 @@ export interface DjStatus {
   /** Prebuilt runtimes exist for this computer. */
   supported: boolean;
   settings: DjConfig;
-  /** Everything the settings need is downloaded (or configured). */
+  /** Everything the settings need is downloaded, and an own server is set up. */
   ready: boolean;
+  /** What the own-server settings still need, if anything. */
+  setup: string | null;
   needed: DjNeeded[];
   install: DjInstall;
   disk_bytes: number;
