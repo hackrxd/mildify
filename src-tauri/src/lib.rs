@@ -4,6 +4,7 @@ mod device;
 mod devtools;
 mod error;
 mod lyrics;
+mod meter;
 mod mods;
 mod webapi;
 #[cfg(target_os = "linux")]
@@ -285,6 +286,12 @@ fn device_command(state: State<'_, AppState>, command: DeviceCommand) -> Result<
     state.device.command(command)
 }
 
+/// Turns the `audio-level` events for audio-responsive effects on or off.
+#[tauri::command]
+fn audio_meter(app: AppHandle, state: State<'_, AppState>, on: bool) {
+    state.device.meter().set_on(&app, on);
+}
+
 #[tauri::command]
 fn restart_device(app: AppHandle, state: State<'_, AppState>) {
     let config = state.config();
@@ -365,6 +372,7 @@ pub fn run() {
             lyrics_server_logout,
             device_command,
             restart_device,
+            audio_meter,
             devtools_answer,
             list_mods,
             open_mods_folder,

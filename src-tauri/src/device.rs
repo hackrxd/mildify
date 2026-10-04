@@ -29,6 +29,7 @@ use tokio::sync::oneshot;
 use crate::auth::{self, LIBRESPOT_REDIRECT};
 use crate::config::{Config, Paths};
 use crate::error::{AppError, Result};
+use crate::meter::{Analyser, Meter};
 
 const AUDIO_CACHE_LIMIT: u64 = 1024 * 1024 * 1024;
 
@@ -115,6 +116,8 @@ pub struct ConnectDevice {
     status: Mutex<DeviceStatus>,
     /// Bumped on every start/stop so stale supervisors exit.
     generation: AtomicU64,
+    /// Levels of what's playing, for audio-responsive effects. Outlives restarts.
+    meter: Meter,
 }
 
 impl ConnectDevice {
@@ -130,7 +133,12 @@ impl ConnectDevice {
                 error: None,
             }),
             generation: AtomicU64::new(0),
+            meter: Meter::default(),
         }
+    }
+
+    pub fn meter(&self) -> &Meter {
+        &self.meter
     }
 
     pub fn status(&self) -> DeviceStatus {
@@ -291,9 +299,14 @@ impl ConnectDevice {
         let mixer = mixer_builder(MixerConfig::default())?;
         let clock = OutputClock::default();
         let sink_clock = clock.clone();
+        let meter = self.meter.clone();
         let player = Player::new(player_config, session.clone(), mixer.get_soft_volume(), move || {
-            Box::new(ClockedSink { inner: sink_builder(None, AudioFormat::default()), clock: sink_clock })
-                as Box<dyn Sink>
+            Box::new(ClockedSink {
+                inner: sink_builder(None, AudioFormat::default()),
+                clock: sink_clock,
+                meter,
+                analyser: Analyser::default(),
+            }) as Box<dyn Sink>
         });
 
         let events = player.get_player_event_channel();
@@ -424,11 +437,12 @@ struct ClockState {
 const REFILL_WINDOW: Duration = Duration::from_millis(200);
 
 impl OutputClock {
-    fn queued(&self, audio: Duration) {
-        self.queued_at(Instant::now(), audio);
+    /// Notes `audio` written to the output; returns when it will start playing.
+    fn queued(&self, audio: Duration) -> Instant {
+        self.queued_at(Instant::now(), audio)
     }
 
-    fn queued_at(&self, now: Instant, audio: Duration) {
+    fn queued_at(&self, now: Instant, audio: Duration) -> Instant {
         let mut s = self.0.lock().unwrap();
         let until = match s.until {
             Some(u) if u > now => u,
@@ -438,6 +452,7 @@ impl OutputClock {
             }
         };
         s.until = Some(until + audio);
+        until
     }
 
     fn drained(&self) {
@@ -458,10 +473,13 @@ impl OutputClock {
     }
 }
 
-/// Passes audio through to the real output while keeping an [`OutputClock`].
+/// Passes audio through to the real output while keeping an [`OutputClock`], and measures it
+/// for the [`Meter`] when that's on.
 struct ClockedSink {
     inner: Box<dyn Sink>,
     clock: OutputClock,
+    meter: Meter,
+    analyser: Analyser,
 }
 
 impl Sink for ClockedSink {
@@ -478,7 +496,10 @@ impl Sink for ClockedSink {
 
     fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
         if let Ok(samples) = packet.samples() {
-            self.clock.queued(Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLES_PER_SECOND)));
+            let starts = self.clock.queued(Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLES_PER_SECOND)));
+            if self.meter.is_on() {
+                self.meter.record(starts, self.analyser.measure(samples));
+            }
         }
         self.inner.write(packet, converter)
     }
@@ -623,6 +644,16 @@ mod tests {
         clock.queued_at(t0 + ms(100), ms(300));
         clock.queued_at(t0 + ms(150), ms(300));
         assert_eq!(clock.heard_at(t0 + ms(400), 5_000), 4_500);
+    }
+
+    #[test]
+    fn a_packet_starts_playing_when_the_ones_before_it_end() {
+        let t0 = Instant::now();
+        let clock = OutputClock::default();
+        assert_eq!(clock.queued_at(t0, ms(300)), t0);
+        assert_eq!(clock.queued_at(t0 + ms(100), ms(300)), t0 + ms(300));
+        // Once the queue has run dry, a packet plays as soon as it's written.
+        assert_eq!(clock.queued_at(t0 + ms(1_000), ms(300)), t0 + ms(1_000));
     }
 
     #[test]
