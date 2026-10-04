@@ -79,6 +79,20 @@ and hands each the `ExtensionApi`. Everything an extension registers through it 
 window focus re-reads the folders, so edits apply live. `--safe-mode` loads none of it. User-facing guide:
 `docs/mods.md`.
 
+**AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
+(llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
+while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, or the Hub's published hash for
+models, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
+port with an API key and `--offline`, or talks to the user's own OpenAI-style server; `voice.rs` reads lines to WAV
+and times each sentence from the program's per-sentence sample counts. The UI does the rest: `djPicks.ts` builds
+segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
+(llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates;
+`djTiming.ts` plans the talk around both songs' synced lyrics (talk in the outro and intro, hold the next song if
+that's not enough); `dj.svelte.ts` plays a set with `playUris(…, here)`, queues the next during its last song, and
+fires cues off `player.positionNow()`. While it talks, `dj_duck` lowers the music in the sink (`duck.rs`, by heard
+time, lifting itself after 90 s if nobody does). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep.
+User guide: `docs/dj.md`.
+
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
 `--remote-debugging-port`: `/json` with one `xpui` page target, and its websocket's `Runtime.evaluate`. It runs
 nothing it's sent: `recognise` matches mild-lyrics' player scripts (controls only as whole calls), asks the window
