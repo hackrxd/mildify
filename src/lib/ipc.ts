@@ -128,6 +128,13 @@ export type LocalEvent =
   | { type: "repeat"; context: boolean; track: boolean }
   | { type: "session_connected" | "session_disconnected" };
 
+/** What the embedded player emits as `audio-level` while the meter is on: RMS, 0-1, as it's heard. */
+export interface AudioLevel {
+  level: number;
+  /** Below about 150 Hz. */
+  bass: number;
+}
+
 type Query = Record<string, string | number | boolean | undefined | null>;
 
 export const backend = {
@@ -138,6 +145,8 @@ export const backend = {
   signOut: () => invoke<AppStatus>("sign_out"),
   restartDevice: () => invoke<void>("restart_device"),
   device: (command: DeviceCommand) => invoke<void>("device_command", { command }),
+  /** Starts or stops the embedded player's `audio-level` events. */
+  audioMeter: (on: boolean) => invoke<void>("audio_meter", { on }),
   /** Spicy Lyrics v1 response for a track, or null when there are no lyrics. */
   lyrics: (trackId: string) => invoke<unknown | null>("spicy_lyrics", { trackId }),
   /** Fetches lyrics for upcoming tracks into the backend's cache. Resolves to how many it fetched. */
