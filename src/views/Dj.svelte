@@ -27,13 +27,14 @@
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
   );
 
-  /** The running order below the card, keyed so a set keeps its place in the page as it moves up. */
-  type Block = { key: DjSet; kind: "set"; set: DjSet } | { key: string; kind: "said" | "tell" };
+  /** The running order below the card, keyed so a set keeps its place in the page as it moves up, and as it
+   * grows when it's picked as it goes. */
+  type Block = { key: number; kind: "set"; set: DjSet } | { key: string; kind: "card" | "said" | "tell" };
   const blocks = $derived.by(() => {
-    const out: Block[] = [];
+    const out: Block[] = [{ key: "card", kind: "card" }];
     if (ready) {
-      if (dj.current) out.push({ key: dj.current, kind: "set", set: dj.current });
-      if (dj.upNext && dj.upNext !== dj.current) out.push({ key: dj.upNext, kind: "set", set: dj.upNext });
+      if (dj.current) out.push({ key: dj.current.id, kind: "set", set: dj.current });
+      if (dj.upNext && dj.upNext.id !== dj.current?.id) out.push({ key: dj.upNext.id, kind: "set", set: dj.upNext });
       if (said.length) out.push({ key: "said", kind: "said" });
     }
     if (status?.supported && dj.enabled) out.push({ key: "tell", kind: "tell" });
@@ -44,8 +45,8 @@
   const MAKE_ROOM_MS = 220;
 
   /** Svelte's flip, at the app's pace, and still for reduced motion (it doesn't go by the CSS rule). */
-  function settle(node: Element, rects: { from: DOMRect; to: DOMRect }, { duration = 420 } = {}) {
-    return reducedMotion() ? { duration: 0 } : flip(node, rects, { duration, easing: cubicOut });
+  function settle(node: Element, rects: { from: DOMRect; to: DOMRect }, { duration = 420, still = false } = {}) {
+    return still || reducedMotion() ? { duration: 0 } : flip(node, rects, { duration, easing: cubicOut });
   }
   /** A new line's list drops in, once the blocks below have mostly made room; the sets bring their own rows'
    * entrance. */
@@ -72,79 +73,83 @@
     </p>
   </header>
 
-  {#if !status}
-    <p class="muted checking">Checking on your DJ…</p>
-  {:else if !status.supported}
-    <section class="card" in:rise>
-      <p>The DJ can't run on this computer: its model and voice aren't built for this kind of processor.</p>
-    </section>
-  {:else if !dj.enabled}
-    <section class="card" in:rise>
-      <p>
-        The DJ is off. Turning it on downloads what it runs on, about {formatBytes(toDownload)}: a language model, a
-        voice and the programs for them. Nothing is downloaded until then, and you can remove it all again in
-        Settings.
-      </p>
-      <div class="actions">
-        <button class="btn primary" onclick={() => dj.setEnabled(true)}><Icon name="dj" size={18} /> Turn on the DJ</button>
-        <button class="btn quiet" onclick={() => router.go({ name: "settings" })}>Choose a model and voice</button>
-      </div>
-    </section>
-  {:else if missing.length && install?.running}
-    <section class="card" in:rise>
-      {#key install.component}
-        <div class="step" in:rise={{ y: 4, duration: 300 }}>
-          <p>Downloading {lowerFirst(install.component ?? "your DJ")}…</p>
-          <div class="bar" role="progressbar" aria-valuenow={share === null ? undefined : Math.round(share * 100)}>
-            <div style:transform="scaleX({share ?? 0})"></div>
-          </div>
-        </div>
-      {/key}
-      <p class="muted small">
-        {formatBytes(install.received)}{install.total ? ` of ${formatBytes(install.total)}` : ""}. {missing.length === 1
-          ? "This is the last download."
-          : `${missing.length} downloads left, ${formatBytes(toDownload)} in all.`} It keeps going if you leave this page.
-      </p>
-      <div class="actions"><button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause download</button></div>
-    </section>
-  {:else if missing.length}
-    <section class="card" in:rise>
-      {#if install?.error}<p class="error">{install.error}</p>{/if}
-      <p class="muted">{formatBytes(toDownload)} left to download before the DJ can play.</p>
-      <div class="actions"><button class="btn primary" onclick={() => dj.retry()}>Download</button></div>
-    </section>
-  {:else if status.setup}
-    <section class="card" in:rise>
-      <p>The DJ is set to use your own model server, and it isn't set up yet: {status.setup.toLowerCase()}.</p>
-      <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
-    </section>
-  {:else}
-    <section class="card start" in:rise>
-      {#if dj.phase === "off"}
-        <button class="btn primary big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.start()}>
-          <Icon name="play" size={18} /> Start the DJ
-        </button>
-        <p class="muted small" in:rise={{ y: 4, delay: 60, duration: 300 }}>
-          It plays on this computer, and talks over the ends and starts of songs, never over the singing.
-        </p>
-      {:else}
-        <button class="btn quiet big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.stop()}>
-          <Icon name="close" size={18} /> Stop the DJ
-        </button>
-        {#if dj.activity}{#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}{/if}
-      {/if}
-    </section>
-  {/if}
 
   {#each blocks as b (b.key)}
-    <section class:set={b.kind === "set"} animate:settle in:enter={b.kind} out:leave={b.kind}>
-      {#if b.kind === "set"}
-        {@const now = b.set === dj.current}
+    <section class:set={b.kind === "set"} animate:settle={{ still: b.kind === "card" }} in:enter={b.kind} out:leave={b.kind}>
+      {#if b.kind === "card"}
+      {#if !status}
+        <p class="muted checking">Checking on your DJ…</p>
+      {:else if !status.supported}
+        <section class="card" in:rise>
+          <p>The DJ can't run on this computer: its model and voice aren't built for this kind of processor.</p>
+        </section>
+      {:else if !dj.enabled}
+        <section class="card" in:rise>
+          <p>
+            The DJ is off. Turning it on downloads what it runs on, about {formatBytes(toDownload)}: a language model, a
+            voice and the programs for them. Nothing is downloaded until then, and you can remove it all again in
+            Settings.
+          </p>
+          <div class="actions">
+            <button class="btn primary" onclick={() => dj.setEnabled(true)}><Icon name="dj" size={18} /> Turn on the DJ</button>
+            <button class="btn quiet" onclick={() => router.go({ name: "settings" })}>Choose a model and voice</button>
+          </div>
+        </section>
+      {:else if missing.length && install?.running}
+        <section class="card" in:rise>
+          {#key install.component}
+            <div class="step" in:rise={{ y: 4, duration: 300 }}>
+              <p>Downloading {lowerFirst(install.component ?? "your DJ")}…</p>
+              <div class="bar" role="progressbar" aria-valuenow={share === null ? undefined : Math.round(share * 100)}>
+                <div style:transform="scaleX({share ?? 0})"></div>
+              </div>
+            </div>
+          {/key}
+          <p class="muted small">
+            {formatBytes(install.received)}{install.total ? ` of ${formatBytes(install.total)}` : ""}. {missing.length === 1
+              ? "This is the last download."
+              : `${missing.length} downloads left, ${formatBytes(toDownload)} in all.`} It keeps going if you leave this page.
+          </p>
+          <div class="actions"><button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause download</button></div>
+        </section>
+      {:else if missing.length}
+        <section class="card" in:rise>
+          {#if install?.error}<p class="error">{install.error}</p>{/if}
+          <p class="muted">{formatBytes(toDownload)} left to download before the DJ can play.</p>
+          <div class="actions"><button class="btn primary" onclick={() => dj.retry()}>Download</button></div>
+        </section>
+      {:else if status.setup}
+        <section class="card" in:rise>
+          <p>The DJ is set to use your own model server, and it isn't set up yet: {status.setup.toLowerCase()}.</p>
+          <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
+        </section>
+      {:else}
+        <section class="card start" in:rise>
+          {#if dj.phase === "off"}
+            <button class="btn primary big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.start()}>
+              <Icon name="play" size={18} /> Start the DJ
+            </button>
+            <p class="muted small" in:rise={{ y: 4, delay: 60, duration: 300 }}>
+              It plays on this computer, and talks over the ends and starts of songs, never over the singing.
+            </p>
+          {:else}
+            <button class="btn quiet big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.stop()}>
+              <Icon name="close" size={18} /> Stop the DJ
+            </button>
+            {#if dj.activity}{#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}{/if}
+          {/if}
+        </section>
+      {/if}
+      {:else if b.kind === "set"}
+        {@const now = b.set.id === dj.current?.id}
         <h2>
           {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
           {b.set.name}
         </h2>
         <DjSongs songs={b.set.songs} />
+        {#if b.set.live}
+          <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>
+        {/if}
       {:else if b.kind === "said"}
         <h2>What your DJ said</h2>
         <ul class="said">
@@ -275,6 +280,9 @@
   }
   .when.now {
     color: var(--highlight);
+  }
+  .live-note {
+    padding: 0 10px;
   }
   .when {
     display: inline-block;
