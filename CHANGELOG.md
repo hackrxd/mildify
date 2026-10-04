@@ -5,6 +5,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+## 1.1.3 - 2026-10-04
+
 ### Fixed
 
 - Banners (an update ready, What's new, signing in for playback) can be clicked again on Home and on album, artist
