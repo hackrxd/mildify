@@ -361,6 +361,9 @@
     gap: 6px;
   }
   .banner {
+    /* Page headers pull up under the top bar (margin-top: -60px), over the banners; stay above them, below the bar. */
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
