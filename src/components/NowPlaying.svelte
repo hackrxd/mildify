@@ -51,6 +51,7 @@
 </script>
 
 <footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"}>
+  {#if audioFx.on}<div class="flare" aria-hidden="true"><div></div></div>{/if}
   <div class="info">
     {#if track}
       <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
@@ -164,13 +165,8 @@
     gap: 24px;
     height: var(--deck-h);
     padding: 0 20px 0 14px;
-    /* --audio-pulse (0-1, set every frame by audioFx) makes the glow reach further and burn brighter. */
     background:
-      radial-gradient(
-        calc(90% + var(--audio-pulse, 0) * 40%) calc(160% + var(--audio-pulse, 0) * 60%) at 0% 100%,
-        color-mix(in srgb, var(--deck-ambient) calc(var(--deck-glow) * (1 + var(--audio-pulse, 0) * 0.8)), transparent),
-        transparent 60%
-      ),
+      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) var(--deck-glow), transparent), transparent 60%),
       var(--frame);
     /* The glow and colour follow the lyrics view's cover background in and out. */
     transition:
@@ -188,7 +184,34 @@
     background: linear-gradient(90deg, var(--deck-ambient), transparent);
     opacity: calc(0.8 + var(--audio-pulse, 0) * 0.2);
     transform-origin: left;
-    scale: calc(1 + var(--audio-pulse, 0) * 0.3) 1;
+    scale: calc(1 + var(--audio-pulse, 0) * 0.6) 1;
+  }
+  /* Above the flare. */
+  .deck > :not(.flare) {
+    position: relative;
+  }
+
+  /* Audio-responsive Effects: a brighter, wider copy of the glow that flares up with each hit
+     (--audio-pulse, 0-1, set every frame by audioFx). Only its opacity and scale change, which
+     the compositor animates without repainting. */
+  .flare {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .flare > div {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      80% 240% at 0% 100%,
+      color-mix(in srgb, color-mix(in oklab, var(--deck-ambient), white 35%) calc(var(--deck-glow) * 1.7), transparent),
+      transparent 70%
+    );
+    transform-origin: 0% 100%;
+    opacity: var(--audio-pulse, 0);
+    scale: calc(1 + var(--audio-pulse, 0) * 0.35);
+    will-change: opacity, scale;
   }
 
   .info {
