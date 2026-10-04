@@ -75,19 +75,23 @@
       opacity: 0.15;
     }
     to {
-      opacity: 0.55;
+      opacity: 0.35;
     }
   }
   .on .glass,
   .talking .glass {
     opacity: 1;
   }
+  /* Dim glass behind light text; dark ink only on the fully lit sign. */
   .held .glass {
-    opacity: 0.6;
+    opacity: 0.3;
+  }
+  .warming,
+  .held {
+    color: var(--text);
   }
   .on,
-  .talking,
-  .held {
+  .talking {
     color: var(--on-highlight);
   }
   .lamp::after {
@@ -111,6 +115,12 @@
     100% {
       opacity: 0;
       transform: scale(1.12, 1.5);
+    }
+  }
+  /* Held still: the ring stays as an outline, so talking still looks different from on. */
+  @media (prefers-reduced-motion: reduce) {
+    .talking::after {
+      opacity: 0.7;
     }
   }
 </style>
