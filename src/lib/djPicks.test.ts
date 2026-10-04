@@ -6,7 +6,9 @@ import {
   facts,
   fallbackPick,
   INSTRUCTIONS_MAX,
+  kinship,
   MAX_CHOICES,
+  nextInSet,
   nextSegment,
   readAnswer,
   SEGMENTS,
@@ -14,8 +16,10 @@ import {
   segmentSchema,
   SET_MAX,
   shuffled,
+  SKIPS_TO_MOVE_ON,
   type Candidate,
   type Listening,
+  type SetSoFar,
 } from "./djPicks";
 import type { Track } from "./types";
 
@@ -135,6 +139,66 @@ describe("choicesFor", () => {
   });
 });
 
+describe("picking as it goes", () => {
+  const song = (id: string, artist: string, over: Partial<Candidate> = {}): Candidate => ({
+    ...candidates(1, ["favorite"])[0],
+    uri: `spotify:track:${id}`,
+    name: id,
+    artists: [artist],
+    ...over,
+  });
+  const a = song("a", "Ann");
+  const b = song("b", "Bo");
+  const c = song("c", "Cy");
+  const d = song("d", "Di");
+  const ann2 = song("ann2", "Ann", { album: "Ann's album" });
+  const ask = (over: Partial<SetSoFar> = {}): SetSoFar => ({
+    plan: [a, b, c],
+    choices: [d],
+    pool: [a, b, c, d, ann2],
+    sofar: [a],
+    played: new Set([a.uri]),
+    skippedArtists: new Set(),
+    reactions: { liked: [], skipped: [] },
+    skips: 0,
+    ...over,
+  });
+
+  it("follows the plan when the listener says nothing", () => {
+    expect(nextInSet(ask())).toBe(b);
+    expect(nextInSet(ask({ sofar: [a, b], played: new Set([a.uri, b.uri]) }))).toBe(c);
+  });
+
+  it("ends the set once it's as long as the plan", () => {
+    expect(nextInSet(ask({ sofar: [a, b, c] }))).toBeNull();
+  });
+
+  it("brings more of a song the listener liked, from anywhere in their listening", () => {
+    expect(nextInSet(ask({ reactions: { liked: [a], skipped: [] } }))).toBe(ann2);
+  });
+
+  it("leaves out artists the listener skipped, and changes direction after a couple of skips", () => {
+    expect(nextInSet(ask({ skippedArtists: new Set(["Bo"]) }))).toBe(c);
+    expect(nextInSet(ask({ skips: SKIPS_TO_MOVE_ON }))).toBeNull();
+  });
+
+  it("doesn't play the same artist twice running unless asked", () => {
+    const bo2 = song("bo2", "Bo");
+    expect(nextInSet(ask({ plan: [b, bo2, c], sofar: [b], played: new Set([b.uri]) }))).toBe(c);
+  });
+
+  it("ends the set when nothing's left to pick", () => {
+    expect(nextInSet(ask({ choices: [], pool: [], played: new Set([a.uri, b.uri, c.uri]) }))).toBeNull();
+  });
+
+  it("weighs a song by how close it is to one liked", () => {
+    const liked = song("x", "Ann", { album: "Ann's album", year: "2011" });
+    expect(kinship(ann2, liked)).toBe(3 + 2 + 1);
+    expect(kinship(song("y", "Zed", { year: "2013" }), liked)).toBe(1 + 1);
+    expect(kinship(song("z", "Zed", { reasons: ["allTime"] }), liked)).toBe(0);
+  });
+});
+
 describe("nextSegment", () => {
   const pool = [
     ...candidates(5, ["onRepeat"]),
@@ -201,6 +265,25 @@ describe("segmentMessages", () => {
     expect(user.content).toContain('coming out of "Midnight City" by M83');
     expect(user.content).toContain("a throwback set");
     expect(user.content).not.toContain("name is");
+  });
+
+  it("tells the model what the listener just liked and skipped, and to name only the first song when picking as it goes", () => {
+    const [, user] = segmentMessages({
+      segment: seg("onRepeat"),
+      choices,
+      listener: null,
+      previous: null,
+      instructions: "",
+      live: true,
+      reactions: { liked: [choices[1]], skipped: [choices[2], choices[3]] },
+      now: NOW,
+    });
+    expect(user.content).toContain('the listener liked "Song 1" by Artist 1.');
+    expect(user.content).toContain('They skipped "Song 2" by Artist 2; "Song 3" by Artist 3.');
+    expect(user.content).toContain("Name only the first song");
+    const [, plain] = segmentMessages({ segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW });
+    expect(plain.content).not.toContain("liked \"");
+    expect(plain.content).not.toContain("Name only the first song");
   });
 
   it("passes on the listener's instructions, fenced and capped", () => {

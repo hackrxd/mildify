@@ -148,6 +148,77 @@ export const MAX_CHOICES = 14;
 export const SET_MIN = 3;
 export const SET_MAX = 5;
 
+/** What the listener did with the DJ's songs this session, most recent first. */
+export interface Reactions {
+  /** Liked while the DJ played them. */
+  liked: Candidate[];
+  /** Left before halfway. */
+  skipped: Candidate[];
+}
+
+/** This many skips in a set and it isn't working: the DJ changes direction. */
+export const SKIPS_TO_MOVE_ON = 2;
+
+/** How closely `c` follows a song the listener liked: the same artist most, then the same album, then the
+ * same kind of favorite or the same few years. */
+export function kinship(c: Candidate, liked: Candidate): number {
+  let n = 0;
+  if (c.artists.some((a) => liked.artists.includes(a))) n += 3;
+  if (c.album && c.album === liked.album) n += 2;
+  if (c.reasons.some((r) => liked.reasons.includes(r))) n += 1;
+  if (c.year && liked.year && Math.abs(Number(c.year) - Number(liked.year)) <= 3) n += 1;
+  return n;
+}
+
+export interface SetSoFar {
+  /** The songs the model picked for the set, in order: what it plays unless the listener says otherwise. */
+  plan: Candidate[];
+  /** The rest of the segment's songs. */
+  choices: Candidate[];
+  /** All of the listener's songs: more by an artist they just liked can come from anywhere in it. */
+  pool: Candidate[];
+  /** The set's songs so far, the last one playing. */
+  sofar: Candidate[];
+  played: Set<string>;
+  skippedArtists: Set<string>;
+  reactions: Reactions;
+  /** Songs skipped in this set. */
+  skips: number;
+}
+
+/** The set's next song, picked while the one before it plays; null when the set should end with it. The plan
+ * comes first, but a song the listener liked pulls its artist and album forward, a skipped artist sits out, and
+ * the same artist twice running is avoided unless they asked for more of it. */
+export function nextInSet(p: SetSoFar): Candidate | null {
+  if (p.skips >= SKIPS_TO_MOVE_ON || p.sofar.length >= Math.max(p.plan.length, 1)) return null;
+  const used = new Set(p.sofar.map((s) => s.uri));
+  const liked = p.reactions.liked.slice(0, 3);
+  const close = p.pool.filter((c) => liked.some((l) => kinship(c, l) >= 3));
+  const seen = new Set<string>();
+  const options = [...p.plan, ...p.choices, ...close].filter((c) => {
+    if (seen.has(c.uri) || used.has(c.uri) || p.played.has(c.uri)) return false;
+    seen.add(c.uri);
+    return !c.artists.some((a) => p.skippedArtists.has(a));
+  });
+  const last = p.sofar[p.sofar.length - 1];
+  // Liking the song playing asks for more of its artist.
+  const moreOfLast = !!last && liked.some((l) => l.artists[0] === last.artists[0]);
+  let best: Candidate | null = null;
+  let top = -Infinity;
+  for (const c of options) {
+    const planned = p.plan.indexOf(c);
+    let score = planned >= 0 ? 2 - planned * 0.1 : 0;
+    // The latest like counts most.
+    liked.forEach((l, i) => (score += kinship(c, l) / (i + 1)));
+    if (last && !moreOfLast && c.artists[0] === last.artists[0]) score -= 2;
+    if (score > top) {
+      top = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
 /** Fisher–Yates with an injectable random source, for tests. */
 export function shuffled<T>(items: T[], random: () => number = Math.random): T[] {
   const out = [...items];
@@ -237,6 +308,9 @@ export interface SegmentAsk {
   /** The song playing out as the DJ talks; none for the opening. */
   previous: { name: string; artists: string[] } | null;
   instructions: string;
+  /** The DJ picks the set's songs after the first as it goes. */
+  live?: boolean;
+  reactions?: Reactions;
   now?: Date;
 }
 
@@ -275,6 +349,7 @@ export function segmentMessages(ask: SegmentAsk): DjMessage[] {
       ? `You're coming out of "${ask.previous.name}" by ${ask.previous.artists.join(", ")}.`
       : "This is the start of the session: greet the listener first.",
     `This segment: ${ask.segment.brief}.`,
+    ...reactionLines(ask.reactions),
     "",
     "Songs you can pick from:",
     ...list,
@@ -282,10 +357,20 @@ export function segmentMessages(ask: SegmentAsk): DjMessage[] {
     `Pick ${SET_MIN} to ${SET_MAX} of them by number, in the order to play them. Give the segment a short name,`,
     "then write what you say before the first song you picked. Answer in JSON.",
   ];
+  if (ask.live) user.push("Name only the first song when you talk: you pick the rest as the listener goes.");
   return [
     { role: "system", content: system.join("\n") },
     { role: "user", content: user.join("\n") },
   ];
+}
+
+/** What the listener just did, for the DJ to go by and mention. */
+function reactionLines(r: Reactions | undefined): string[] {
+  const list = (songs: Candidate[]) => songs.slice(0, 3).map((c) => `"${c.name}" by ${c.artists.join(", ")}`).join("; ");
+  const out: string[] = [];
+  if (r?.liked.length) out.push(`While you played, the listener liked ${list(r.liked)}.`);
+  if (r?.skipped.length) out.push(`They skipped ${list(r.skipped)}.`);
+  return out;
 }
 
 /** The answer's shape. llama.cpp writes properties in alphabetical order: the name, then the songs,
