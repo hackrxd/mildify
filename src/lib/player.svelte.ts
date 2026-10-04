@@ -300,18 +300,20 @@ class Player {
     return this.#play({ context_uri: contextUri, offset: startUri ? { uri: startUri } : undefined });
   }
 
-  /** Plays an explicit list of tracks starting at `index`. */
-  playUris(uris: string[], index = 0) {
-    return this.#play({ uris, offset: { position: index } });
+  /** Plays an explicit list of tracks starting at `index`; `here` plays them on this computer's player. */
+  playUris(uris: string[], index = 0, here = false) {
+    return this.#play({ uris, offset: { position: index } }, here);
   }
 
-  async #play(body: sp.PlayRequest) {
+  /** Resolves to whether playback started. */
+  async #play(body: sp.PlayRequest, here = false): Promise<boolean> {
     const local = session.deviceReady ? session.device : null;
-    const target = this.deviceId ?? local?.device_id;
+    const target = here ? local?.device_id : (this.deviceId ?? local?.device_id);
     if (!target) {
       toasts.show("No playback device is available. Check the built-in player in Settings.", "error");
-      return;
+      return false;
     }
+    let ok = true;
     try {
       await sp.play(target, body);
     } catch (e) {
@@ -323,12 +325,15 @@ class Player {
           await sp.play(local.device_id, body);
         } catch (e2) {
           toasts.error(e2);
+          ok = false;
         }
       } else {
         toasts.error(e);
+        ok = false;
       }
     }
     this.refreshSoon(800);
+    return ok;
   }
 
   async transferTo(deviceId: string, play = true) {
