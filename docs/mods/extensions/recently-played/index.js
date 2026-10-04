@@ -11,9 +11,9 @@ export default function (ns) {
   ns.addStyle(`
     .rp-list { display: grid; gap: 2px; }
     .rp-row { display: flex; justify-content: space-between; gap: 16px; padding: 8px 12px; border-radius: 6px; }
-    .rp-row:hover { background: var(--raised); }
-    .rp-row.playing .rp-name { color: var(--brass); }
-    .rp-when { color: var(--smoke); font-size: var(--t-sm); }
+    .rp-row:hover { background: var(--surface-raised); }
+    .rp-row.playing .rp-name { color: var(--highlight); }
+    .rp-when { color: var(--text-muted); font-size: var(--t-sm); }
   `);
 
   ns.addPage({

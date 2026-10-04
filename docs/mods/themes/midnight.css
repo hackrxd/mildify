@@ -1,19 +1,19 @@
 /**
  * @name Midnight
- * @description Deep blue panels with a cool cyan accent instead of brass.
+ * @description Deep blue panels with a cool cyan accent instead of the default amber.
  * @author Mildify
  * @version 1.0
  */
 
 :root {
-  --graphite: #0f1420;
-  --panel: #141b2b;
-  --raised: #1d2740;
-  --line: #26314d;
-  --paper: #e6ecf7;
-  --smoke: #8a97b3;
-  --brass: #6fd3f7;
-  --brass-ink: #04202b;
+  --bg: #0f1420;
+  --surface: #141b2b;
+  --surface-raised: #1d2740;
+  --border: #26314d;
+  --text: #e6ecf7;
+  --text-muted: #8a97b3;
+  --highlight: #6fd3f7;
+  --on-highlight: #04202b;
 }
 
 /* Rounder buttons and cover art. */

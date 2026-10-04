@@ -32,21 +32,25 @@ to restyle the app is to override its colour variables:
 
 ```css
 :root {
-  --graphite: #0f1420; /* window background */
-  --panel: #141b2b;    /* sidebar, cards */
-  --raised: #1d2740;   /* hovered and selected rows, buttons */
-  --line: #26314d;     /* dividers, field borders */
-  --paper: #e6ecf7;    /* main text */
-  --smoke: #8a97b3;    /* secondary text */
-  --brass: #6fd3f7;    /* the accent: play buttons, active items, sliders */
-  --brass-ink: #04202b; /* text on the accent */
+  --bg: #0f1420;             /* panel background: sidebar, main view, queue */
+  --surface: #141b2b;        /* cards, top bar, settings groups */
+  --surface-raised: #1d2740; /* hovered and selected rows, buttons */
+  --border: #26314d;         /* dividers, field borders */
+  --text: #e6ecf7;           /* main text */
+  --text-muted: #8a97b3;     /* secondary text */
+  --highlight: #6fd3f7;      /* the accent: play buttons, active items, sliders */
+  --on-highlight: #04202b;   /* text on the accent */
   --danger: #f07a6a;
 }
 ```
 
+Themes written for Mildify 1.1 and earlier used `--graphite`, `--panel`, `--raised`, `--line`, `--paper`,
+`--smoke`, `--brass` and `--brass-ink` for these. A theme that sets them still works, but extensions should
+read the new names.
+
 Also available: `--font-ui`, `--font-display`, the type scale `--t-xs` … `--t-2xl`, and the layout
 sizes `--sidebar-w`, `--deck-h` (the player bar's height) and `--gutter`. The window frame behind the
-floating panels is `--frame` (derived from `--graphite`), the gap between panels `--seam`, their corners
+floating panels is `--frame` (derived from `--bg`), the gap between panels `--seam`, their corners
 `--panel-radius`, and the shadow under menus and popovers `--shadow-pop`. Animations use `--ease-out`,
 `--ease-spring` and `--stagger` (the delay between list items popping in). `--ambient` is set per page
 from the cover art.
