@@ -49,7 +49,7 @@ API (`device_command`), and librespot's player events reach the UI as `local-pla
 arrive. It also interpolates the playback position: `position` updates at 4 Hz for UI, and `positionNow()` is
 per-frame for lyrics. The sink also feeds `meter.rs`: with Audio-responsive Effects on, each packet's loudness is
 filed under when it will be heard and sent as `audio-level` events, which `src/lib/audiofx.svelte.ts` turns into the
-`--audio-pulse` CSS variable on the lyrics NowBar's cover.
+`--audio-pulse` CSS variable on the player bar, whose cover glow grows with it.
 
 **Frontend state** lives in Svelte 5 rune classes in `src/lib/*.svelte.ts`, as singletons (`session`, `player`,
 `router`, `lyrics`, …). Routing is the in-memory `router` store; views live in `src/views/`.
