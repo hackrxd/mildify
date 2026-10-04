@@ -5,6 +5,10 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Added
+
+- A Midnight (Dark) theme: Midnight with deeper blue-black panels.
+
 ### Changed
 
 - The theme colour variables have names that say what they colour: `--bg`, `--surface`, `--surface-raised`,
