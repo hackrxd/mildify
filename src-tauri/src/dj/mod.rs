@@ -3,13 +3,14 @@
 //!
 //! - downloading the runtimes, model and voice, only once the DJ is turned on (`install.rs`),
 //! - the language model, run locally by llama.cpp or on the user's own server (`engine.rs`),
-//! - the voice, sherpa-onnx text-to-speech (`voice.rs`).
+//! - the voice, sherpa-onnx text-to-speech (`voice.rs`), played on this computer's audio output (`speaker.rs`).
 //!
 //! Everything lives in `<app data>/dj/`; removing the DJ deletes that folder.
 
 pub mod engine;
 pub mod install;
 pub mod manifest;
+pub mod speaker;
 pub mod voice;
 
 use std::collections::VecDeque;
@@ -25,6 +26,7 @@ use tauri::{AppHandle, Emitter};
 use crate::error::{AppError, Result};
 use engine::{Engine, Message, Target};
 use manifest::{Component, Runtime, OWN_SERVER};
+use speaker::{Cmd, Speaker, VoiceCommand};
 use voice::Speech;
 
 /// The DJ's settings, part of `config.json`.
@@ -174,6 +176,7 @@ pub struct Dj {
     engine: Arc<Engine>,
     speech: Mutex<VecDeque<(u64, Arc<Vec<u8>>)>>,
     next_speech: AtomicU64,
+    speaker: Speaker,
 }
 
 impl Dj {
@@ -189,6 +192,7 @@ impl Dj {
             engine: Arc::default(),
             speech: Mutex::default(),
             next_speech: AtomicU64::new(1),
+            speaker: Speaker::default(),
         }
     }
 
@@ -392,6 +396,7 @@ impl Dj {
 
     /// Unloads the model; the next request loads it again.
     pub async fn release(&self) {
+        self.speaker.close();
         self.engine.stop().await;
     }
 
@@ -411,6 +416,7 @@ impl Dj {
 
     pub fn shutdown(&self) {
         self.cancel_install();
+        self.speaker.close();
         self.engine.kill_now();
     }
 
@@ -438,8 +444,31 @@ impl Dj {
     }
 
     /// The WAV audio of a line `speak` made.
-    pub fn speech_audio(&self, id: u64) -> Option<Arc<Vec<u8>>> {
+    fn speech_audio(&self, id: u64) -> Option<Arc<Vec<u8>>> {
         self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone())
+    }
+
+    /// Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes.
+    pub fn voice(&self, app: &AppHandle, command: VoiceCommand) -> Result<()> {
+        let cmd = match command {
+            VoiceCommand::Play { id, gain } => {
+                let wav = self.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
+                let pcm = voice::pcm(&wav)
+                    .ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
+                Cmd::Play { id, pcm, gain: gain.clamp(0.0, 1.0) }
+            }
+            VoiceCommand::Pause => Cmd::Pause,
+            VoiceCommand::Resume => Cmd::Resume,
+            VoiceCommand::Gain { gain } => Cmd::Gain(gain.clamp(0.0, 1.0)),
+            VoiceCommand::Stop => Cmd::Stop,
+        };
+        let app = app.clone();
+        self.speaker.send(cmd, move || {
+            Arc::new(move |event| {
+                let _ = app.emit("dj-voice", event);
+            })
+        });
+        Ok(())
     }
 }
 

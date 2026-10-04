@@ -367,17 +367,16 @@ async fn dj_generate(
     state.dj.generate(&cfg, &messages, schema.as_ref(), max_tokens.unwrap_or(400).min(2000)).await
 }
 
-/// Reads a line in the DJ's voice; `dj_speech` hands over the audio.
+/// Reads a line in the DJ's voice; `dj_voice` plays it.
 #[tauri::command]
 async fn dj_speak(state: State<'_, AppState>, text: String) -> Result<dj::voice::Speech> {
     state.dj.speak(&state.config().dj, &text).await
 }
 
-/// A spoken line's WAV audio, as raw bytes.
+/// Plays, pauses or stops the DJ's lines on this computer's audio output, as the music plays.
 #[tauri::command]
-fn dj_speech(state: State<'_, AppState>, id: u64) -> Result<tauri::ipc::Response> {
-    let wav = state.dj.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
-    Ok(tauri::ipc::Response::new(wav.as_ref().clone()))
+fn dj_voice(app: AppHandle, state: State<'_, AppState>, command: dj::speaker::VoiceCommand) -> Result<()> {
+    state.dj.voice(&app, command)
 }
 
 /// Turns the music on the embedded player down to `level` (0-1) while the DJ talks, or back up.
@@ -534,7 +533,7 @@ pub fn run() {
             dj_warm,
             dj_generate,
             dj_speak,
-            dj_speech,
+            dj_voice,
             dj_duck,
             dj_release,
         ])
