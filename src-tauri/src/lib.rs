@@ -392,6 +392,7 @@ fn dj_duck(state: State<'_, AppState>, level: f32, delay_ms: u32, ramp_ms: u32) 
 /// Unloads the DJ's model, freeing its memory.
 #[tauri::command]
 async fn dj_release(state: State<'_, AppState>) -> Result<()> {
+    state.dj.close_voice();
     state.dj.release().await;
     Ok(())
 }

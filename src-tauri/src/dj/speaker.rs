@@ -22,6 +22,9 @@ const POLL: Duration = Duration::from_millis(20);
 const IDLE_POLL: Duration = Duration::from_secs(1);
 /// The output is let go after this long without a line, so the DJ doesn't keep the audio device open.
 const IDLE_CLOSE: Duration = Duration::from_secs(120);
+/// A line that hasn't moved on for this long isn't being played: the output died (a device unplugged with no
+/// sound server to move the stream). Longer than a sound server can take to start a new stream.
+const STALL: Duration = Duration::from_secs(4);
 
 /// What the UI asks of the voice.
 #[derive(Debug, Deserialize)]
@@ -146,7 +149,7 @@ impl Speaker {
         let report = report();
         let spawned = std::thread::Builder::new()
             .name("dj-voice".into())
-            .spawn(move || run(recv, Rodio::open, move |e| report(e), IDLE_CLOSE));
+            .spawn(move || run(recv, Rodio::open, move |e| report(e), IDLE_CLOSE, STALL));
         match spawned {
             Ok(_) => {
                 let _ = send.send(cmd);
@@ -169,6 +172,16 @@ struct Line {
     id: u64,
     paused: bool,
     reported: Instant,
+    /// Where it was when it last moved on, and when.
+    at: Duration,
+    moved: Instant,
+}
+
+impl Line {
+    fn new(id: u64) -> Self {
+        let now = Instant::now();
+        Self { id, paused: false, reported: now, at: Duration::ZERO, moved: now }
+    }
 }
 
 fn ms(d: Duration) -> u32 {
@@ -181,6 +194,7 @@ fn run(
     open: impl Fn() -> Result<Box<dyn Output>, String>,
     report: impl Fn(VoiceEvent),
     idle_close: Duration,
+    stall: Duration,
 ) {
     let mut out: Option<Box<dyn Output>> = None;
     let mut line: Option<Line> = None;
@@ -203,7 +217,7 @@ fn run(
                     // A line in its place just stops: it doesn't end.
                     o.play(pcm, gain);
                     report(VoiceEvent::Playing { id, position_ms: 0 });
-                    line = Some(Line { id, paused: false, reported: Instant::now() });
+                    line = Some(Line::new(id));
                 }
             }
             Ok(Cmd::Pause) => {
@@ -217,6 +231,7 @@ fn run(
                     o.resume();
                     l.paused = false;
                     l.reported = Instant::now();
+                    l.moved = Instant::now();
                     report(VoiceEvent::Playing { id: l.id, position_ms: ms(o.position()) });
                 }
             }
@@ -233,13 +248,30 @@ fn run(
                 idle_since = Instant::now();
             }
             Ok(Cmd::Close) => {
+                // A line cut off here still ends, for whoever is waiting on it.
+                if let Some(l) = line.take() {
+                    report(VoiceEvent::Ended { id: l.id });
+                }
                 out = None;
-                line = None;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
         let Some(o) = out.as_ref() else { continue };
+        if let Some(l) = line.as_mut().filter(|l| !l.paused) {
+            let at = o.position();
+            if at != l.at {
+                l.at = at;
+                l.moved = Instant::now();
+            } else if !o.finished() && l.moved.elapsed() >= stall {
+                log::warn!("DJ: the voice's output stopped playing");
+                report(VoiceEvent::Failed { id: l.id, error: "The sound output stopped playing.".into() });
+                // Opened anew for the next line, on whatever output is the default by then.
+                out = None;
+                line = None;
+                continue;
+            }
+        }
         match line.as_mut() {
             Some(l) if !l.paused && o.finished() => {
                 report(VoiceEvent::Ended { id: l.id });
@@ -311,6 +343,10 @@ mod tests {
     }
 
     fn harness(fails: bool, idle_close: Duration) -> Harness {
+        harness_with(fails, idle_close, STALL)
+    }
+
+    fn harness_with(fails: bool, idle_close: Duration, stall: Duration) -> Harness {
         let (tx, rx) = mpsc::channel();
         let (etx, events) = mpsc::channel();
         let fake = Arc::new(Mutex::new(Fake::default()));
@@ -322,7 +358,7 @@ mod tests {
             shared.lock().unwrap().open = true;
             Ok(Box::new(FakeOutput(shared.clone())))
         };
-        std::thread::spawn(move || run(rx, open, move |e| etx.send(e).unwrap(), idle_close));
+        std::thread::spawn(move || run(rx, open, move |e| etx.send(e).unwrap(), idle_close, stall));
         Harness { tx, events, fake }
     }
 
@@ -405,7 +441,7 @@ mod tests {
     fn plays_through_the_default_output() {
         let (tx, rx) = mpsc::channel();
         let (etx, events) = mpsc::channel();
-        std::thread::spawn(move || run(rx, Rodio::open, move |e| etx.send(e).unwrap(), IDLE_CLOSE));
+        std::thread::spawn(move || run(rx, Rodio::open, move |e| etx.send(e).unwrap(), IDLE_CLOSE, STALL));
         let samples = (0..24_000 * 6 / 10).map(|i| (i as f32 * 0.05).sin() * 0.1).collect();
         tx.send(Cmd::Play { id: 9, pcm: Pcm { channels: 1, sample_rate: 24_000, samples }, gain: 0.5 }).unwrap();
         let started = Instant::now();
@@ -421,6 +457,39 @@ mod tests {
         // A sound server can take a moment to start a new stream.
         assert!(took >= Duration::from_millis(550) && took < Duration::from_secs(3), "{took:?}");
         assert!(last >= 200, "reported {last} ms in");
+    }
+
+    #[test]
+    fn gives_up_on_an_output_that_stopped_playing() {
+        let h = harness_with(false, IDLE_CLOSE, Duration::from_millis(300));
+        h.tx.send(line(1)).unwrap();
+        h.next();
+        h.fake.lock().unwrap().position = Duration::from_millis(100);
+        // Stuck there: no end, no more progress.
+        let failed = loop {
+            match h.next() {
+                VoiceEvent::Playing { .. } => continue,
+                other => break other,
+            }
+        };
+        assert_eq!(failed, VoiceEvent::Failed { id: 1, error: "The sound output stopped playing.".into() });
+        assert!(!h.fake.lock().unwrap().open);
+        // A paused line stands still on purpose.
+        h.tx.send(line(2)).unwrap();
+        h.next();
+        h.fake.lock().unwrap().position = Duration::from_millis(50);
+        h.tx.send(Cmd::Pause).unwrap();
+        h.told("pause");
+        assert!(h.quiet(600));
+    }
+
+    #[test]
+    fn a_line_cut_off_by_closing_still_ends() {
+        let h = harness(false, IDLE_CLOSE);
+        h.tx.send(line(3)).unwrap();
+        h.next();
+        h.tx.send(Cmd::Close).unwrap();
+        assert_eq!(h.next(), VoiceEvent::Ended { id: 3 });
     }
 
     #[test]

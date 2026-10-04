@@ -396,8 +396,12 @@ impl Dj {
 
     /// Unloads the model; the next request loads it again.
     pub async fn release(&self) {
-        self.speaker.close();
         self.engine.stop().await;
+    }
+
+    /// Stops any line and lets go of the audio output, as a session ends.
+    pub fn close_voice(&self) {
+        self.speaker.close();
     }
 
     /// Unloads the model after it's gone unused for a while.
