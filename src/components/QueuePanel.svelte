@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { dj } from "../lib/dj.svelte";
   import { errorMessage } from "../lib/ipc";
   import { player } from "../lib/player.svelte";
@@ -15,9 +16,13 @@
   let queue = $state<Queue | null>(null);
   let error = $state<string | null>(null);
 
-  // Reload whenever the track changes.
+  // Reload whenever the track changes, or the DJ lines up another song. The player takes a moment to tell
+  // Spotify about a queue change, so that reload waits longer.
+  let linedSeen = untrack(() => dj.linedUp);
   $effect(() => {
     const uri = player.track?.uri;
+    const lined = dj.linedUp !== linedSeen;
+    linedSeen = dj.linedUp;
     const t = setTimeout(async () => {
       try {
         const q = await sp.queue();
@@ -26,7 +31,7 @@
       } catch (e) {
         error = errorMessage(e);
       }
-    }, 400);
+    }, lined ? 1000 : 400);
     return () => clearTimeout(t);
   });
 
