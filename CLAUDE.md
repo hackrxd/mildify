@@ -33,7 +33,9 @@ sample syllable sync).
 ## Architecture
 
 **The UI never talks to Spotify directly.** Every Web API call goes through the `api` Tauri command
-(`src/lib/ipc.ts` → `src-tauri/src/lib.rs` → `webapi.rs`), which holds the token, refreshes it and handles 429s.
+(`src/lib/ipc.ts` → `src-tauri/src/lib.rs` → `webapi.rs`), which holds the token, refreshes it and paces requests:
+at most 40 per rolling 30 s (the rest wait), and after a 429 longer than 5 s it fails every request locally until
+it's over, kept across restarts in `webapi_cooldown.json`, since requests sent during a rate limit can extend it.
 `src/lib/spotify.ts` holds the typed endpoint wrappers. Backend errors reject with the `AppError` shape
 (`kind`/`message`/`status`) from `error.rs`, mirrored in `ipc.ts`.
 
