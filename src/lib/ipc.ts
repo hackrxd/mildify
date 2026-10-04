@@ -189,7 +189,11 @@ export type DeviceCommand =
   | { action: "seek"; position_ms: number }
   | { action: "volume"; percent: number }
   | { action: "shuffle"; on: boolean }
-  | { action: "repeat"; mode: RepeatMode };
+  | { action: "repeat"; mode: RepeatMode }
+  /** A song after the one playing, ahead of the rest. */
+  | { action: "queue"; uri: string }
+  /** Takes out what was queued; the rest of what's playing stays. */
+  | { action: "clear_queue" };
 
 export type RepeatMode = "off" | "context" | "track";
 
