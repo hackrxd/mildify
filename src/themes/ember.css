@@ -1,13 +1,13 @@
 /* Ember: warm charcoal and a glowing coral accent. */
 
 :root {
-  --graphite: #1c1715;
-  --panel: #241d1a;
-  --raised: #302723;
-  --line: #3b302b;
-  --paper: #f1e7df;
-  --smoke: #a39187;
-  --brass: #ff7a59;
-  --brass-ink: #2b0d04;
+  --bg: #1c1715;
+  --surface: #241d1a;
+  --surface-raised: #302723;
+  --border: #3b302b;
+  --text: #f1e7df;
+  --text-muted: #a39187;
+  --highlight: #ff7a59;
+  --on-highlight: #2b0d04;
   --danger: #ff5c7a;
 }

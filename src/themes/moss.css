@@ -1,12 +1,12 @@
 /* Moss: forest greens with a fresh sage accent. */
 
 :root {
-  --graphite: #141a16;
-  --panel: #19211c;
-  --raised: #232e27;
-  --line: #2d3a31;
-  --paper: #e7ecdf;
-  --smoke: #8d9a8f;
-  --brass: #a3d16b;
-  --brass-ink: #17260a;
+  --bg: #141a16;
+  --surface: #19211c;
+  --surface-raised: #232e27;
+  --border: #2d3a31;
+  --text: #e7ecdf;
+  --text-muted: #8d9a8f;
+  --highlight: #a3d16b;
+  --on-highlight: #17260a;
 }

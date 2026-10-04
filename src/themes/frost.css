@@ -1,13 +1,13 @@
 /* Frost: cool slate greys and an icy blue accent. */
 
 :root {
-  --graphite: #242933;
-  --panel: #2b313c;
-  --raised: #353c4a;
-  --line: #3f4757;
-  --paper: #eceff4;
-  --smoke: #a2abbc;
-  --brass: #88c0d0;
-  --brass-ink: #102a33;
+  --bg: #242933;
+  --surface: #2b313c;
+  --surface-raised: #353c4a;
+  --border: #3f4757;
+  --text: #eceff4;
+  --text-muted: #a2abbc;
+  --highlight: #88c0d0;
+  --on-highlight: #102a33;
   --danger: #e0838b;
 }

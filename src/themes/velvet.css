@@ -1,12 +1,12 @@
 /* Velvet: dusky plum with a neon pink accent. */
 
 :root {
-  --graphite: #1a1322;
-  --panel: #20182a;
-  --raised: #2c2138;
-  --line: #382b47;
-  --paper: #efe6f5;
-  --smoke: #9e8fae;
-  --brass: #f07cc4;
-  --brass-ink: #2e0920;
+  --bg: #1a1322;
+  --surface: #20182a;
+  --surface-raised: #2c2138;
+  --border: #382b47;
+  --text: #efe6f5;
+  --text-muted: #9e8fae;
+  --highlight: #f07cc4;
+  --on-highlight: #2e0920;
 }

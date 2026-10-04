@@ -1,12 +1,12 @@
 /* Midnight: blue-black panels lit by a soft moonlit indigo. */
 
 :root {
-  --graphite: #0b0d17;
-  --panel: #10131f;
-  --raised: #191d2e;
-  --line: #22273b;
-  --paper: #e3e6f3;
-  --smoke: #878dac;
-  --brass: #8c9eff;
-  --brass-ink: #0b1035;
+  --bg: #0b0d17;
+  --surface: #10131f;
+  --surface-raised: #191d2e;
+  --border: #22273b;
+  --text: #e3e6f3;
+  --text-muted: #878dac;
+  --highlight: #8c9eff;
+  --on-highlight: #0b1035;
 }
