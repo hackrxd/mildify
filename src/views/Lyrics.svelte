@@ -3,7 +3,6 @@
   import { fade } from "svelte/transition";
   import * as renderer from "spicy-lyrics-renderer";
   import Icon from "../components/Icon.svelte";
-  import { audioFx } from "../lib/audiofx.svelte";
   import { BACKDROP_FADE_MS, lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from "../lib/lyrics.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
@@ -80,12 +79,6 @@
   $effect(() => {
     void lyrics.textScale;
     if (mounted) untrack(() => requestAnimationFrame(() => renderer.remeasure()));
-  });
-
-  // The cover beside the lyrics pulses with the music while it's showing.
-  $effect(() => {
-    if (!mounted || !nowBar || !audioFx.on) return;
-    return untrack(() => audioFx.attach(() => host?.querySelector<HTMLElement>(".NowBar .MediaBox") ?? null));
   });
 
   function timing(ms: number): string {
@@ -468,15 +461,6 @@
   .lyrics-view
     :global(#SpicyLyricsPage.SpicyRenderer .LyricsContainer .SpicyLyricsScrollContainer[data-lyrics-type="Static"]) {
     --DefaultLyricsSize: calc(clamp(0.8rem, calc(1cqw * 5), 2.5rem) * var(--lyrics-scale, 1));
-  }
-
-  /* Audio-responsive Effects: --audio-pulse (0-1) is set on the cover's box every frame. Scale and
-     the brightness filter the renderer already composites, so it doesn't repaint. */
-  .lyrics-view :global(#SpicyLyricsPage .ContentBox .NowBar .Header .MediaBox) {
-    --ArtworkBrightness: calc(1 + var(--audio-pulse, 0) * 0.14);
-  }
-  .lyrics-view :global(#SpicyLyricsPage .ContentBox .NowBar .Header .MediaBox .MediaImageContainer) {
-    scale: calc(1 + var(--audio-pulse, 0) * 0.05);
   }
 
   .panel {
