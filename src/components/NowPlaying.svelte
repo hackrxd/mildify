@@ -112,7 +112,7 @@
       <button class="icon-btn" class:on={player.shuffle} onclick={() => player.toggleShuffle()} title="Shuffle" aria-pressed={player.shuffle}>
         <Icon name="shuffle" size={18} />
       </button>
-      <button class="icon-btn" onclick={() => player.prev()} disabled={!!air} title="Previous">
+      <button class="icon-btn" onclick={() => dj.previous()} disabled={!!air} title="Previous">
         <Icon name="prev" size={18} />
       </button>
       <button class="play" onclick={() => dj.togglePause()} title={playing ? "Pause" : "Play"}>

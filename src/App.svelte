@@ -108,7 +108,7 @@
     } else if (mod && e.key === "ArrowRight") {
       dj.skipTalk();
     } else if (mod && e.key === "ArrowLeft") {
-      if (!dj.onAir) player.prev();
+      dj.previous();
     } else if (mod && e.key === "ArrowUp") {
       e.preventDefault();
       player.setVolume(player.volume + 10);

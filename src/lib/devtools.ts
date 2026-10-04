@@ -54,7 +54,7 @@ export async function act(ask: DevtoolsAsk): Promise<unknown> {
       await dj.skipTalk();
       break;
     case "back":
-      if (!dj.onAir) await player.prev();
+      await dj.previous();
       break;
   }
   return null;

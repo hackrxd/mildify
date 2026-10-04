@@ -25,11 +25,13 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("./ipc", () => ({ backend: { devtoolsAnswer: (...a: unknown[]) => devtoolsAnswer(...a) } }));
 vi.mock("./player.svelte", () => ({ player }));
-// Like the real DJ: its item takes play/pause and next while it's up; otherwise they reach the player.
+// Like the real DJ: its item takes play/pause and next while it's up, and previous does nothing then; otherwise
+// they reach the player.
 const dj = {
   onAir: null as object | null,
   togglePause: vi.fn(() => (dj.onAir ? undefined : player.togglePlay())),
   skipTalk: vi.fn(() => (dj.onAir ? undefined : player.next())),
+  previous: vi.fn(() => (dj.onAir ? undefined : player.prev())),
 };
 vi.mock("./dj.svelte", () => ({ dj }));
 
