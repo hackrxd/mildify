@@ -103,11 +103,12 @@
       return;
     } else if (e.key === " " && (e.target as HTMLElement).tagName !== "BUTTON") {
       e.preventDefault();
-      player.togglePlay();
+      // While the DJ talks between songs, these act on its talk (see NowPlaying).
+      dj.togglePause();
     } else if (mod && e.key === "ArrowRight") {
-      player.next();
+      dj.skipTalk();
     } else if (mod && e.key === "ArrowLeft") {
-      player.prev();
+      if (!dj.onAir) player.prev();
     } else if (mod && e.key === "ArrowUp") {
       e.preventDefault();
       player.setVolume(player.volume + 10);

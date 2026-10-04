@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { dj } from "../lib/dj.svelte";
   import { errorMessage } from "../lib/ipc";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import * as sp from "../lib/spotify";
   import type { Queue, Track } from "../lib/types";
   import { formatDuration, pickImage } from "../lib/util";
+  import DjCover from "./DjCover.svelte";
   import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
 
@@ -29,7 +31,31 @@
   });
 
   const upNext = $derived((queue?.queue ?? []).slice(0, 30));
+  // The DJ's next talk is an item of the queue too: before its set's first song, or, before that set is
+  // queued, after the last song of the one playing now.
+  const djNext = $derived(dj.upNext?.speech && dj.announced !== dj.upNext ? dj.upNext : null);
+  const djAt = $derived.by(() => {
+    if (!djNext) return -1;
+    const first = upNext.findIndex((t) => t.uri === djNext.songs[0].uri);
+    if (first >= 0) return first;
+    const last = dj.current?.songs[dj.current.songs.length - 1].uri;
+    return last ? upNext.findIndex((t) => t.uri === last) + 1 : 0;
+  });
 </script>
+
+{#snippet djItem(name: string, durationMs: number, current = false)}
+  <li class="item" class:current>
+    <button class="cover" onclick={() => router.go({ name: "dj" })} tabindex="-1">
+      <DjCover size={42} />
+      {#if current && !dj.paused}<span class="live"><Equalizer label="Your DJ is talking" /></span>{/if}
+    </button>
+    <span class="text">
+      <span class="name">{name}</span>
+      <span class="muted artists">Your DJ</span>
+    </span>
+    <span class="muted num dur">{formatDuration(durationMs)}</span>
+  </li>
+{/snippet}
 
 {#snippet item(t: Track, current = false)}
   <li class="item" class:current>
@@ -57,14 +83,21 @@
     {:else if !queue}
       <p class="muted note">Loading…</p>
     {:else}
-      {#if queue.currently_playing}
+      {#if dj.onAir}
+        <h3>Now playing</h3>
+        <ul>{@render djItem(dj.onAir.name, dj.onAir.durationMs, true)}</ul>
+      {:else if queue.currently_playing}
         <h3>Now playing</h3>
         <ul>{@render item(queue.currently_playing, true)}</ul>
       {/if}
       <h3>Next up</h3>
-      {#if upNext.length}
+      {#if upNext.length || djNext}
         <ul>
-          {#each upNext as t, i (t.uri + i)}{@render item(t)}{/each}
+          {#each upNext as t, i (t.uri + i)}
+            {#if djNext && i === djAt}{@render djItem(djNext.name, djNext.speech?.durationMs ?? 0)}{/if}
+            {@render item(t)}
+          {/each}
+          {#if djNext && djAt >= upNext.length}{@render djItem(djNext.name, djNext.speech?.durationMs ?? 0)}{/if}
         </ul>
       {:else}
         <p class="muted note">Nothing queued. Right-click a song and choose "Add to queue".</p>

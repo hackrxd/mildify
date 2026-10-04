@@ -9,6 +9,7 @@
   import { dj } from "../lib/dj.svelte";
   import DeckLyric from "./DeckLyric.svelte";
   import DjCaption from "./DjCaption.svelte";
+  import DjCover from "./DjCover.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
   import Pop from "./Pop.svelte";
@@ -17,6 +18,9 @@
   let { queueOpen, ontogglequeue }: { queueOpen: boolean; ontogglequeue: () => void } = $props();
 
   const track = $derived(player.track);
+  // While the DJ talks between songs, its talk is the item playing, with its own progress and controls.
+  const air = $derived(dj.onAir);
+  const playing = $derived(air ? !dj.paused : player.isPlaying);
   let ambient = $state<string | null>(null);
   let deck: HTMLElement | undefined = $state();
   let seekPreview = $state<number | null>(null);
@@ -55,7 +59,20 @@
 <footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"} style:--audio-intensity={audioFx.intensity}>
   {#if audioFx.on}<div class="flare" aria-hidden="true"><div></div></div>{/if}
   <div class="info">
-    {#if track}
+    {#if air}
+      {#key air}
+        <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => router.go({ name: "dj" })} title="Your DJ">
+          <DjCover size={60} />
+        </button>
+        <div class="text" in:rise={{ y: 6, delay: 60 }}>
+          <div class="title-row">
+            <button class="title link" onclick={() => router.go({ name: "dj" })}>{air.name}</button>
+          </div>
+          <div class="artists muted">Your DJ · next: {air.next.name}</div>
+        </div>
+      {/key}
+      {#if router.current.name !== "lyrics"}<DjCaption />{/if}
+    {:else if track}
       <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
       {#key track.uri}
         <button class="cover" in:rise={{ scale: 0.9 }} onclick={() => track.album.uri && router.openUri(track.album.uri)} title={track.album.name}>
@@ -95,13 +112,13 @@
       <button class="icon-btn" class:on={player.shuffle} onclick={() => player.toggleShuffle()} title="Shuffle" aria-pressed={player.shuffle}>
         <Icon name="shuffle" size={18} />
       </button>
-      <button class="icon-btn" onclick={() => player.prev()} title="Previous">
+      <button class="icon-btn" onclick={() => player.prev()} disabled={!!air} title="Previous">
         <Icon name="prev" size={18} />
       </button>
-      <button class="play" onclick={() => player.togglePlay()} title={player.isPlaying ? "Pause" : "Play"}>
-        <Pop key={player.isPlaying}><Icon name={player.isPlaying ? "pause" : "play"} size={18} /></Pop>
+      <button class="play" onclick={() => dj.togglePause()} title={playing ? "Pause" : "Play"}>
+        <Pop key={playing}><Icon name={playing ? "pause" : "play"} size={18} /></Pop>
       </button>
-      <button class="icon-btn" onclick={() => player.next()} title="Next">
+      <button class="icon-btn" onclick={() => dj.skipTalk()} title={air ? "Skip the DJ" : "Next"}>
         <Icon name="next" size={18} />
       </button>
       <button
@@ -114,17 +131,17 @@
       </button>
     </div>
     <div class="progress">
-      <span class="time num">{formatDuration(seekPreview ?? player.position)}</span>
+      <span class="time num">{formatDuration(air ? dj.talkMs : (seekPreview ?? player.position))}</span>
       <Slider
         label="Seek"
-        value={player.position}
-        max={track?.durationMs ?? 0}
+        value={air ? dj.talkMs : player.position}
+        max={air ? air.durationMs : (track?.durationMs ?? 0)}
         step={5000}
-        disabled={!track || !player.deviceId}
+        disabled={!!air || !track || !player.deviceId}
         onpreview={(v) => (seekPreview = v)}
         oncommit={(v) => player.seek(v)}
       />
-      <span class="time num">{formatDuration(track?.durationMs ?? 0)}</span>
+      <span class="time num">{formatDuration(air ? air.durationMs : (track?.durationMs ?? 0))}</span>
     </div>
   </div>
 
