@@ -3,7 +3,7 @@
 What changed in each Mildify release. A release's section becomes its GitHub release notes and the app's
 What's new page. Add to **Unreleased** as you go; a release renames it to the new version and date.
 
-## Unreleased
+## 1.2.0
 
 ### Added
 
