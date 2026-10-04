@@ -33,21 +33,24 @@ voice reads it into audio ahead of time. During a set's last song, the next set 
 
 Between sets, the DJ's talk is an **item of its own**, as long as the line takes. The player bar shows it like a
 song: the segment's name, "Your DJ", its own progress bar and length. Play/pause pauses the DJ (and any music
-under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces.
+under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces. Starting
+the DJ fades out whatever was playing, so its greeting is an item of its own too.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.
+If you've nudged a song's lyric timing in the lyrics view, the DJ goes by that too.
 
 - **Allow DJ to talk over beginning of track** (Settings → AI DJ, on by default): the next song comes in under the
-  last few seconds of the talk (at most 5), so the DJ is done before the first sung line. When the song's intro
-  is too short for that (under about 2 seconds), or its lyrics aren't synced, the song starts after the DJ.
-  Off, songs always start once the DJ is done.
+  last few seconds of the talk (at most 5, and at most half of it), so the DJ is done before the first sung line.
+  When the song's intro is too short for that (under about 2 seconds), or its lyrics aren't synced, the song starts
+  after the DJ. Off, songs always start once the DJ is done.
 - **Allow DJ to talk over end of track** (on by default): the DJ starts over the last few seconds of the finishing
-  song (at most 5), once nobody is singing. Without a synced lyric, it assumes the last 3 seconds are free.
-  Off, it waits for the song to finish.
+  song (at most 5), once nobody is singing. Without a synced lyric, it assumes the last 3 seconds are free. With
+  less than about 1.5 seconds free, it waits for the song to finish, as it does with this off.
 
-Whatever doesn't fit over the songs, the DJ says on its own: the finishing song stops just short of its end, and
-the next one waits. It never talks over anyone singing.
+Whatever doesn't fit over the songs, the DJ says on its own: the finishing song plays to its end and the music goes
+quiet right there, and the next song waits at its start until its time in the line. It never talks over anyone
+singing.
 
 While it talks over music, the music is turned down inside the player's own output, not with the volume slider.
 Your volume and other Spotify apps see no change. The voice follows the volume slider, so it sits at the same

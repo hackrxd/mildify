@@ -87,13 +87,15 @@ port with an API key and `--offline`, or talks to the user's own OpenAI-style se
 and times each sentence from the program's per-sentence sample counts. The UI does the rest: `djPicks.ts` builds
 segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
 (llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates;
-`djTiming.ts` plans the talk around both songs' synced lyrics: the talk is an item of its own (`dj.onAir`, shown
-by the player bar and queue), overlapping at most 5 s of the finishing song's outro and the next song's intro, each
-behind a setting (`overEnd`/`overStart`). `dj.svelte.ts` plays a set with `playUris(…, here)` and queues the next
-during its last song; cues on the song's clock (`player.positionNow()`) start the talk and pause the song just short
-of its end, and cues on the line's clock (`Voice.now()`, which stands still while paused) bring the queued song in
-with `next`. While it talks, `dj_duck` lowers the music in the sink (`duck.rs`, by heard
-time, lifting itself after 90 s if nobody does). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep.
+`djTiming.ts` plans the talk around both songs' synced lyrics (shifted by the song's own `songOffsets` nudge): the
+talk is an item of its own (`dj.onAir`, shown by the player bar and queue), overlapping 1.5 to 5 s of the finishing
+song's outro and of the next song's intro (under at most half the line), or none, each behind a setting
+(`overEnd`/`overStart`). `dj.svelte.ts` plays a set with `playUris(…, here)` and queues the next during its last
+song; cues on the song's clock (`player.positionNow()`) start the talk and, when it outlasts both overlaps, silence
+the music right at the song's end. Spotify's queued song is caught as it comes up, paused, and brought in from its
+start by a cue on the line's clock (`Voice.now()`, which stands still while paused). While it talks, `dj_duck` lowers
+the music in the sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again
+every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
