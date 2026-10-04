@@ -163,8 +163,10 @@ export const SKIPS_TO_MOVE_ON = 2;
  * same kind of favorite or the same few years. */
 export function kinship(c: Candidate, liked: Candidate): number {
   let n = 0;
-  if (c.artists.some((a) => liked.artists.includes(a))) n += 3;
-  if (c.album && c.album === liked.album) n += 2;
+  const sameArtist = c.artists.some((a) => liked.artists.includes(a));
+  if (sameArtist) n += 3;
+  // Album names repeat across artists ("Greatest Hits"), so only the same artist's album counts.
+  if (sameArtist && c.album && c.album === liked.album) n += 2;
   if (c.reasons.some((r) => liked.reasons.includes(r))) n += 1;
   if (c.year && liked.year && Math.abs(Number(c.year) - Number(liked.year)) <= 3) n += 1;
   return n;

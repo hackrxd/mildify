@@ -197,6 +197,13 @@ describe("picking as it goes", () => {
     expect(kinship(song("y", "Zed", { year: "2013" }), liked)).toBe(1 + 1);
     expect(kinship(song("z", "Zed", { reasons: ["allTime"] }), liked)).toBe(0);
   });
+
+  it("doesn't take another artist's album of the same name for the same album", () => {
+    const hits = song("x", "Ann", { album: "Greatest Hits", year: "2011" });
+    const other = song("q", "Queen", { album: "Greatest Hits", year: "2011" });
+    expect(kinship(other, hits)).toBe(1 + 1);
+    expect(nextInSet(ask({ pool: [other], reactions: { liked: [hits], skipped: [] } }))).not.toBe(other);
+  });
 });
 
 describe("nextSegment", () => {
