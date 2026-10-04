@@ -24,7 +24,7 @@ import {
   type SegmentId,
 } from "./djPicks";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
-import { backend, type DjConfig, type DjInstall, type DjStatus } from "./ipc";
+import { backend, type DjConfig, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { player } from "./player.svelte";
 import { session } from "./session.svelte";
@@ -55,6 +55,8 @@ const SKIP_SHARE = 0.5;
 export const FOREIGN_MS = 2500;
 /** A set asked for this long ago that still hasn't started isn't going to. */
 export const START_TIMEOUT_MS = 15_000;
+/** How long a request to turn shuffle or repeat off gets before it's sent again. */
+const MODES_RETRY_MS = 3000;
 
 export interface Spoken {
   id: number;
@@ -270,6 +272,9 @@ class Dj {
   #holding = false;
   #ducked = false;
   #outOfSongs = false;
+  /** Shuffle and repeat as they were before the DJ turned them off, to put back when it stops. */
+  #modes: { shuffle: boolean; repeat: RepeatMode } | null = null;
+  #modesSentAt = -Infinity;
   /** The set whose talk the DJ has given. */
   #announced: DjSet | null = null;
 
@@ -405,6 +410,12 @@ class Dj {
     this.#voice.stop();
     this.#unduck();
     if (this.#holding) backend.device({ action: "play" }).catch(() => {});
+    const modes = this.#modes;
+    this.#modes = null;
+    if (modes && player.isLocal) {
+      if (modes.shuffle) backend.device({ action: "shuffle", on: true }).catch(() => {});
+      if (modes.repeat !== "off") backend.device({ action: "repeat", mode: modes.repeat }).catch(() => {});
+    }
     this.phase = "off";
     this.activity = null;
     this.speaking = false;
@@ -573,6 +584,7 @@ class Dj {
       this.#remoteSince = null;
     }
 
+    if (uri && this.#isDjSong(uri) && player.isLocal) this.#plainModes(now);
     if (uri !== this.#lastUri) this.#trackChanged(run, uri);
     this.#lastUri = uri;
     this.#lastPos = pos;
@@ -616,6 +628,18 @@ class Dj {
     if (this.#queued !== "done") return;
     if (this.#plannedOn !== uri) this.#plan(run, next, t.durationMs, pos, uri);
     this.#runCues(run, pos);
+  }
+
+  /** Keeps shuffle and repeat off while a DJ song plays: shuffle would play a set out of order, and repeat
+   * would hold it on one song or go round the set again, so the next set would never come. */
+  #plainModes(now: number) {
+    const shuffle = player.shuffle;
+    const repeat = player.repeat;
+    if ((!shuffle && repeat === "off") || now - this.#modesSentAt < MODES_RETRY_MS) return;
+    this.#modesSentAt = now;
+    this.#modes ??= { shuffle, repeat };
+    if (shuffle) backend.device({ action: "shuffle", on: false }).catch(() => {});
+    if (repeat !== "off") backend.device({ action: "repeat", mode: "off" }).catch(() => {});
   }
 
   #trackChanged(run: number, uri: string | null) {

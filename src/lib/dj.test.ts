@@ -32,6 +32,8 @@ const player = vi.hoisted(() => ({
   isLocal: true,
   deviceId: "here" as string | null,
   volume: 100,
+  shuffle: false,
+  repeat: "off" as "off" | "context" | "track",
   positionNow(): number {
     return this.pos;
   },
@@ -95,6 +97,7 @@ function sync(first: number, last: number) {
 const readyStatus = {
   supported: true,
   ready: true,
+  setup: null,
   settings: { enabled: true, model: "qwen2.5-1.5b", voice: "michael", server_url: "", server_model: "" },
   needed: [],
   install: { running: false, component: null, received: 0, total: null, error: null },
@@ -116,7 +119,16 @@ beforeEach(async () => {
   for (const fn of [...Object.values(backend), ...Object.values(sp), player.playUris, player.togglePlay, toasts.show, toasts.error]) {
     fn.mockClear();
   }
-  Object.assign(player, { track: null, pos: 0, isPlaying: true, isLocal: true, deviceId: "here", volume: 100 });
+  Object.assign(player, {
+    track: null,
+    pos: 0,
+    isPlaying: true,
+    isLocal: true,
+    deviceId: "here",
+    volume: 100,
+    shuffle: false,
+    repeat: "off",
+  });
   speechMs = 6000;
   answers = 0;
   sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
@@ -320,6 +332,33 @@ describe("between sets", () => {
     await playing(next.songs[0].uri, 0);
     expect(dj.current).toBe(next);
     expect(voice.played).toHaveLength(1);
+  });
+});
+
+describe("shuffle and repeat", () => {
+  it("are off while the DJ plays, and back as they were when it stops", async () => {
+    player.shuffle = true;
+    player.repeat = "track";
+    const first = await started();
+    expect(backend.device).toHaveBeenCalledWith({ action: "shuffle", on: false });
+    expect(backend.device).toHaveBeenCalledWith({ action: "repeat", mode: "off" });
+    // The player reports them off; nothing more is sent.
+    player.shuffle = false;
+    player.repeat = "off";
+    backend.device.mockClear();
+    await playing(first.songs[1].uri, 0);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(backend.device).not.toHaveBeenCalled();
+    dj.stop();
+    expect(backend.device).toHaveBeenCalledWith({ action: "shuffle", on: true });
+    expect(backend.device).toHaveBeenCalledWith({ action: "repeat", mode: "track" });
+  });
+
+  it("are left alone when they were off", async () => {
+    await started();
+    dj.stop();
+    expect(backend.device).not.toHaveBeenCalledWith(expect.objectContaining({ action: "shuffle" }));
+    expect(backend.device).not.toHaveBeenCalledWith(expect.objectContaining({ action: "repeat" }));
   });
 });
 
