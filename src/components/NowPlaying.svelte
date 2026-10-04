@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { audioFx } from "../lib/audiofx.svelte";
   import { coverColor } from "../lib/color";
   import { liked } from "../lib/liked.svelte";
   import { rise } from "../lib/motion";
@@ -15,6 +16,7 @@
 
   const track = $derived(player.track);
   let ambient = $state<string | null>(null);
+  let deck: HTMLElement | undefined = $state();
   let seekPreview = $state<number | null>(null);
   let volumeBeforeMute = 50;
 
@@ -27,6 +29,12 @@
 
   $effect(() => {
     if (track?.uri) liked.ensure([track.uri]);
+  });
+
+  // Audio-responsive Effects: the cover's glow pulses with the music.
+  $effect(() => {
+    const el = deck;
+    if (el && audioFx.on) return audioFx.attach(() => el);
   });
 
   const saved = $derived(track ? liked.has(track.uri) : undefined);
@@ -42,7 +50,7 @@
   }
 </script>
 
-<footer class="deck" style:--deck-ambient={ambient ?? "transparent"}>
+<footer class="deck" bind:this={deck} style:--deck-ambient={ambient ?? "transparent"}>
   <div class="info">
     {#if track}
       <!-- A new track's cover and title rise into place; the heart only pops when you toggle it. -->
@@ -156,8 +164,13 @@
     gap: 24px;
     height: var(--deck-h);
     padding: 0 20px 0 14px;
+    /* --audio-pulse (0-1, set every frame by audioFx) makes the glow reach further and burn brighter. */
     background:
-      radial-gradient(90% 160% at 0% 100%, color-mix(in srgb, var(--deck-ambient) var(--deck-glow), transparent), transparent 60%),
+      radial-gradient(
+        calc(90% + var(--audio-pulse, 0) * 40%) calc(160% + var(--audio-pulse, 0) * 60%) at 0% 100%,
+        color-mix(in srgb, var(--deck-ambient) calc(var(--deck-glow) * (1 + var(--audio-pulse, 0) * 0.8)), transparent),
+        transparent 60%
+      ),
       var(--frame);
     /* The glow and colour follow the lyrics view's cover background in and out. */
     transition:
@@ -173,7 +186,9 @@
     width: 60%;
     height: 1px;
     background: linear-gradient(90deg, var(--deck-ambient), transparent);
-    opacity: 0.8;
+    opacity: calc(0.8 + var(--audio-pulse, 0) * 0.2);
+    transform-origin: left;
+    scale: calc(1 + var(--audio-pulse, 0) * 0.3) 1;
   }
 
   .info {
