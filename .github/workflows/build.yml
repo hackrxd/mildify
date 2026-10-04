@@ -50,6 +50,12 @@ jobs:
             exit 1
           fi
 
+      # The release notes are the version's CHANGELOG.md section, which a release can't go out without.
+      # GitHub appends the generated list of commits and pull requests below them.
+      - name: Release notes
+        if: github.ref_type == 'tag'
+        run: node scripts/release-notes.mjs "${GITHUB_REF_NAME}" > release-notes.md
+
       - id: release
         if: github.ref_type == 'tag'
         uses: actions/github-script@v7
@@ -60,6 +66,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: context.ref.replace('refs/tags/', ''),
               name: `Mildify ${context.ref.replace('refs/tags/', '')}`,
+              body: require('fs').readFileSync('release-notes.md', 'utf8'),
               generate_release_notes: true,
               draft: true,
             });
