@@ -16,6 +16,7 @@ import {
   choicesFor,
   fallbackPick,
   INSTRUCTIONS_MAX,
+  nextInSet,
   nextSegment,
   readAnswer,
   segmentMessages,
@@ -28,6 +29,7 @@ import {
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
 import { backend, errorMessage, type DjConfig, type DjInstall, type DjStatus, type DjVoiceEvent, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
+import { liked } from "./liked.svelte";
 import { lyrics } from "./lyrics.svelte";
 import { player } from "./player.svelte";
 import { session } from "./session.svelte";
@@ -39,6 +41,7 @@ import { idFromUri } from "./util";
 const INSTRUCTIONS_KEY = "nativify:djInstructions";
 const OVER_START_KEY = "nativify:djOverStart";
 const OVER_END_KEY = "nativify:djOverEnd";
+const LIVE_KEY = "nativify:djLive";
 const PLAYED_KEY = "nativify:djPlayed";
 /** Songs the DJ played this recently aren't picked again in a new session. */
 const PLAYED_MEMORY_MS = 3 * 24 * 60 * 60 * 1000;
@@ -73,6 +76,9 @@ const OUTPUT_QUEUE_MS = 600;
 const RETIME_MS = 250;
 /** The player lifts a duck on its own after 90 s, in case the window went away; the DJ renews its own sooner. */
 const GAIN_REFRESH_MS = 30_000;
+/** The song lined up next can change (the listener liked something) until this long before the one playing
+ * ends; the player starts loading the next song 30 s before. */
+export const REPICK_UNTIL_MS = 35_000;
 /** How long a request to turn shuffle or repeat off gets before it's sent again. */
 const MODES_RETRY_MS = 3000;
 
@@ -84,9 +90,19 @@ export interface Spoken {
 }
 
 export interface DjSet {
+  /** The same while a set picked as it goes grows song by song (each step is a new object). */
+  id: number;
   segment: SegmentId;
   name: string;
+  /** The songs to play. A set picked as it goes has the ones played and playing, and the one lined up next. */
   songs: Candidate[];
+  /** Picks each song after the first while the one before it plays (Settings → AI DJ). */
+  live: boolean;
+  /** The songs the model picked, in order: what a set picked as it goes follows unless the listener says
+   * otherwise. */
+  plan: Candidate[];
+  /** The rest of the segment's songs, for a set picked as it goes to turn to. */
+  choices: Candidate[];
   talk: string;
   /** Written by the model, or from a template. */
   byModel: boolean;
@@ -301,6 +317,8 @@ class Dj {
   overStart = $state(load(OVER_START_KEY, true, (raw) => raw !== "false"));
   /** Settings → AI DJ: the talk may start over the end of the finishing song. */
   overEnd = $state(load(OVER_END_KEY, true, (raw) => raw !== "false"));
+  /** Settings → AI DJ: pick each song while the one before it plays, so likes and skips change what's next. */
+  live = $state(load(LIVE_KEY, false, (raw) => raw === "true"));
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
@@ -372,6 +390,18 @@ class Dj {
   /** The listener's pause stopped music that was playing under the voice. */
   #pausedMusic = false;
   #outOfSongs = false;
+  #setIds = 0;
+  /** What the listener did with the DJ's songs this session, most recent first. */
+  #liked: Candidate[] = [];
+  #skippedSongs: Candidate[] = [];
+  /** Whether each of the set's songs was in the listener's library when last looked, to notice a new like. */
+  #likeSeen = new Map<string, boolean>();
+  /** For the set playing, picked as it goes: songs skipped, whether it ends with the song playing, whether the
+   * song lined up next should be picked again, and a queue change on its way to the player. */
+  #setSkips = 0;
+  #setEnds = false;
+  #repick = false;
+  #lining = false;
   /** The listener has been told the voice isn't working, this session. */
   #voiceWarned = false;
   /** Shuffle and repeat as they were before the DJ turned them off, to put back when it stops. */
@@ -458,6 +488,12 @@ class Dj {
     persist(OVER_END_KEY, on ? null : "false");
   }
 
+  /** Applies from the next set the DJ picks. */
+  setLive(on: boolean) {
+    this.live = on;
+    persist(LIVE_KEY, on ? "true" : null);
+  }
+
   /** ms into the line the DJ is speaking, per frame, for captions. */
   speechNow(): number {
     return this.#voice.now();
@@ -492,7 +528,7 @@ class Dj {
 
   /** Next while the DJ's item is up skips the rest of its talk: the song it leads into comes in now. */
   skipTalk() {
-    if (!this.onAir) return player.next();
+    if (!this.onAir) return this.#nothingAfter() ? this.#skipToNextSet() : player.next();
     const run = this.#run;
     this.#voice.stop();
     this.#voice.resume();
@@ -526,6 +562,9 @@ class Dj {
     this.#segments = [];
     this.#skippedArtists = new Set();
     this.#outOfSongs = false;
+    this.#liked = [];
+    this.#skippedSongs = [];
+    this.#likeSeen.clear();
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
     // The DJ plays here; music on another device would play on under its voice.
@@ -597,6 +636,10 @@ class Dj {
     this.#muteAtEnd = null;
     this.#silentAt = 0;
     this.#stalledSince = null;
+    this.#setSkips = 0;
+    this.#setEnds = false;
+    this.#repick = false;
+    this.#lining = false;
     this.#foreignSince = null;
     this.#remoteSince = null;
     backend.djRelease().catch(() => {});
@@ -640,8 +683,10 @@ class Dj {
     const listener = session.user?.display_name?.split(" ")[0] ?? null;
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     let pick: Pick | null = null;
+    const live = this.live;
     try {
-      const messages = segmentMessages({ segment, choices, listener, previous: prev, instructions: this.instructions });
+      const reactions = { liked: this.#liked, skipped: this.#skippedSongs };
+      const messages = segmentMessages({ segment, choices, listener, previous: prev, instructions: this.instructions, live, reactions });
       const answer = await this.#rushable(backend.djGenerate(messages, segmentSchema(choices.length), 300), timeoutMs);
       pick = readAnswer(answer, choices, segment);
       if (!pick) console.warn("DJ: the model's answer wasn't usable", answer);
@@ -652,10 +697,25 @@ class Dj {
     const byModel = !!pick;
     pick ??= fallbackPick(segment, choices, listener, prev);
     this.#segments.push(segment.id);
-    for (const s of pick.songs) this.#played.add(s.uri);
+    // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
+    const songs = live ? pick.songs.slice(0, 1) : pick.songs;
+    for (const s of songs) this.#played.add(s.uri);
     const [speech, firstVocals] = await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
     if (run !== this.#run) return null;
-    return { segment: segment.id, name: pick.name, songs: pick.songs, talk: pick.talk, byModel, speech, firstVocals };
+    const rest = choices.filter((c) => !pick.songs.includes(c));
+    return {
+      id: ++this.#setIds,
+      segment: segment.id,
+      name: pick.name,
+      songs,
+      live,
+      plan: pick.songs,
+      choices: rest,
+      talk: pick.talk,
+      byModel,
+      speech,
+      firstVocals,
+    };
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
@@ -900,11 +960,12 @@ class Dj {
       return this.stop();
     }
 
+    if (!this.current || !t || !uri || this.#awaiting) return;
+    const left = t.durationMs - pos;
+    if (this.current.live && player.isLocal) this.#goLive(run, this.current, uri, left);
     const cur = this.current;
-    if (!cur || !t || !uri || this.#awaiting) return;
     const last = cur.songs[cur.songs.length - 1];
     if (uri !== last.uri) return;
-    const left = t.durationMs - pos;
 
     const next = this.upNext;
     if (!next && this.#outOfSongs) {
@@ -939,6 +1000,112 @@ class Dj {
     if (player.isPlaying) this.#runCues(run, this.#cues, pos, () => player.positionNow(), true);
   }
 
+  /** A set picked as it goes: once a song is under way, the next one is picked and lined up in the player's
+   * queue, and picked again when the listener likes something, until it's too late to change. When the set
+   * should end with the song playing, the next set gets picked. */
+  #goLive(run: number, cur: DjSet, uri: string, left: number) {
+    this.#noticeLikes(cur);
+    if (this.#setEnds || this.#lining) return;
+    const at = cur.songs.findIndex((s) => s.uri === uri);
+    if (at < 0) return;
+    if (at === cur.songs.length - 1) {
+      const pick = this.#nextInSet(cur, cur.songs, this.#played);
+      if (pick) return this.#lineUp(run, cur, cur.songs, pick);
+      this.#setEnds = true;
+      this.#readyNext(run, cur, cur.songs[at]);
+    } else if (at === cur.songs.length - 2 && this.#repick && left > REPICK_UNTIL_MS) {
+      this.#repick = false;
+      const queued = cur.songs[at + 1];
+      // The song lined up is fair game again.
+      const played = new Set(this.#played);
+      played.delete(queued.uri);
+      const sofar = cur.songs.slice(0, -1);
+      const pick = this.#nextInSet(cur, sofar, played);
+      if (pick && pick.uri !== queued.uri) this.#lineUp(run, cur, sofar, pick);
+    }
+  }
+
+  #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
+    return nextInSet({
+      plan: cur.plan,
+      choices: cur.choices,
+      pool: this.#pool,
+      sofar,
+      played,
+      skippedArtists: this.#skippedArtists,
+      reactions: { liked: this.#liked, skipped: this.#skippedSongs },
+      skips: this.#setSkips,
+    });
+  }
+
+  /** Puts `pick` after `sofar`, in the set and in the player's queue, in place of whatever was lined up. */
+  #lineUp(run: number, cur: DjSet, sofar: Candidate[], pick: Candidate) {
+    const replaced = cur.songs.length > sofar.length ? cur.songs[cur.songs.length - 1] : null;
+    if (replaced) this.#played.delete(replaced.uri);
+    this.#played.add(pick.uri);
+    this.#repick = false;
+    this.#lining = true;
+    this.current = { ...cur, songs: [...sofar, pick] };
+    (async () => {
+      await backend.device({ action: "clear_queue" });
+      await backend.device({ action: "queue", uri: pick.uri });
+    })()
+      .catch((e) => {
+        console.warn("DJ: couldn't line up the next song:", e);
+        // Nothing follows in the player: the set ends with the song playing.
+        if (run !== this.#run || this.current?.id !== cur.id) return;
+        this.current = { ...this.current, songs: sofar };
+        this.#setEnds = true;
+        this.#readyNext(run, cur, sofar[sofar.length - 1]);
+      })
+      .finally(() => {
+        if (run === this.#run) this.#lining = false;
+      });
+  }
+
+  /** A song of the set the listener just liked, here or anywhere in the app: what's next leans toward it. */
+  #noticeLikes(cur: DjSet) {
+    for (const s of cur.songs) {
+      const now = liked.has(s.uri);
+      if (now === undefined) {
+        liked.ensure([s.uri]);
+        continue;
+      }
+      const was = this.#likeSeen.get(s.uri);
+      this.#likeSeen.set(s.uri, now);
+      if (was === false && now) {
+        this.#liked = [s, ...this.#liked.filter((l) => l.uri !== s.uri)].slice(0, 10);
+        this.#repick = true;
+      }
+    }
+  }
+
+  /** The song playing ends its set, and nothing is lined up after it yet. */
+  #nothingAfter(): boolean {
+    const cur = this.current;
+    const uri = player.track?.uri;
+    if (this.phase !== "on" || !cur || !uri || this.#awaiting || this.onAir || !player.isLocal) return false;
+    return uri === cur.songs[cur.songs.length - 1].uri && this.#queued !== "done";
+  }
+
+  /** Skipped past the end of a set with nothing after it: the player would stop. The song counts as skipped, the
+   * music waits, and the next set comes in as soon as it's ready. */
+  #skipToNextSet() {
+    const run = this.#run;
+    const song = this.current?.songs.find((s) => s.uri === player.track?.uri);
+    if (song) {
+      for (const a of song.artists) this.#skippedArtists.add(a);
+      this.#skippedSongs = [song, ...this.#skippedSongs.filter((s) => s.uri !== song.uri)].slice(0, 10);
+    }
+    this.#heldMusic = true;
+    backend.device({ action: "pause" }).catch(() => {});
+    if (this.upNext) return this.#playSet(run, this.upNext);
+    this.#waitingForSet = true;
+    this.activity = "Your DJ is still picking what's next…";
+    if (!this.#preparing) this.#prepareNext(run);
+    this.#rush?.();
+  }
+
   /** Keeps shuffle and repeat off while a DJ song plays: shuffle would play a set out of order, and repeat
    * would hold it on one song or go round the set again, so the next set would never come. */
   #plainModes(now: number) {
@@ -956,6 +1123,8 @@ class Dj {
     // A DJ song left early, not by the DJ: the listener skipped it, so its artist sits out a while.
     if (prev && this.#lastDuration > 0 && this.#lastPos < this.#lastDuration * SKIP_SHARE && !this.#heldMusic) {
       for (const a of prev.artists) this.#skippedArtists.add(a);
+      this.#skippedSongs = [prev, ...this.#skippedSongs.filter((s) => s.uri !== prev.uri)].slice(0, 10);
+      if (this.current?.songs.some((s) => s.uri === prev.uri)) this.#setSkips++;
     }
     if (!uri) return;
     const song = this.#isDjSong(uri);
@@ -1003,10 +1172,19 @@ class Dj {
       if (this.#level === 0) this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, 0);
       this.#endOnAir();
     }
+    this.#setSkips = 0;
+    this.#setEnds = false;
+    this.#repick = false;
     this.#lastVocals = null;
-    const last = set.songs[set.songs.length - 1].uri;
-    songVocals(last).then((v) => {
-      if (run === this.#run && this.current === set) this.#lastVocals = v;
+    // A set picked as it goes knows its last song, and readies the next set, only once that song is under way.
+    if (set.live) return;
+    this.#readyNext(run, set, set.songs[set.songs.length - 1]);
+  }
+
+  /** The set ends with `last`: its vocals time the talk over its end, and the next set gets picked. */
+  #readyNext(run: number, set: DjSet, last: Candidate) {
+    songVocals(last.uri).then((v) => {
+      if (run === this.#run && this.current?.id === set.id) this.#lastVocals = v;
     });
     this.#prepareNext(run);
   }
@@ -1027,7 +1205,7 @@ class Dj {
     // Spotify moves on once the finishing song is decoded, before its last moments have left the player's
     // output: the DJ starts once they're heard.
     const wait = Math.min(OUTPUT_QUEUE_MS, this.#silentAt - performance.now());
-    if (wait > 0) this.#after(wait, () => this.current === set && this.#announce(run, set));
+    if (wait > 0) this.#after(wait, () => this.current?.id === set.id && this.#announce(run, set));
     else this.#announce(run, set);
   }
 
