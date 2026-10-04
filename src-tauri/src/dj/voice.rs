@@ -198,32 +198,73 @@ impl WavInfo {
     }
 }
 
-/// The sample rate and length of a PCM WAV file.
-fn wav_info(wav: &[u8]) -> Option<WavInfo> {
+/// A WAV file's format and its sample data.
+struct Wav<'a> {
+    /// 1 for integer PCM, 3 for float.
+    format: u16,
+    channels: u16,
+    sample_rate: u32,
+    bits: u16,
+    data: &'a [u8],
+}
+
+fn parse_wav(wav: &[u8]) -> Option<Wav<'_>> {
     if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
         return None;
     }
     let mut pos = 12;
-    let (mut channels, mut rate, mut bits) = (0u16, 0u32, 0u16);
+    let (mut format, mut channels, mut rate, mut bits) = (0u16, 0u16, 0u32, 0u16);
     while pos + 8 <= wav.len() {
         let id = &wav[pos..pos + 4];
         let size = u32::from_le_bytes(wav[pos + 4..pos + 8].try_into().ok()?) as usize;
         let body = pos + 8;
+        let field = |at: usize| Some(u16::from_le_bytes(wav.get(body + at..body + at + 2)?.try_into().ok()?));
         if id == b"fmt " && size >= 16 && body + 16 <= wav.len() {
-            channels = u16::from_le_bytes(wav[body + 2..body + 4].try_into().ok()?);
+            format = field(0)?;
+            channels = field(2)?;
             rate = u32::from_le_bytes(wav[body + 4..body + 8].try_into().ok()?);
-            bits = u16::from_le_bytes(wav[body + 14..body + 16].try_into().ok()?);
+            bits = field(14)?;
+            // WAVE_FORMAT_EXTENSIBLE keeps the real format at the start of its subformat GUID.
+            if format == 0xFFFE && size >= 26 {
+                format = field(24)?;
+            }
         } else if id == b"data" {
-            let frame = usize::from(channels) * usize::from(bits / 8);
-            if frame == 0 || rate == 0 {
+            if channels == 0 || rate == 0 || bits < 8 {
                 return None;
             }
-            let len = size.min(wav.len() - body);
-            return Some(WavInfo { sample_rate: rate, frames: (len / frame) as u64 });
+            let data = &wav[body..body + size.min(wav.len() - body)];
+            return Some(Wav { format, channels, sample_rate: rate, bits, data });
         }
         pos = body + size + (size & 1);
     }
     None
+}
+
+/// The sample rate and length of a PCM WAV file.
+fn wav_info(wav: &[u8]) -> Option<WavInfo> {
+    let w = parse_wav(wav)?;
+    let frame = usize::from(w.channels) * usize::from(w.bits / 8);
+    Some(WavInfo { sample_rate: w.sample_rate, frames: (w.data.len() / frame) as u64 })
+}
+
+/// A line's audio, ready to play: interleaved samples between -1 and 1.
+pub struct Pcm {
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub samples: Vec<f32>,
+}
+
+/// Decodes a 16-bit or 32-bit float WAV, as the voice program writes.
+pub fn pcm(wav: &[u8]) -> Option<Pcm> {
+    let w = parse_wav(wav)?;
+    let mut samples: Vec<f32> = match (w.format, w.bits) {
+        (1, 16) => w.data.chunks_exact(2).map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0).collect(),
+        (3, 32) => w.data.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect(),
+        _ => return None,
+    };
+    // Whole frames only.
+    samples.truncate(samples.len() - samples.len() % usize::from(w.channels));
+    Some(Pcm { channels: w.channels, sample_rate: w.sample_rate, samples })
 }
 
 #[cfg(test)]
@@ -249,6 +290,58 @@ mod tests {
         w.extend_from_slice(&data.to_le_bytes());
         w.resize(w.len() + data as usize, 0);
         w
+    }
+
+    /// A WAV with the given format tag and fmt chunk length, around `data`.
+    fn wav_with(format: u16, channels: u16, bits: u16, fmt_len: u32, data: &[u8]) -> Vec<u8> {
+        let mut w = Vec::new();
+        w.extend_from_slice(b"RIFF");
+        w.extend_from_slice(&(4 + 8 + fmt_len + 8 + data.len() as u32).to_le_bytes());
+        w.extend_from_slice(b"WAVEfmt ");
+        w.extend_from_slice(&fmt_len.to_le_bytes());
+        let tag = if fmt_len >= 40 { 0xFFFEu16 } else { format };
+        w.extend_from_slice(&tag.to_le_bytes());
+        w.extend_from_slice(&channels.to_le_bytes());
+        w.extend_from_slice(&24_000u32.to_le_bytes());
+        w.extend_from_slice(&(24_000 * u32::from(channels * bits / 8)).to_le_bytes());
+        w.extend_from_slice(&(channels * bits / 8).to_le_bytes());
+        w.extend_from_slice(&bits.to_le_bytes());
+        if fmt_len >= 40 {
+            // cbSize, valid bits, channel mask, then the subformat GUID, whose first two bytes are the format.
+            w.extend_from_slice(&22u16.to_le_bytes());
+            w.extend_from_slice(&bits.to_le_bytes());
+            w.extend_from_slice(&0u32.to_le_bytes());
+            w.extend_from_slice(&format.to_le_bytes());
+            w.extend_from_slice(&[0u8; 14]);
+        }
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        w.extend_from_slice(data);
+        w
+    }
+
+    #[test]
+    fn decodes_16_bit_and_float_audio() {
+        let ints: Vec<u8> = [0i16, 16_384, -32_768].iter().flat_map(|v| v.to_le_bytes()).collect();
+        let p = pcm(&wav_with(1, 1, 16, 16, &ints)).unwrap();
+        assert_eq!((p.channels, p.sample_rate), (1, 24_000));
+        assert_eq!(p.samples, vec![0.0, 0.5, -1.0]);
+
+        let floats: Vec<u8> = [0.25f32, -0.75].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(pcm(&wav_with(3, 1, 32, 16, &floats)).unwrap().samples, vec![0.25, -0.75]);
+        // The same, in WAVE_FORMAT_EXTENSIBLE's longer header.
+        assert_eq!(pcm(&wav_with(3, 1, 32, 40, &floats)).unwrap().samples, vec![0.25, -0.75]);
+    }
+
+    #[test]
+    fn decodes_whole_frames_only_and_refuses_other_formats() {
+        let ints: Vec<u8> = [1i16, 2, 3].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(pcm(&wav_with(1, 2, 16, 16, &ints)).unwrap().samples.len(), 2);
+        // 8-bit, and a-law.
+        assert!(pcm(&wav_with(1, 1, 8, 16, &[128, 128])).is_none());
+        assert!(pcm(&wav_with(6, 1, 8, 16, &[0, 0])).is_none());
+        assert!(pcm(&wav_with(1, 0, 16, 16, &ints)).is_none());
+        assert!(pcm(b"not a wav file at all").is_none());
     }
 
     #[test]
