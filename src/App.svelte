@@ -153,10 +153,20 @@
 
       {#if updater.state === "ready" || updater.state === "installing"}
         <div class="banner">
-          <p>Version {updater.available} is ready. Restart to finish updating.</p>
-          <button class="btn primary" onclick={() => updater.restart()} disabled={updater.state === "installing"}>
-            {updater.state === "installing" ? "Installing…" : "Restart now"}
-          </button>
+          {#if updater.needsRestart}
+            <p>
+              Version {updater.available} is ready. It updates more than the interface, so Mildify has to restart to
+              install it, and your music will stop.
+            </p>
+            <button class="btn primary" onclick={() => updater.apply()} disabled={updater.state === "installing"}>
+              {updater.state === "installing" ? "Installing…" : "Restart and stop music"}
+            </button>
+          {:else}
+            <p>Version {updater.available} is ready. Reload to finish updating; your music keeps playing.</p>
+            <button class="btn primary" onclick={() => updater.apply()} disabled={updater.state === "installing"}>
+              {updater.state === "installing" ? "Reloading…" : "Reload now"}
+            </button>
+          {/if}
         </div>
       {/if}
 
