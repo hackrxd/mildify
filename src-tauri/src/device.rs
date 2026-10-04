@@ -15,6 +15,7 @@ use librespot_core::config::{DeviceType, SessionConfig};
 use librespot_core::session::Session;
 use librespot_core::error::ErrorKind;
 use librespot_core::Error as LibrespotError;
+use librespot_core::SpotifyUri;
 use librespot_playback::audio_backend::{self, Sink, SinkResult};
 use librespot_playback::config::{AudioFormat, Bitrate, PlayerConfig};
 use librespot_playback::convert::Converter;
@@ -72,6 +73,10 @@ pub enum DeviceCommand {
     Shuffle { on: bool },
     /// "off" | "context" | "track"
     Repeat { mode: String },
+    /// Adds a song after the one playing, ahead of the rest.
+    Queue { uri: String },
+    /// Takes out what was added to the queue; the rest of what's playing stays.
+    ClearQueue,
 }
 
 /// Local player events forwarded to the UI as `local-player`. Positions are what's
@@ -385,8 +390,18 @@ impl ConnectDevice {
                 "context" => spirc.repeat_track(false).and_then(|_| spirc.repeat(true)),
                 _ => spirc.repeat_track(false).and_then(|_| spirc.repeat(false)),
             },
+            DeviceCommand::Queue { uri } => spirc.add_to_queue(queueable(&uri)?),
+            DeviceCommand::ClearQueue => spirc.clear_queue(),
         };
         r.map_err(|e| AppError::Device(e.to_string()))
+    }
+}
+
+/// A song to queue. Only songs: librespot would queue every track of an album or playlist.
+fn queueable(uri: &str) -> Result<SpotifyUri> {
+    match SpotifyUri::from_uri(uri) {
+        Ok(u @ SpotifyUri::Track { .. }) => Ok(u),
+        _ => Err(AppError::Device(format!("can't queue {uri}"))),
     }
 }
 
@@ -733,6 +748,19 @@ mod tests {
             command(json!({ "action": "repeat", "mode": "context" })),
             DeviceCommand::Repeat { mode } if mode == "context"
         ));
+        assert!(matches!(
+            command(json!({ "action": "queue", "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC" })),
+            DeviceCommand::Queue { uri } if uri == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+        ));
+        assert!(matches!(command(json!({ "action": "clear_queue" })), DeviceCommand::ClearQueue));
+    }
+
+    #[test]
+    fn queues_songs_only() {
+        assert!(queueable("spotify:track:4uLU6hMCjMI75M1A2tKUQC").is_ok());
+        assert!(queueable("spotify:album:4aawyAB9vmqN3uQ7FjRGTy").is_err());
+        assert!(queueable("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M").is_err());
+        assert!(queueable("not a uri").is_err());
     }
 
     #[test]
