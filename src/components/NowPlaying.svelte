@@ -184,14 +184,14 @@
     background: linear-gradient(90deg, var(--deck-ambient), transparent);
     opacity: calc(0.8 + var(--audio-pulse, 0) * 0.2);
     transform-origin: left;
-    scale: calc(1 + var(--audio-pulse, 0) * 0.6) 1;
+    scale: calc(1 + var(--audio-pulse, 0) * 0.3) 1;
   }
   /* Above the flare. */
   .deck > :not(.flare) {
     position: relative;
   }
 
-  /* Audio-responsive Effects: a brighter, wider copy of the glow that flares up with each hit
+  /* Audio-responsive Effects: a lighter, wider copy of the glow that flares up with each hit
      (--audio-pulse, 0-1, set every frame by audioFx). Only its opacity and scale change, which
      the compositor animates without repainting. */
   .flare {
@@ -205,12 +205,12 @@
     inset: 0;
     background: radial-gradient(
       80% 240% at 0% 100%,
-      color-mix(in srgb, color-mix(in oklab, var(--deck-ambient), white 35%) calc(var(--deck-glow) * 1.7), transparent),
+      color-mix(in srgb, color-mix(in oklab, var(--deck-ambient), white 20%) var(--deck-glow), transparent),
       transparent 70%
     );
     transform-origin: 0% 100%;
-    opacity: var(--audio-pulse, 0);
-    scale: calc(1 + var(--audio-pulse, 0) * 0.35);
+    opacity: calc(var(--audio-pulse, 0) * 0.6);
+    scale: calc(1 + var(--audio-pulse, 0) * 0.15);
     will-change: opacity, scale;
   }
 
