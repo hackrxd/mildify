@@ -5,6 +5,12 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Changed
+
+- The theme colour variables have names that say what they colour: `--bg`, `--surface`, `--surface-raised`,
+  `--border`, `--text`, `--text-muted`, `--highlight` and `--on-highlight`. Themes using the old names still work;
+  extensions that read them should switch.
+
 ## 1.1.3 - 2026-10-04
 
 ### Fixed
