@@ -2,7 +2,9 @@
   import { untrack } from "svelte";
   import { fade } from "svelte/transition";
   import * as renderer from "spicy-lyrics-renderer";
+  import DjCaption from "../components/DjCaption.svelte";
   import Icon from "../components/Icon.svelte";
+  import { dj } from "../lib/dj.svelte";
   import { BACKDROP_FADE_MS, lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP } from "../lib/lyrics.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
@@ -281,6 +283,11 @@
     </form>
   {/if}
 
+  {#if dj.speaking}
+    <!-- The DJ's words over the lyrics, which wait for it: it never talks over a singer. -->
+    <div class="dj-over" transition:fade={{ duration: 200 }}><DjCaption stage /></div>
+  {/if}
+
   {#if credit}
     <!-- Required by the Spicy Lyrics API terms: visible whenever lyrics are. -->
     <footer class="credit">
@@ -315,6 +322,18 @@
   .stage {
     position: absolute;
     inset: 0;
+  }
+
+  .dj-over {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 56px;
+    z-index: 4;
+    display: flex;
+    justify-content: center;
+    padding: 0 24px;
+    pointer-events: none;
   }
 
   .controls {
