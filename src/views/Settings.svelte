@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from "../components/Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { audioFx } from "../lib/audiofx.svelte";
+  import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
@@ -275,6 +275,34 @@
         <span class="muted small">The glow from the cover in the player bar pulses with the beat. Only for music playing on this computer.</span>
       </span>
       <input type="checkbox" class="switch" checked={audioFx.on} onchange={(e) => audioFx.setOn(e.currentTarget.checked)} />
+    </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Effect intensity</span>
+        <span class="muted small">How strongly the glow pulses: {Math.round(audioFx.intensity * 100)}%.</span>
+      </span>
+      <span class="timing">
+        <span class="muted small">Subtle</span>
+        <input
+          type="range"
+          min={INTENSITY_MIN}
+          max={INTENSITY_MAX}
+          step={INTENSITY_STEP}
+          value={audioFx.intensity}
+          disabled={!audioFx.on}
+          oninput={(e) => audioFx.setIntensity(Number(e.currentTarget.value))}
+          aria-label="Audio-responsive effect intensity"
+        />
+        <span class="muted small">Strong</span>
+        <button
+          class="btn quiet"
+          class:hidden={audioFx.intensity === 1}
+          type="button"
+          disabled={audioFx.intensity === 1}
+          onclick={() => audioFx.setIntensity(1)}>Reset</button
+        >
+      </span>
     </label>
 
     <label class="row">
