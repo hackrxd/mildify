@@ -152,6 +152,45 @@ jobs:
           args: ${{ matrix.args }}
           releaseId: ${{ needs.prepare.outputs.release_id }}
 
+      # Interface-only updates (src-tauri/src/ui.rs): the built UI, signed like the update bundles, and
+      # ui.json, which names the backend it needs. Installed apps with that backend load it with a
+      # reload, so their music keeps playing; the rest take the full update from latest.json.
+      - name: Interface bundle
+        if: startsWith(matrix.platform, 'ubuntu')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version=$(jq -r .version dist/build.json)
+          bundle="ui-${version}.tar.gz"
+          mkdir ui-bundle
+          tar -czf "ui-bundle/${bundle}" -C dist .
+          npx tauri signer sign --app-version "${version}" "ui-bundle/${bundle}"
+          jq -n \
+            --arg version "${version}" \
+            --arg backend "$(jq -r .backend dist/build.json)" \
+            --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${bundle}" \
+            --arg signature "$(cat "ui-bundle/${bundle}.sig")" \
+            '{version: $version, backend: $backend, url: $url, signature: $signature}' > ui-bundle/ui.json
+
+      - name: Attach the interface bundle
+        if: startsWith(matrix.platform, 'ubuntu') && github.ref_type == 'tag'
+        uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.prepare.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            for (const name of fs.readdirSync('ui-bundle')) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: Number(process.env.release_id),
+                name,
+                data: fs.readFileSync(`ui-bundle/${name}`),
+              });
+            }
+
       - uses: actions/upload-artifact@v4
         with:
           name: mildify-${{ matrix.platform }}${{ contains(matrix.args, 'aarch64') && '-arm64' || contains(matrix.args, 'x86_64') && '-x64' || '' }}
