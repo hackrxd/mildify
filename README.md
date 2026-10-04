@@ -1,6 +1,6 @@
 # Mildify
 
->[INFO]
+>[!INFO]
 >Mildify was built almost entirely through the use of Generative AI tools. See [CLAUDE.md](CLAUDE.md) for guidelines given.
 
 A custom desktop Spotify client. It browses your music through the **Spotify Web API** and plays it
