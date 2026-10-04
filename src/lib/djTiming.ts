@@ -20,6 +20,10 @@ export const MAX_OVER_INTRO_MS = 5000;
 export const MAX_OVER_OUTRO_MS = 5000;
 /** The next song only comes in under the voice when at least this much of its intro is free to talk over. */
 export const MIN_OVER_INTRO_MS = 1500;
+/** The DJ only starts over the finishing song when at least this much of its end is free to talk over. */
+export const MIN_OVER_OUTRO_MS = 1500;
+/** The next song comes in near the end of the talk: under at most this share of it. */
+export const MAX_OVER_INTRO_SHARE = 0.5;
 /** The music under the DJ's voice. */
 export const DUCK_LEVEL = 0.22;
 export const DUCK_DOWN_MS = 450;
@@ -67,12 +71,14 @@ export interface TalkAsk {
 export function planTalk(p: TalkAsk): TalkPlan {
   // The end of the line that fits over the next song's intro, before its singer comes in.
   const room = p.overStart !== false && p.next ? p.next.first - VOCAL_GAP_MS : 0;
-  const overIntro = room >= MIN_OVER_INTRO_MS ? Math.min(room, p.speechMs, MAX_OVER_INTRO_MS) : 0;
+  const overIntro =
+    room >= MIN_OVER_INTRO_MS ? Math.min(room, MAX_OVER_INTRO_MS, p.speechMs * MAX_OVER_INTRO_SHARE) : 0;
   const musicAt = Math.max(0, p.speechMs - overIntro);
   // Room at the end of the finishing song, after its singer is done.
   const outroRoom =
     p.overEnd === false ? 0 : p.old ? Math.max(0, p.oldDurationMs - p.old.last - VOCAL_GAP_MS) : UNKNOWN_OUTRO_MS;
-  const overOld = Math.round(Math.min(musicAt, outroRoom, MAX_OVER_OUTRO_MS, Math.max(0, p.oldLeftMs)));
+  const fits = Math.min(musicAt, outroRoom, MAX_OVER_OUTRO_MS, Math.max(0, p.oldLeftMs));
+  const overOld = fits >= MIN_OVER_OUTRO_MS ? Math.round(fits) : 0;
   return {
     overOld,
     hold: Math.round(musicAt - overOld),

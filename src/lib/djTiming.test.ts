@@ -4,6 +4,7 @@ import {
   MAX_OVER_INTRO_MS,
   MAX_OVER_OUTRO_MS,
   MIN_OVER_INTRO_MS,
+  MIN_OVER_OUTRO_MS,
   planTalk,
   UNKNOWN_OUTRO_MS,
   vocals,
@@ -35,12 +36,13 @@ describe("planTalk", () => {
   const old = { first: 10_000, last: 190_000 };
   const base = { old, oldLeftMs: 30_000, oldDurationMs: 200_000 };
 
-  it("brings the next song in under a line that fits its intro, done before the singer", () => {
+  it("brings the next song in under the end of a line, at most half of it", () => {
+    // 4 s of talk, a long intro: the song comes in 2 s in, and the first 2 s go over the finishing song.
     expect(planTalk({ ...base, speechMs: 4000, next: { first: 15_000, last: 1 } })).toEqual({
-      overOld: 0,
+      overOld: 2000,
       hold: 0,
-      musicAt: 0,
-      overIntro: 4000,
+      musicAt: 2000,
+      overIntro: 2000,
     });
   });
 
@@ -88,8 +90,18 @@ describe("planTalk", () => {
   });
 
   it("can't start in the past", () => {
-    const plan = planTalk({ speechMs: 8000, next: null, old: null, oldLeftMs: 1200, oldDurationMs: 200_000 });
-    expect(plan).toMatchObject({ overOld: 1200, hold: 6800 });
+    const plan = planTalk({ speechMs: 8000, next: null, old: null, oldLeftMs: 2000, oldDurationMs: 200_000 });
+    expect(plan).toMatchObject({ overOld: 2000, hold: 6000 });
+  });
+
+  it("doesn't start over a song for just a moment", () => {
+    expect(planTalk({ speechMs: 8000, next: null, old: null, oldLeftMs: MIN_OVER_OUTRO_MS - 1, oldDurationMs: 200_000 })).toMatchObject({
+      overOld: 0,
+      hold: 8000,
+    });
+    // Its singer stops 2 s before the end: 1.3 s of room isn't enough.
+    const plan = planTalk({ ...base, speechMs: 8000, next: null, old: { first: 0, last: 198_000 } });
+    expect(plan).toMatchObject({ overOld: 0, hold: 8000 });
   });
 
   it("with nothing playing, the line comes first and the song near its end", () => {
