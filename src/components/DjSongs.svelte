@@ -84,15 +84,15 @@
     padding: 6px 10px;
     border-radius: 8px;
     font-size: var(--t-md);
-    transition: opacity 400ms var(--ease-out);
   }
   .songs li > span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .songs li.played {
-    opacity: 0.55;
+  /* Fades by colour, not opacity, so the artist beside it stays readable. */
+  .played .name {
+    color: var(--text-muted);
   }
   .name {
     transition: color 200ms var(--ease-out);
