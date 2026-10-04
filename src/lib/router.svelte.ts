@@ -12,7 +12,9 @@ export type Route =
   | { name: "lyrics" }
   /** A page an extension added; `id` is `<extension id>/<page id>`. */
   | { name: "extension"; id: string }
-  | { name: "settings" };
+  | { name: "settings" }
+  /** What's new: the changelog. */
+  | { name: "changelog" };
 
 class Router {
   #stack = $state<Route[]>([{ name: "home" }]);
