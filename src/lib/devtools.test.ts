@@ -25,6 +25,13 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("./ipc", () => ({ backend: { devtoolsAnswer: (...a: unknown[]) => devtoolsAnswer(...a) } }));
 vi.mock("./player.svelte", () => ({ player }));
+// Like the real DJ: its item takes play/pause and next while it's up; otherwise they reach the player.
+const dj = {
+  onAir: null as object | null,
+  togglePause: vi.fn(() => (dj.onAir ? undefined : player.togglePlay())),
+  skipTalk: vi.fn(() => (dj.onAir ? undefined : player.next())),
+};
+vi.mock("./dj.svelte", () => ({ dj }));
 
 let devtools: typeof import("./devtools");
 
@@ -86,6 +93,21 @@ describe("act", () => {
     expect(player.togglePlay).toHaveBeenCalledOnce();
     expect(player.next).toHaveBeenCalledOnce();
     expect(player.prev).toHaveBeenCalledOnce();
+  });
+
+  it("acts on the DJ's talk while it's the item playing", async () => {
+    dj.onAir = { name: "Set" };
+    await devtools.act({ action: "toggle_play" });
+    await devtools.act({ action: "next" });
+    await devtools.act({ action: "back" });
+    await devtools.act({ action: "seek", position_ms: 5000 });
+    expect(dj.togglePause).toHaveBeenCalledOnce();
+    expect(dj.skipTalk).toHaveBeenCalledOnce();
+    expect(player.togglePlay).not.toHaveBeenCalled();
+    expect(player.next).not.toHaveBeenCalled();
+    expect(player.prev).not.toHaveBeenCalled();
+    expect(player.seek).not.toHaveBeenCalled();
+    dj.onAir = null;
   });
 });
 
