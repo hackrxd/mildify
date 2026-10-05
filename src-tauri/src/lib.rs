@@ -378,6 +378,13 @@ async fn dj_set_key(state: State<'_, AppState>, provider: String, key: Option<St
     Ok(state.dj.status(&state.config().dj))
 }
 
+/// What the DJ's model can find out about songs it's choosing from, before it picks.
+#[tauri::command]
+async fn dj_song_info(state: State<'_, AppState>, songs: Vec<dj::songinfo::SongRef>) -> Result<Vec<dj::songinfo::SongInfo>> {
+    let cfg = state.config().dj;
+    state.dj.song_info(&cfg, &songs, state.device.session(), &state.webapi).await
+}
+
 /// The models a cloud provider offers with the saved key.
 #[tauri::command]
 async fn dj_models(state: State<'_, AppState>, provider: String) -> Result<Vec<dj::chat::ModelChoice>> {
@@ -552,6 +559,7 @@ pub fn run() {
             dj_generate,
             dj_set_key,
             dj_models,
+            dj_song_info,
             dj_speak,
             dj_voice,
             dj_duck,

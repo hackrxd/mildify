@@ -13,6 +13,7 @@ pub mod engine;
 pub mod install;
 pub mod manifest;
 pub mod secrets;
+pub mod songinfo;
 pub mod speaker;
 pub mod voice;
 
@@ -31,6 +32,7 @@ use chat::{Answer, Api, Ask, Message, ModelChoice, Target, Tool};
 use engine::Engine;
 use manifest::{Component, Runtime, OWN_SERVER};
 use secrets::Keys;
+use songinfo::{SongInfo, SongLookup, SongRef};
 use speaker::{Cmd, Speaker, VoiceCommand};
 use voice::Speech;
 
@@ -280,13 +282,17 @@ pub struct Dj {
     keys: Keys,
     /// Whether each Anthropic model takes `effort`, once asked.
     effort: Mutex<HashMap<String, bool>>,
+    songs: SongLookup,
 }
+
+/// The most songs one look-up covers: the model asks about a handful before it picks.
+pub const LOOK_UP_AT_MOST: usize = 5;
 
 impl Dj {
     pub fn new(root: PathBuf, scratch: PathBuf, http: reqwest::Client) -> Self {
         Self {
             scratch,
-            http,
+            http: http.clone(),
             runtime: manifest::this_runtime(),
             install: Arc::default(),
             generation: Arc::default(),
@@ -298,6 +304,7 @@ impl Dj {
             // Beside the DJ's folder, not in it: removing the DJ's downloads keeps the keys.
             keys: Keys::new(root.with_file_name("dj_keys.json")),
             effort: Mutex::default(),
+            songs: SongLookup::new(http.clone(), root.join("song_info.json")),
             root,
         }
     }
@@ -563,6 +570,22 @@ impl Dj {
         let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
         self.engine.touch();
         answer
+    }
+
+    /// What can be found out about songs the model asked about. Spotify's metadata comes through the player's
+    /// session, so there's less to say while it isn't running.
+    pub async fn song_info(
+        &self,
+        cfg: &DjConfig,
+        songs: &[SongRef],
+        session: Option<librespot_core::Session>,
+        web: &crate::webapi::WebApi,
+    ) -> Result<Vec<SongInfo>> {
+        if !cfg.enabled {
+            return Err(AppError::Other("The DJ is turned off".into()));
+        }
+        let songs = &songs[..songs.len().min(LOOK_UP_AT_MOST)];
+        Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await)
     }
 
     /// Unloads the model; the next request loads it again.
