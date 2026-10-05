@@ -282,24 +282,36 @@ const FILLER = new Set([
   "need", "feel", "feeling", "mood", "vibe", "vibes", "kind", "bit", "all", "now", "just", "maybe", "let", "lets",
   "get", "put", "have", "got", "into", "there", "what", "how", "about", "really", "very", "too", "again",
 ]);
-/** Words that turn the next ones around: "no more Drake", "anything but Drake", "without the 80s". */
-const NEGATIONS = new Set(["no", "not", "without", "except", "but", "less", "nothing", "never", "stop", "skip", "avoid"]);
+/** Words that turn the next ones around: "no more Drake", "anything but Drake", "without the 80s", "don't play
+ * Drake". */
+const NEGATIONS = new Set([
+  "no", "not", "without", "except", "but", "less", "nothing", "never", "stop", "skip", "avoid", "dont", "doesnt",
+  "cant", "wont", "nor",
+]);
 /** Words that turn them back, unless right after one: "no Drake, more Radiohead", "less Drake and more Future". */
 const TURNS = new Set(["more", "instead", "only", "just", "rather"]);
 
 /** How well a song fits what a request names: its artists, album, title or decade. Below zero for what the request
  * says to leave out. */
 export function requestScore(request: string): (c: Candidate) => number {
-  // Words, and the punctuation that ends a clause.
-  const tokens = request.toLowerCase().match(/[\p{L}\p{N}']+|[.,;!?]/gu) ?? [];
+  // Words, and the punctuation that ends a clause. A typographic apostrophe is a plain one.
+  const tokens = request.toLowerCase().replace(/[\u2018\u2019]/g, "'").match(/[\p{L}\p{N}']+|[.,;!?]/gu) ?? [];
   const wanted: string[] = [];
   const unwanted: string[] = [];
+  /** Decades, by their first year. */
+  const decades: number[] = [];
+  const notDecades: number[] = [];
   let against = false;
   let prev = "";
   for (const t of tokens) {
     const w = t.replace(/'/g, "");
     const after = prev;
     prev = w;
+    // "Nothing but Radiohead" is only Radiohead.
+    if (w === "but" && after === "nothing") {
+      against = false;
+      continue;
+    }
     if (NEGATIONS.has(w)) {
       against = true;
       continue;
@@ -308,11 +320,14 @@ export function requestScore(request: string): (c: Candidate) => number {
       against = false;
       continue;
     }
+    const decade = decadeOf(w);
+    if (decade !== null) {
+      (against ? notDecades : decades).push(decade);
+      continue;
+    }
     if (w.length < 3 || FILLER.has(w)) continue;
     (against ? unwanted : wanted).push(w);
   }
-  const decade = decadeIn(request);
-  const decadeUnwanted = decade !== null && /\b(no|not|without|except|but|less|never|avoid|skip)\b[^.,;!?]*\b(19|20)?\d0'?s\b/i.test(request);
   const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
   const about = (c: Candidate, w: string) =>
     (c.artists.some((a) => has(a, w)) ? 3 : 0) + (has(c.album, w) ? 2 : 0) + (has(c.name, w) ? 1 : 0);
@@ -321,14 +336,16 @@ export function requestScore(request: string): (c: Candidate) => number {
     for (const w of wanted) n += about(c, w);
     for (const w of unwanted) if (about(c, w) > 0) n -= 10;
     const year = Number(c.year);
-    if (decade !== null && year >= decade && year < decade + 10) n += decadeUnwanted ? -10 : 2;
+    const inDecade = (d: number) => year >= d && year < d + 10;
+    if (decades.some(inDecade)) n += 2;
+    if (notDecades.some(inDecade)) n -= 10;
     return n;
   };
 }
 
-/** The decade a request names ("90s", "the 1980s", "2010s"), as its first year. */
-function decadeIn(request: string): number | null {
-  const m = request.toLowerCase().match(/\b(19|20)?(\d)0'?s\b/);
+/** The decade a word names ("90s", "1980s", "2010s"), as its first year. */
+function decadeOf(word: string): number | null {
+  const m = word.match(/^(19|20)?(\d)0s$/);
   if (!m) return null;
   const century = m[1] ? Number(m[1]) * 100 : Number(m[2]) >= 3 ? 1900 : 2000;
   return century + Number(m[2]) * 10;

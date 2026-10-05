@@ -175,6 +175,20 @@ describe("requests", () => {
     expect(score("Radiohead, not the 90s", "spotify:track:rh1")).toBeGreaterThan(0);
     expect(score("no Band, 90s please", "spotify:track:n1")).toBeLessThan(0);
     expect(score("no Drake, 90s please", "spotify:track:n1")).toBeGreaterThan(0);
+    // A decade turns back with the words around it, as any word does.
+    expect(score("less Band and more 90s", "spotify:track:n1")).toBeLessThan(0);
+    expect(score("less Radiohead and more 90s", "spotify:track:n1")).toBeGreaterThan(0);
+    expect(score("90s, not the 2000s", "spotify:track:rh2")).toBeLessThan(0);
+    expect(score("90s, not the 2000s", "spotify:track:n1")).toBeGreaterThan(0);
+  });
+
+  it("reads contractions and typographic apostrophes, and \"nothing but\" as only", () => {
+    const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
+    expect(score("don't play Radiohead", "spotify:track:rh1")).toBeLessThan(0);
+    expect(score("don\u2019t play Radiohead", "spotify:track:rh1")).toBeLessThan(0);
+    expect(score("I can't stand Radiohead", "spotify:track:rh1")).toBeLessThan(0);
+    expect(score("nothing but Radiohead", "spotify:track:rh1")).toBeGreaterThan(0);
+    expect(score("anything but Radiohead", "spotify:track:rh1")).toBeLessThan(0);
   });
 
   it("doesn't match songs on the words around what's asked for", () => {
