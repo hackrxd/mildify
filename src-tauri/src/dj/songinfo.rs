@@ -553,7 +553,7 @@ mod tests {
         let web = WebApi::new(reqwest::Client::new(), l.file.with_file_name("token.json"));
         let song = SongRef { uri: "spotify:track:a".into(), name: "x".into(), artist: "y".into(), artist_id: None };
         l.look_up(&[song], None, &web, false).await;
-        assert_eq!(l.with_kept(|m| m["spotify:track:a"].complete), false);
+        assert!(!l.with_kept(|m| m["spotify:track:a"].complete));
     }
 
     #[test]

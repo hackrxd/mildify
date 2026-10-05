@@ -162,7 +162,8 @@ impl Keys {
         }
     }
 
-    pub fn has(&self, provider: &str) -> bool {
+    #[cfg(test)]
+    fn has(&self, provider: &str) -> bool {
         self.get(provider).is_some()
     }
 
