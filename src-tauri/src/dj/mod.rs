@@ -1003,9 +1003,9 @@ mod tests {
     #[tokio::test]
     async fn removing_the_djs_files_forgets_its_song_look_ups() {
         let d = dj();
-        d.songs.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true);
+        d.songs.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, 0);
         d.remove().await.unwrap();
-        assert_eq!(d.songs.kept("spotify:track:a"), None);
+        assert_eq!(d.songs.kept("spotify:track:a", false), None);
     }
 
     #[tokio::test]

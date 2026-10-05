@@ -76,6 +76,9 @@ struct Kept {
     /// Every source asked answered.
     #[serde(default)]
     complete: bool,
+    /// MusicBrainz was among them.
+    #[serde(default)]
+    musicbrainz: bool,
 }
 
 impl Kept {
@@ -91,6 +94,8 @@ pub struct SongLookup {
     kept: Mutex<Option<BTreeMap<String, Kept>>>,
     /// Held while the file is written, so two look-ups can't interleave their writes.
     saving: Mutex<()>,
+    /// Bumped as everything's forgotten, so a look-up under way then keeps nothing.
+    generation: std::sync::atomic::AtomicU64,
     /// When the last MusicBrainz request went out.
     musicbrainz_at: tokio::sync::Mutex<Option<Instant>>,
     musicbrainz_url: String,
@@ -107,6 +112,7 @@ impl SongLookup {
             file,
             kept: Mutex::new(None),
             saving: Mutex::new(()),
+            generation: std::sync::atomic::AtomicU64::new(0),
             musicbrainz_at: tokio::sync::Mutex::new(None),
             musicbrainz_url: MUSICBRAINZ.into(),
         }
@@ -126,11 +132,12 @@ impl SongLookup {
         deadline: Instant,
     ) -> Vec<SongInfo> {
         let left = || deadline.saturating_duration_since(Instant::now());
+        let generation = self.generation();
         // Songs by the same artist in one look-up ask for its genres once.
         let mut genres_of: HashMap<String, Option<Vec<String>>> = HashMap::new();
         let mut out = Vec::with_capacity(songs.len());
         for song in songs {
-            if let Some(info) = self.kept(&song.uri) {
+            if let Some(info) = self.kept(&song.uri, musicbrainz) {
                 out.push(info);
                 continue;
             }
@@ -141,7 +148,9 @@ impl SongLookup {
             let mut artist_id = song.artist_id.clone();
             if let Some(session) = &session {
                 match tokio::time::timeout(left(), spotify_metadata(session, &song.uri)).await {
-                    Ok(Ok((found, found_isrc, found_artist))) => {
+                    Ok(Ok((found, found_isrc, found_artist, whole))) => {
+                        // An album or artist entry missing is asked for again soon.
+                        complete &= whole;
                         info = found;
                         isrc = found_isrc;
                         artist_id = artist_id.or(found_artist);
@@ -179,24 +188,33 @@ impl SongLookup {
             }
             if musicbrainz {
                 match self.musicbrainz(isrc.as_deref(), song, deadline).await {
-                    Ok((genres, tags)) => merge(&mut info, genres, tags),
+                    Ok((genres, tags, whole)) => {
+                        complete &= whole;
+                        merge(&mut info, genres, tags);
+                    }
                     Err(e) => {
                         complete = false;
                         log::info!("DJ: nothing from MusicBrainz for {}: {e}", song.uri);
                     }
                 }
             }
-            self.keep(&info, complete);
+            self.keep(&info, complete, musicbrainz, generation);
             out.push(info);
         }
-        self.save();
+        self.save(generation);
         out
     }
 
-    /// Forgets every look-up, as the DJ's files are removed.
+    fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Forgets every look-up, as the DJ's files are removed; one under way keeps nothing, nor writes the file.
     pub fn clear(&self) {
         let _saving = self.saving.lock().unwrap();
-        *self.kept.lock().unwrap() = Some(BTreeMap::new());
+        let mut kept = self.kept.lock().unwrap();
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *kept = Some(BTreeMap::new());
     }
 
     fn with_kept<R>(&self, f: impl FnOnce(&mut BTreeMap<String, Kept>) -> R) -> R {
@@ -207,15 +225,20 @@ impl SongLookup {
         f(map)
     }
 
-    pub(super) fn kept(&self, uri: &str) -> Option<SongInfo> {
+    /// A look-up kept, unless it's old, or MusicBrainz is asked now and wasn't then.
+    pub(super) fn kept(&self, uri: &str, musicbrainz: bool) -> Option<SongInfo> {
         let now = now_secs();
-        self.with_kept(|m| m.get(uri).filter(|k| k.fresh(now)).map(|k| k.info.clone()))
+        self.with_kept(|m| m.get(uri).filter(|k| k.fresh(now) && (k.musicbrainz || !musicbrainz)).map(|k| k.info.clone()))
     }
 
-    pub(super) fn keep(&self, info: &SongInfo, complete: bool) {
+    /// Keeps a look-up begun in `generation`, unless everything's been forgotten since.
+    pub(super) fn keep(&self, info: &SongInfo, complete: bool, musicbrainz: bool, generation: u64) {
         let now = now_secs();
         self.with_kept(|m| {
-            m.insert(info.uri.clone(), Kept { info: info.clone(), at: now, complete });
+            if self.generation() != generation {
+                return;
+            }
+            m.insert(info.uri.clone(), Kept { info: info.clone(), at: now, complete, musicbrainz });
             m.retain(|_, k| k.fresh(now));
             while m.len() > KEEP_AT_MOST {
                 let oldest = m.iter().min_by_key(|(_, k)| k.at).map(|(u, _)| u.clone());
@@ -229,8 +252,12 @@ impl SongLookup {
 
     /// Writes what's kept to a new file and moves it over the old one, one look-up at a time, so the file is
     /// never half written.
-    fn save(&self) {
+    fn save(&self, generation: u64) {
         let _saving = self.saving.lock().unwrap();
+        // Forgotten since, with the DJ's folder going: nothing's written back into it.
+        if self.generation() != generation {
+            return;
+        }
         let body = self.with_kept(|m| serde_json::to_vec(m).ok());
         let (Some(body), Some(dir)) = (body, self.file.parent()) else { return };
         let tmp = self.file.with_extension("json.tmp");
@@ -278,7 +305,8 @@ impl SongLookup {
 
     /// The song's genres and tags on MusicBrainz: by ISRC, or by searching for its title and artist when there's
     /// none or MusicBrainz doesn't know it; then the artist's, when the recording has no genres of its own.
-    async fn musicbrainz(&self, isrc: Option<&str>, song: &SongRef, deadline: Instant) -> Result<(Vec<String>, Vec<String>), String> {
+    /// Whether it got all it asked for comes third: the artist's genres can be missing.
+    async fn musicbrainz(&self, isrc: Option<&str>, song: &SongRef, deadline: Instant) -> Result<(Vec<String>, Vec<String>, bool), String> {
         let mut found = None;
         if let Some(isrc) = isrc {
             found = self
@@ -293,19 +321,25 @@ impl SongLookup {
                 let q = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
                 match self.musicbrainz_get(&format!("/recording?query={q}&limit=1&fmt=json"), deadline).await? {
                     Some(v) => v,
-                    None => return Ok((Vec::new(), Vec::new())),
+                    None => return Ok((Vec::new(), Vec::new(), true)),
                 }
             }
         };
         let (mut genres, tags, artist) = read_recording(&found);
+        let mut whole = true;
         if genres.is_empty() {
             if let Some(mbid) = artist {
-                if let Ok(Some(a)) = self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await {
-                    genres = top_names(&a["genres"], 4);
+                match self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await {
+                    Ok(Some(a)) => genres = top_names(&a["genres"], 4),
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::info!("DJ: no MusicBrainz genres for {}'s artist: {e}", song.uri);
+                        whole = false;
+                    }
                 }
             }
         }
-        Ok((genres, tags))
+        Ok((genres, tags, whole))
     }
 }
 
@@ -359,8 +393,8 @@ async fn artist_genres(web: &WebApi, id: &str) -> crate::error::Result<Vec<Strin
 }
 
 /// What Spotify's metadata says about the track, its album and its first artist; with the ISRC and the
-/// artist's id, for the other sources.
-async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Option<String>, Option<String>), String> {
+/// artist's id, for the other sources, and whether the album's and artist's entries were both there.
+async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Option<String>, Option<String>, bool), String> {
     let id = SpotifyUri::from_uri(uri).map_err(|e| e.to_string())?;
     let track = Track::get(session, &id).await.map_err(|e| e.to_string())?;
     let mut info = SongInfo {
@@ -370,6 +404,7 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
         ..Default::default()
     };
     let isrc = track.external_ids.iter().find(|e| e.external_type.eq_ignore_ascii_case("isrc")).map(|e| e.id.clone());
+    let mut whole = true;
     // The track carries a partial album; the album's own entry has its label and date.
     match Album::get(session, &track.album.id).await {
         Ok(album) => {
@@ -381,6 +416,7 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
         Err(e) => {
             log::info!("DJ: no album metadata for {uri}: {e}");
             info.album = non_empty(&track.album.name);
+            whole = false;
         }
     }
     let artist_id = track.artists.first().map(|a| a.id.clone());
@@ -391,10 +427,13 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
                 info.artist_active = active(&artist.activity_periods);
                 info.related_artists = artist.related.iter().map(|a| a.name.clone()).filter(|n| !n.is_empty()).take(3).collect();
             }
-            Err(e) => log::info!("DJ: no artist metadata for {uri}: {e}"),
+            Err(e) => {
+                log::info!("DJ: no artist metadata for {uri}: {e}");
+                whole = false;
+            }
         }
     }
-    Ok((info, isrc, artist_id.map(|a| a.to_id())))
+    Ok((info, isrc, artist_id.map(|a| a.to_id()), whole))
 }
 
 fn non_empty(s: &str) -> Option<String> {
@@ -510,14 +549,14 @@ mod tests {
     fn keeps_look_ups_for_a_month_and_on_disk() {
         let l = lookup();
         let info = SongInfo { uri: "spotify:track:a".into(), label: Some("Mute".into()), ..Default::default() };
-        l.keep(&info, true);
-        l.save();
-        assert_eq!(l.kept("spotify:track:a"), Some(info.clone()));
+        l.keep(&info, true, false, 0);
+        l.save(0);
+        assert_eq!(l.kept("spotify:track:a", false), Some(info.clone()));
         let again = SongLookup::new(reqwest::Client::new(), l.file.clone());
-        assert_eq!(again.kept("spotify:track:a"), Some(info));
+        assert_eq!(again.kept("spotify:track:a", false), Some(info));
         // A month on, it's asked again.
         again.with_kept(|m| m.get_mut("spotify:track:a").unwrap().at -= KEEP_FOR.as_secs());
-        assert_eq!(again.kept("spotify:track:a"), None);
+        assert_eq!(again.kept("spotify:track:a", false), None);
     }
 
     #[test]
@@ -525,26 +564,26 @@ mod tests {
         let l = lookup();
         for i in 0..(KEEP_AT_MOST + 5) {
             l.with_kept(|m| {
-                m.insert(format!("u{i}"), Kept { info: SongInfo::default(), at: now_secs() - 1000 + i as u64 / 10, complete: true });
+                m.insert(format!("u{i}"), Kept { info: SongInfo::default(), at: now_secs() - 1000 + i as u64 / 10, complete: true, musicbrainz: false });
             });
         }
-        l.keep(&SongInfo { uri: "newest".into(), ..Default::default() }, true);
+        l.keep(&SongInfo { uri: "newest".into(), ..Default::default() }, true, false, 0);
         assert_eq!(l.with_kept(|m| m.len()), KEEP_AT_MOST);
-        assert!(l.kept("newest").is_some());
-        assert!(l.kept("u0").is_none());
+        assert!(l.kept("newest", false).is_some());
+        assert!(l.kept("u0", false).is_none());
     }
 
     #[test]
     fn keeps_an_incomplete_look_up_only_a_few_minutes() {
         let l = lookup();
         let info = SongInfo { uri: "spotify:track:a".into(), ..Default::default() };
-        l.keep(&info, false);
-        assert!(l.kept("spotify:track:a").is_some());
+        l.keep(&info, false, false, 0);
+        assert!(l.kept("spotify:track:a", false).is_some());
         l.with_kept(|m| m.get_mut("spotify:track:a").unwrap().at -= RETRY_AFTER.as_secs());
-        assert_eq!(l.kept("spotify:track:a"), None);
-        l.keep(&info, true);
+        assert_eq!(l.kept("spotify:track:a", false), None);
+        l.keep(&info, true, false, 0);
         l.with_kept(|m| m.get_mut("spotify:track:a").unwrap().at -= RETRY_AFTER.as_secs());
-        assert!(l.kept("spotify:track:a").is_some());
+        assert!(l.kept("spotify:track:a", false).is_some());
     }
 
     #[tokio::test]
@@ -559,20 +598,43 @@ mod tests {
     #[test]
     fn forgets_everything_when_the_djs_files_go() {
         let l = lookup();
-        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true);
-        l.save();
+        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, 0);
+        l.save(0);
         l.clear();
-        assert_eq!(l.kept("spotify:track:a"), None);
+        assert_eq!(l.kept("spotify:track:a", false), None);
+    }
+
+    #[test]
+    fn a_look_up_under_way_as_everything_is_forgotten_keeps_nothing() {
+        let l = lookup();
+        let started = l.generation();
+        l.clear();
+        // The DJ's folder is gone by now.
+        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, started);
+        l.save(started);
+        assert_eq!(l.kept("spotify:track:a", false), None);
+        assert!(!l.file.exists());
+    }
+
+    #[test]
+    fn looks_a_song_up_again_once_musicbrainz_is_allowed() {
+        let l = lookup();
+        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, 0);
+        assert!(l.kept("spotify:track:a", false).is_some());
+        assert_eq!(l.kept("spotify:track:a", true), None);
+        l.keep(&SongInfo { uri: "spotify:track:b".into(), ..Default::default() }, true, true, 0);
+        assert!(l.kept("spotify:track:b", true).is_some());
+        assert!(l.kept("spotify:track:b", false).is_some());
     }
 
     #[test]
     fn writes_the_whole_file_or_none_of_it() {
         let l = lookup();
-        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true);
-        l.save();
+        l.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, 0);
+        l.save(0);
         assert!(!l.file.with_extension("json.tmp").exists());
         let again = SongLookup::new(reqwest::Client::new(), l.file.clone());
-        assert!(again.kept("spotify:track:a").is_some());
+        assert!(again.kept("spotify:track:a", false).is_some());
     }
 
     /// Answers requests over loopback in turn with these statuses and bodies, or never answers past them, and
@@ -608,11 +670,25 @@ mod tests {
         let mut l = lookup();
         l.musicbrainz_url = url;
         let song = SongRef { uri: "u".into(), name: "When You Sleep".into(), artist: "My Bloody Valentine".into(), artist_id: None };
-        let (genres, _) = l.musicbrainz(Some("GBAAA9100001"), &song, Instant::now() + DEADLINE).await.unwrap();
+        let (genres, _, whole) = l.musicbrainz(Some("GBAAA9100001"), &song, Instant::now() + DEADLINE).await.unwrap();
         assert_eq!(genres, ["shoegaze"]);
+        assert!(whole);
         let seen = server.await.unwrap();
         assert!(seen[0].contains("/isrc/GBAAA9100001"));
         assert!(seen[1].contains("/recording?query="));
+    }
+
+    #[tokio::test]
+    async fn says_when_the_artists_genres_didnt_come() {
+        let search = r#"{"recordings":[{"title":"x","genres":[],"tags":[],"artist-credit":[{"artist":{"id":"a-1"}}]}]}"#;
+        let (url, server) = serve(vec![(200, search), (503, r#"{"error":"slow down"}"#)], false).await;
+        let mut l = lookup();
+        l.musicbrainz_url = url;
+        let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
+        let (genres, _, whole) = l.musicbrainz(None, &song, Instant::now() + DEADLINE).await.unwrap();
+        assert!(genres.is_empty());
+        assert!(!whole);
+        assert!(server.await.unwrap()[1].contains("/artist/a-1"));
     }
 
     #[tokio::test]
