@@ -59,6 +59,7 @@ const player = vi.hoisted(() => ({
   togglePlay: vi.fn(),
   next: vi.fn(),
   prev: vi.fn(),
+  seek: vi.fn(),
 }));
 const toasts = vi.hoisted(() => ({ show: vi.fn(), error: vi.fn() }));
 
@@ -170,6 +171,7 @@ beforeEach(async () => {
     player.togglePlay,
     player.next,
     player.prev,
+    player.seek,
     toasts.show,
     toasts.error,
   ]) {
@@ -1176,15 +1178,132 @@ describe("picking as it goes", () => {
     expect(queued().at(-1)).toBe(b.uri);
   });
 
-  it("leaves going back to the player past a song's first seconds, or with no song before in the set", async () => {
+  it("goes back to the song's start past its first seconds, and at the set's first song", async () => {
     await liveStarted();
+    // The player's own previous would drop the song, which came in from its queue or a play request.
     await dj.previous();
-    expect(player.prev).toHaveBeenCalledTimes(1);
+    expect(player.seek).toHaveBeenLastCalledWith(0);
     await finish();
     await playing(dj.current!.songs[1].uri, 5000);
     await dj.previous();
-    expect(player.prev).toHaveBeenCalledTimes(2);
+    expect(player.seek).toHaveBeenCalledTimes(2);
+    expect(player.prev).not.toHaveBeenCalled();
     expect(backend.device).not.toHaveBeenCalledWith({ action: "next" });
+  });
+
+  /** What went to the player, in order: the device's commands, and the player's own Next. */
+  const sent = () =>
+    [
+      ...backend.device.mock.calls.map(([c], i) => ({ c: c as { action: string; uri?: string }, at: backend.device.mock.invocationCallOrder[i] })),
+      ...player.next.mock.calls.map((_, i) => ({ c: { action: "player next" } as { action: string; uri?: string }, at: player.next.mock.invocationCallOrder[i] })),
+    ]
+      .sort((x, y) => x.at - y.at)
+      .map(({ c }) => (c.uri ? `${c.action} ${c.uri}` : c.action));
+
+  it("goes back twice when Previous is pressed twice quickly", async () => {
+    await liveStarted();
+    const [a, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    await finish();
+    await playing(c.uri, 1000);
+    backend.device.mockClear();
+    void dj.previous();
+    await dj.previous();
+    expect(sent()).toEqual(["clear_queue", `queue ${b.uri}`, "next", "clear_queue", `queue ${a.uri}`, "next"]);
+    expect(dj.current!.songs.map((s) => s.uri)).toEqual([a.uri]);
+    expect(player.prev).not.toHaveBeenCalled();
+  });
+
+  it("lines up a song after the one gone back to when Next follows Previous quickly", async () => {
+    await liveStarted();
+    const [a, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    backend.device.mockClear();
+    // The player hasn't said it's back on the first song when Next comes.
+    void dj.previous();
+    dj.skipTalk();
+    await vi.advanceTimersByTimeAsync(0);
+    const after = dj.current!.songs[1];
+    expect(dj.current!.songs[0].uri).toBe(a.uri);
+    expect(sent()).toEqual(["clear_queue", `queue ${a.uri}`, "next", "clear_queue", `queue ${after.uri}`, "player next"]);
+  });
+
+  it("goes back to the song Next left when Previous follows it quickly, and forgets that skip", async () => {
+    await liveStarted();
+    const [a, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    backend.device.mockClear();
+    dj.skipTalk();
+    void dj.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent()).toEqual(["player next", "clear_queue", `queue ${b.uri}`, "next"]);
+    expect(dj.current!.songs.map((s) => s.uri)).toEqual([a.uri, b.uri]);
+    // The player passes through the song Next went to, then comes back.
+    await playing(c.uri, 0);
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queued().at(-1)).toBe(c.uri);
+    await untilNextSet();
+    expect(prompt()).not.toContain(`They skipped "${b.name}"`);
+    expect(prompt()).not.toContain(`They skipped "${c.name}"`);
+  });
+
+  it("sends one Next into the next set when Next is pressed twice quickly on a set's last song", async () => {
+    await liveStarted();
+    await untilNextSet();
+    // The next set's first song goes into the player's queue.
+    await tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sp.addToQueue).toHaveBeenCalledWith(dj.upNext!.songs[0].uri, "here");
+    dj.skipTalk();
+    dj.skipTalk();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.next).toHaveBeenCalledOnce();
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+  });
+
+  it("goes back only once the next set's song is in the queue", async () => {
+    await liveStarted();
+    const [a, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await finish();
+    await playing(dj.current!.songs[2].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext).not.toBeNull();
+    let added!: () => void;
+    sp.addToQueue.mockImplementationOnce(() => new Promise((r) => (added = () => r(null))));
+    await tick();
+    backend.device.mockClear();
+    const back = dj.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(backend.device).not.toHaveBeenCalled();
+    added();
+    await back;
+    expect(sent()).toEqual(["clear_queue", `queue ${b.uri}`, "next"]);
+    expect(a).toBeDefined();
+  });
+
+  it("still tells the model about a skip when the set after it was made from a template", async () => {
+    const set = await liveStarted();
+    await playing(dj.current!.songs[1].uri, 0);
+    backend.djGenerate.mockRejectedValueOnce(new Error("too slow"));
+    await untilNextSet();
+    expect(dj.upNext!.byModel).toBe(false);
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await nextSet();
+    await untilNextSet();
+    expect(prompt()).toContain(`They skipped "${set.songs[0].name}"`);
   });
 
   it("does nothing on previous while the DJ talks", async () => {

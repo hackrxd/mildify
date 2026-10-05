@@ -413,9 +413,12 @@ class Dj {
   #told = new Set<string>();
   /** The last queue change sent to the player, settled once the player has it. */
   #linedUpDone: Promise<boolean> = Promise.resolve(true);
-  /** Where a Next sent in a set picked as it goes is headed, while the player gets there. */
-  #skipTo: { uri: string; at: number } | null = null;
-  #skips: Promise<unknown> = Promise.resolve();
+  /** Where a Next or Previous sent in a set picked as it goes is headed, while the player gets there. */
+  #heading: { uri: string; at: number } | null = null;
+  /** Those Nexts and Previouses, one after another: each goes from where the one before left the player. */
+  #steps: Promise<unknown> = Promise.resolve();
+  /** The next set's first song on its way into the player's queue. */
+  #queuing: Promise<void> = Promise.resolve();
   /** Previous went back to this song: leaving the one before isn't a skip. */
   #goingBack: string | null = null;
   /** The listener has been told the voice isn't working, this session. */
@@ -548,7 +551,7 @@ class Dj {
   skipTalk() {
     if (!this.onAir) {
       // Its next song is lined up only as each one plays, so one Next has to land before the next is sent.
-      if (this.#live()) return void (this.#skips = this.#skips.then(() => this.#skipLive()));
+      if (this.#live()) return void this.#step(() => this.#skipLive());
       return this.#nothingAfter() ? this.#skipToNextSet() : player.next();
     }
     const run = this.#run;
@@ -564,22 +567,49 @@ class Dj {
   }
 
   /** Previous, as the player bar's button and keys do it. A set picked as it goes has its songs after the first
-   * in the player's queue, and the player keeps only a context's songs behind it: going back would skip a song,
-   * so the song before is lined up again and played. */
-  async previous() {
+   * in the player's queue, and the player keeps only a context's songs behind it: its own previous would drop the
+   * song playing and go back past the set. So the song before is lined up again and played, and the set's first
+   * song goes back to its start. */
+  previous(): Promise<unknown> {
+    if (this.onAir) return Promise.resolve();
+    if (!this.#live()) return player.prev();
+    return this.#step(() => this.#stepBack());
+  }
+
+  #step(fn: () => Promise<unknown>): Promise<unknown> {
+    const p = this.#steps.then(fn);
+    this.#steps = p.catch(() => {});
+    return p;
+  }
+
+  /** Where the last Next or Previous sent is headed, if the player may not be there yet. */
+  #headed(): string | null {
+    const h = this.#heading;
+    return h && performance.now() - h.at < SKIP_LANDS_MS ? h.uri : null;
+  }
+
+  #headTo(uri: string) {
+    this.#heading = { uri, at: performance.now() };
+  }
+
+  async #stepBack() {
     if (this.onAir) return;
-    const cur = this.current;
-    const uri = player.track?.uri;
-    const at = cur && uri ? cur.songs.findIndex((s) => s.uri === uri) : -1;
-    // Past the first few seconds the player goes back to the song's start, which needs nothing from here.
-    if (!cur || !this.#live() || at < 1 || this.#lining || this.#queued === "pending" || player.positionNow() >= BACK_RESTARTS_MS) {
-      return player.prev();
-    }
+    if (!this.#live()) return player.prev();
     const run = this.#run;
+    // Changes on their way to the player's queue land first, or they'd land after the song gone back to.
+    await Promise.all([this.#linedUpDone, this.#queuing]);
+    if (run !== this.#run || this.onAir || !this.#live()) return;
+    const cur = this.current!;
+    const heading = this.#headed();
+    // Into the next set, with the player not there yet: nothing of this set is to go back to from there.
+    if (heading && this.upNext?.songs.some((s) => s.uri === heading)) return;
+    const at = cur.songs.findIndex((s) => s.uri === (heading ?? player.track?.uri));
+    if (at < 0) return player.prev();
+    // Past its first few seconds, a song goes back to its start, as the player does it. So does the set's first.
+    if (at === 0 || (!heading && player.positionNow() >= BACK_RESTARTS_MS)) return player.seek(0);
     const back = cur.songs[at - 1];
     this.#lining = true;
     this.#goingBack = back.uri;
-    this.#skipTo = null;
     try {
       await backend.device({ action: "clear_queue" });
       await backend.device({ action: "queue", uri: back.uri });
@@ -588,9 +618,10 @@ class Dj {
       console.warn("DJ: couldn't go back a song:", e);
       this.#goingBack = null;
       if (run === this.#run) this.#lining = false;
-      return player.prev();
+      return;
     }
     if (run !== this.#run) return;
+    this.#headTo(back.uri);
     this.#lining = false;
     this.linedUp++;
     const now = this.current?.id === cur.id ? this.current : cur;
@@ -617,9 +648,10 @@ class Dj {
     const run = this.#run;
     if (!this.#live() || this.onAir) return this.skipTalk();
     const cur = this.current!;
-    const heading = this.#skipTo && performance.now() - this.#skipTo.at < SKIP_LANDS_MS ? this.#skipTo.uri : null;
-    const from = heading ?? player.track?.uri;
-    const at = cur.songs.findIndex((s) => s.uri === from);
+    const heading = this.#headed();
+    // Already on its way into the next set, whose song has nothing lined up after it yet: one Next is enough.
+    if (heading && this.upNext?.songs.some((s) => s.uri === heading)) return;
+    const at = cur.songs.findIndex((s) => s.uri === (heading ?? player.track?.uri));
     if (at < 0) return player.next();
     // A change on its way to the player's queue lands before the Next does.
     await this.#linedUpDone;
@@ -628,7 +660,9 @@ class Dj {
     if (at === set.songs.length - 1) {
       if (this.#setEnds) {
         // The next set follows from the player's queue once it's there; until then the music waits for it.
-        return this.#queued === "done" && !heading ? player.next() : this.#skipToNextSet();
+        if (this.#queued !== "done" || !this.upNext || heading) return this.#skipToNextSet();
+        this.#headTo(this.upNext.songs[0].uri);
+        return player.next();
       }
       const pick = this.#nextInSet(set, set.songs, this.#played);
       if (!pick || !(await this.#lineUp(run, set, set.songs, pick))) {
@@ -642,7 +676,7 @@ class Dj {
       if (run !== this.#run) return;
       set = this.current!;
     }
-    this.#skipTo = { uri: set.songs[at + 1].uri, at: performance.now() };
+    this.#headTo(set.songs[at + 1].uri);
     await player.next();
   }
 
@@ -753,7 +787,7 @@ class Dj {
     this.#repick = false;
     this.#lining = false;
     this.#setLiked = [];
-    this.#skipTo = null;
+    this.#heading = null;
     this.#goingBack = null;
     this.#foreignSince = null;
     this.#remoteSince = null;
@@ -799,8 +833,8 @@ class Dj {
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     let pick: Pick | null = null;
     const live = this.live;
+    const reactions = live ? this.#news() : undefined;
     try {
-      const reactions = live ? this.#news() : undefined;
       const messages = segmentMessages({ segment, choices, listener, previous: prev, instructions: this.instructions, live, reactions });
       const answer = await this.#rushable(backend.djGenerate(messages, segmentSchema(choices.length), 300), timeoutMs);
       pick = readAnswer(answer, choices, segment);
@@ -810,6 +844,8 @@ class Dj {
     }
     if (run !== this.#run) return null;
     const byModel = !!pick;
+    // A template doesn't mention them: the next prompt still does.
+    if (byModel && reactions) this.#toldOf(reactions);
     pick ??= fallbackPick(segment, choices, listener, prev);
     this.#segments.push(segment.id);
     // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
@@ -1140,13 +1176,16 @@ class Dj {
     }
   }
 
-  /** Likes and skips since the last prompt, for the model to go by. */
+  /** Likes and skips no answer from the model has gone by yet. */
   #news(): Reactions {
     const fresh = (kind: string, songs: Candidate[]) => songs.filter((s) => !this.#told.has(kind + s.uri));
-    const news = { liked: fresh("liked:", this.#liked), skipped: fresh("skipped:", this.#skippedSongs) };
+    return { liked: fresh("liked:", this.#liked), skipped: fresh("skipped:", this.#skippedSongs) };
+  }
+
+  /** The model answered with these in mind: later prompts leave them out. */
+  #toldOf(news: Reactions) {
     for (const s of news.liked) this.#told.add("liked:" + s.uri);
     for (const s of news.skipped) this.#told.add("skipped:" + s.uri);
-    return news;
   }
 
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
@@ -1254,9 +1293,10 @@ class Dj {
 
   #trackChanged(run: number, uri: string | null) {
     const prev = this.#lastUri ? this.#isDjSong(this.#lastUri) : undefined;
+    // Songs the player passes through on its way back leave it be.
     const wentBack = uri !== null && uri === this.#goingBack;
-    this.#goingBack = null;
-    if (uri === this.#skipTo?.uri) this.#skipTo = null;
+    if (wentBack) this.#goingBack = null;
+    if (uri === this.#heading?.uri) this.#heading = null;
     // A DJ song left early, not by the DJ: the listener skipped it, so its artist sits out a while.
     if (prev && !wentBack && this.#lastDuration > 0 && this.#lastPos < this.#lastDuration * SKIP_SHARE && !this.#heldMusic) {
       for (const a of prev.artists) this.#skippedArtists.add(a);
@@ -1265,6 +1305,8 @@ class Dj {
     }
     if (!uri) return;
     const song = this.#isDjSong(uri);
+    // Gone back to: whatever Next left it, the listener wants it after all.
+    if (wentBack && song) this.#forgive(song);
     if (!song) {
       // The listener's own pick is heard, under the voice, not held silent for the DJ's talk.
       if (this.#level === 0) {
@@ -1283,6 +1325,14 @@ class Dj {
     rememberPlayed(uri);
     const next = this.upNext;
     if (next && next.songs.some((s) => s.uri === uri)) this.#advance(run, next);
+  }
+
+  /** Takes back a skip of `song`. */
+  #forgive(song: Candidate) {
+    if (!this.#skippedSongs.some((s) => s.uri === song.uri)) return;
+    this.#skippedSongs = this.#skippedSongs.filter((s) => s.uri !== song.uri);
+    for (const a of song.artists) if (!this.#skippedSongs.some((s) => s.artists.includes(a))) this.#skippedArtists.delete(a);
+    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips = Math.max(0, this.#setSkips - 1);
   }
 
   /** A new set's song came up: it's the current set now, and the next one gets picked. */
@@ -1313,7 +1363,7 @@ class Dj {
     this.#setEnds = false;
     this.#repick = false;
     this.#setLiked = [];
-    this.#skipTo = null;
+    this.#heading = null;
     this.#lastVocals = null;
     // A set picked as it goes knows its last song, and readies the next set, only once that song is under way.
     if (set.live) return;
@@ -1409,7 +1459,11 @@ class Dj {
   }
 
   /** Adds the next set to Spotify's queue, so it can follow the last song without a gap. */
-  async #queue(run: number, set: DjSet) {
+  #queue(run: number, set: DjSet) {
+    this.#queuing = this.#queueSongs(run, set);
+  }
+
+  async #queueSongs(run: number, set: DjSet) {
     this.#queued = "pending";
     const device = session.device?.device_id;
     try {
