@@ -10,6 +10,7 @@
 pub mod engine;
 pub mod install;
 pub mod manifest;
+pub mod secrets;
 pub mod speaker;
 pub mod voice;
 
