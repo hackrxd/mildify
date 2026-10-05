@@ -314,7 +314,7 @@ async fn dj_configure(
         cfg.save(&state.paths.config_file)?;
         (old, cfg.dj.clone())
     };
-    if old != new {
+    if !old.same_engine(&new) {
         // What's downloading may not be what's needed any more; partial downloads are kept.
         state.dj.cancel_install();
         state.dj.release().await;
@@ -374,8 +374,18 @@ async fn dj_generate(
 /// never comes back to the UI; the status says only whether one is saved.
 #[tauri::command]
 async fn dj_set_key(state: State<'_, AppState>, provider: String, key: Option<String>) -> Result<dj::DjStatus> {
-    state.dj.set_key(&provider, key.as_deref())?;
-    Ok(state.dj.status(&state.config().dj))
+    let saved = state.dj.set_key(&provider, key).await?;
+    let cfg = {
+        let mut cfg = state.config.lock().unwrap();
+        if saved {
+            cfg.dj.api_keys.insert(provider);
+        } else {
+            cfg.dj.api_keys.remove(&provider);
+        }
+        cfg.save(&state.paths.config_file)?;
+        cfg.dj.clone()
+    };
+    Ok(state.dj.status(&cfg))
 }
 
 /// What the DJ's model can find out about songs it's choosing from, before it picks.
