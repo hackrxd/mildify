@@ -301,7 +301,7 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
             Err(e) => log::info!("DJ: no artist metadata for {uri}: {e}"),
         }
     }
-    Ok((info, isrc, artist_id.map(|a| a.to_base62())))
+    Ok((info, isrc, artist_id.map(|a| a.to_id())))
 }
 
 fn non_empty(s: &str) -> Option<String> {
