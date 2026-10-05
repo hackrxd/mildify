@@ -544,14 +544,17 @@ impl Dj {
     /// user to unlock it.
     async fn key(&self, provider: &str) -> Result<String> {
         let (keys, p) = (self.keys.clone(), provider.to_owned());
+        let name = api(provider).name();
         let key = tokio::task::spawn_blocking(move || keys.get(&p))
             .await
-            .map_err(|e| AppError::Other(format!("Couldn't read the keychain: {e}")))?;
+            .map_err(|e| AppError::Other(format!("Couldn't read the keychain: {e}")))?
+            .map_err(|e| {
+                AppError::Other(format!(
+                    "Couldn't read your {name} API key from the keychain ({e}). If it's locked, unlock it and try again."
+                ))
+            })?;
         key.ok_or_else(|| {
-            AppError::Other(format!(
-                "Your {} API key isn't in the keychain any more. Add it again in Settings → AI DJ.",
-                api(provider).name()
-            ))
+            AppError::Other(format!("Your {name} API key isn't in the keychain any more. Add it again in Settings → AI DJ."))
         })
     }
 

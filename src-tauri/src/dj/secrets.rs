@@ -123,24 +123,23 @@ impl Keys {
         format!("dj-{provider}")
     }
 
-    /// The key for `provider`, if one is saved. This may wait on the keychain, which may ask the user to unlock
-    /// it: call it off the async runtime's workers.
-    pub fn get(&self, provider: &str) -> Option<String> {
+    /// The key for `provider`, if one is saved; an error when the keychain couldn't be read (locked, or its
+    /// service not up). This may wait on the keychain, which may ask the user to unlock it: call it off the async
+    /// runtime's workers.
+    pub fn get(&self, provider: &str) -> std::result::Result<Option<String>, String> {
         let saves = match self.known(provider) {
-            Ok(known) => return known,
+            Ok(known) => return Ok(known),
             Err(saves) => saves,
         };
-        let key = match self.chain.get(&Self::entry(provider)) {
-            Ok(Some(k)) => Some(k),
-            Ok(None) => self.read_file().remove(provider),
-            Err(e) => {
-                // Not kept: the keychain may answer next time (unlocked, or its service up by then).
-                log::warn!("DJ: couldn't read the keychain, looking in the keys file: {e}");
-                return self.read_file().remove(provider);
-            }
+        // The file has an entry only when the last save or removal couldn't reach the keychain: it wins over
+        // what the keychain still holds. An empty one is a removal.
+        let key = match self.read_file().remove(provider) {
+            Some(k) => Some(k).filter(|k| !k.is_empty()),
+            // Not kept when it fails: the keychain may answer next time (unlocked, or its service up by then).
+            None => self.chain.get(&Self::entry(provider))?,
         };
         self.remember(provider, saves, key.clone());
-        key
+        Ok(key)
     }
 
     /// The key as last read or saved; else how many saves there have been, to read it against.
@@ -164,7 +163,7 @@ impl Keys {
 
     #[cfg(test)]
     fn has(&self, provider: &str) -> bool {
-        self.get(provider).is_some()
+        matches!(self.get(provider), Ok(Some(_)))
     }
 
     /// Saves a key for `provider`, or removes it with `None` or an empty key.
@@ -181,18 +180,30 @@ impl Keys {
                 }
                 Err(e) => {
                     log::warn!("DJ: the keychain wouldn't take the key, keeping it in the keys file: {e}");
+                    // An older key there would be the wrong one; the file's wins anyway.
+                    let _ = self.chain.delete(&Self::entry(provider));
                     file.insert(provider.to_owned(), k.to_owned());
                     self.write_file(&file)?;
                 }
             },
-            None => {
-                if let Err(e) = self.chain.delete(&Self::entry(provider)) {
-                    log::warn!("DJ: couldn't remove the key from the keychain: {e}");
+            None => match self.chain.delete(&Self::entry(provider)) {
+                Ok(()) => {
+                    if file.remove(provider).is_some() {
+                        self.write_file(&file)?;
+                    }
                 }
-                if file.remove(provider).is_some() {
+                // A key only the file had goes from there, and stays gone whatever the keychain still holds.
+                Err(e) if file.get(provider).is_some_and(|k| !k.is_empty()) => {
+                    log::warn!("DJ: couldn't reach the keychain, removing the key from the keys file: {e}");
+                    file.insert(provider.to_owned(), String::new());
                     self.write_file(&file)?;
                 }
-            }
+                Err(e) => {
+                    return Err(AppError::Other(format!(
+                        "Couldn't remove the key from the keychain: {e}. If it's locked, unlock it and try again."
+                    )))
+                }
+            },
         }
         let mut cache = self.cache.lock().unwrap();
         let slot = cache.entry(provider.to_owned()).or_default();
@@ -254,6 +265,8 @@ mod tests {
         broken: bool,
         /// Reads fail while this is set, as a locked keychain's do.
         locked: std::sync::atomic::AtomicBool,
+        /// Saves and removals fail while this is set, as when the user turns down the keychain's prompt.
+        refusing: std::sync::atomic::AtomicBool,
         reads: Mutex<u32>,
     }
 
@@ -266,13 +279,16 @@ mod tests {
             Ok(self.entries.lock().unwrap().get(name).cloned())
         }
         fn set(&self, name: &str, secret: &str) -> std::result::Result<(), String> {
-            if self.broken {
+            if self.broken || self.refusing.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err("no secret service".into());
             }
             self.entries.lock().unwrap().insert(name.into(), secret.into());
             Ok(())
         }
         fn delete(&self, name: &str) -> std::result::Result<(), String> {
+            if self.refusing.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("the user said no".into());
+            }
             self.entries.lock().unwrap().remove(name);
             Ok(())
         }
@@ -293,7 +309,7 @@ mod tests {
         assert!(!path.exists());
         // A fresh start reads it back from the keychain.
         let again = Keys::with(Box::new(chain.clone()), path.clone());
-        assert_eq!(again.get("openai").as_deref(), Some("sk-test"));
+        assert_eq!(again.get("openai").unwrap().as_deref(), Some("sk-test"));
         keys.set("openai", None).unwrap();
         assert!(chain.entries.lock().unwrap().is_empty());
         assert!(!keys.has("openai"));
@@ -312,7 +328,7 @@ mod tests {
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         let again = Keys::with(Box::new(chain.clone()), path.clone());
-        assert_eq!(again.get("anthropic").as_deref(), Some("sk-ant"));
+        assert_eq!(again.get("anthropic").unwrap().as_deref(), Some("sk-ant"));
         again.set("anthropic", Some("")).unwrap();
         assert!(!path.exists());
         assert!(!again.has("anthropic"));
@@ -326,10 +342,55 @@ mod tests {
         let chain = Arc::new(Fake::default());
         let keys = Keys::with(Box::new(chain.clone()), path.clone());
         // Still found in the file.
-        assert_eq!(keys.get("gemini").as_deref(), Some("old"));
+        assert_eq!(keys.get("gemini").unwrap().as_deref(), Some("old"));
         keys.set("gemini", Some("new")).unwrap();
         assert!(!path.exists());
-        assert_eq!(keys.get("gemini").as_deref(), Some("new"));
+        assert_eq!(keys.get("gemini").unwrap().as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn a_key_saved_to_the_file_wins_over_an_older_one_in_the_keychain() {
+        let chain = Arc::new(Fake::default());
+        let path = file();
+        let keys = Keys::with(Box::new(chain.clone()), path.clone());
+        keys.set("openai", Some("old")).unwrap();
+        // The keychain turns the new key down, and keeps the old one.
+        chain.refusing.store(true, std::sync::atomic::Ordering::SeqCst);
+        keys.set("openai", Some("new")).unwrap();
+        chain.refusing.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(chain.entries.lock().unwrap().get("dj-openai").map(String::as_str), Some("old"));
+        let again = Keys::with(Box::new(chain.clone()), path.clone());
+        assert_eq!(again.get("openai").unwrap().as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn removing_a_key_the_keychain_keeps_fails() {
+        let chain = Arc::new(Fake::default());
+        let keys = Keys::with(Box::new(chain.clone()), file());
+        keys.set("openai", Some("sk-test")).unwrap();
+        chain.refusing.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(keys.set("openai", None).is_err());
+        assert_eq!(keys.get("openai").unwrap().as_deref(), Some("sk-test"));
+    }
+
+    #[test]
+    fn removing_a_filed_key_keeps_it_gone_whatever_the_keychain_holds() {
+        let chain = Arc::new(Fake::default());
+        let path = file();
+        let keys = Keys::with(Box::new(chain.clone()), path.clone());
+        keys.set("openai", Some("old")).unwrap();
+        chain.refusing.store(true, std::sync::atomic::Ordering::SeqCst);
+        keys.set("openai", Some("new")).unwrap();
+        // The keychain still won't let go of the old one, but the key saved last was the file's.
+        keys.set("openai", None).unwrap();
+        assert!(!keys.has("openai"));
+        chain.refusing.store(false, std::sync::atomic::Ordering::SeqCst);
+        let again = Keys::with(Box::new(chain.clone()), path.clone());
+        assert_eq!(again.get("openai").unwrap(), None);
+        // Saving one again puts it in the keychain, and the file goes.
+        again.set("openai", Some("newer")).unwrap();
+        assert!(!path.exists());
+        assert_eq!(Keys::with(Box::new(chain.clone()), path).get("openai").unwrap().as_deref(), Some("newer"));
     }
 
     #[test]
@@ -338,9 +399,10 @@ mod tests {
         chain.entries.lock().unwrap().insert("dj-anthropic".into(), "sk-ant".into());
         chain.locked.store(true, std::sync::atomic::Ordering::SeqCst);
         let keys = Keys::with(Box::new(chain.clone()), file());
-        assert_eq!(keys.get("anthropic"), None);
+        // Not "no key": the keychain couldn't say.
+        assert!(keys.get("anthropic").is_err());
         chain.locked.store(false, std::sync::atomic::Ordering::SeqCst);
-        assert_eq!(keys.get("anthropic").as_deref(), Some("sk-ant"));
+        assert_eq!(keys.get("anthropic").unwrap().as_deref(), Some("sk-ant"));
     }
 
     #[test]
@@ -351,15 +413,15 @@ mod tests {
         let saves = keys.known("openai").unwrap_err();
         keys.set("openai", Some("sk-new")).unwrap();
         keys.remember("openai", saves, None);
-        assert_eq!(keys.get("openai").as_deref(), Some("sk-new"));
+        assert_eq!(keys.get("openai").unwrap().as_deref(), Some("sk-new"));
     }
 
     #[test]
     fn asks_the_keychain_once() {
         let chain = Arc::new(Fake::default());
         let keys = Keys::with(Box::new(chain.clone()), file());
-        keys.get("openai");
-        keys.get("openai");
+        let _ = keys.get("openai");
+        let _ = keys.get("openai");
         keys.has("openai");
         assert_eq!(*chain.reads.lock().unwrap(), 1);
     }
