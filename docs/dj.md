@@ -115,6 +115,20 @@ its start and comes in where the rest of the line fits.
 The DJ plays on this computer's built-in player. It stops when you play something else, or move the music to
 another device. Songs it already added to Spotify's queue stay there; Spotify has no way to take them out.
 
+## Asking for a set, and skipping one
+
+While the DJ is on, **Ask for the next set** on the DJ page takes a request in your own words: "something
+upbeat", "more Radiohead", "the 90s", "songs for a rainy evening". The DJ offers its model the songs from your
+listening that the request names (by artist, album, title or decade) first, then a spread of the rest for it to
+judge a mood or genre by, and the set it picks says it's your request. If the next set is already picked but not yet
+introduced, the request takes its place; once its introduction has started, the request is the set after it. Never
+mind takes a request back.
+
+**Skip this set**, beside the set playing, moves on to the next set straight away: its introduction, then its
+songs. If the next set isn't picked yet, the music waits up to 8 seconds for the model before the DJ talks from a
+template. The model hears that you skipped the last set, so it goes somewhere else, and leaving the set doesn't
+count as skipping the song that was playing.
+
 ## Telling it what to do
 
 Under **Tell your DJ** (on the DJ page and in Settings) you can write instructions, up to 1000 characters. It
