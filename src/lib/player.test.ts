@@ -274,8 +274,47 @@ describe("the embedded device", () => {
     emit({ type: "playing", uri: "spotify:track:a", position_ms: 5000 });
     emit({ type: "position", uri: "spotify:track:a", position_ms: 5060 });
     expect(player.positionNow()).toBe(5000);
+  });
+
+  it("eases in half of a position report's difference over the next second", async () => {
+    emit({ type: "playing", uri: "spotify:track:a", position_ms: 5000 });
     emit({ type: "position", uri: "spotify:track:a", position_ms: 5200 });
-    expect(player.positionNow()).toBe(5200);
+    expect(player.positionNow()).toBe(5000);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(player.positionNow()).toBe(5550);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(player.positionNow()).toBe(6100);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(player.positionNow()).toBe(6600);
+    expect(player.position).toBe(6600);
+  });
+
+  it("never runs the clock backwards for a report behind it", async () => {
+    emit({ type: "playing", uri: "spotify:track:a", position_ms: 5000 });
+    emit({ type: "position", uri: "spotify:track:a", position_ms: 4000 });
+    let last = player.positionNow();
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(50);
+      const now = player.positionNow();
+      expect(now).toBeGreaterThanOrEqual(last);
+      last = now;
+    }
+    expect(last).toBe(5500);
+  });
+
+  it("jumps to a position report far off its clock", () => {
+    emit({ type: "playing", uri: "spotify:track:a", position_ms: 5000 });
+    emit({ type: "position", uri: "spotify:track:a", position_ms: 9000 });
+    expect(player.positionNow()).toBe(9000);
+  });
+
+  it("drops an unfinished correction when the position is set", async () => {
+    emit({ type: "playing", uri: "spotify:track:a", position_ms: 5000 });
+    emit({ type: "position", uri: "spotify:track:a", position_ms: 5400 });
+    await vi.advanceTimersByTimeAsync(500);
+    emit({ type: "seeked", uri: "spotify:track:a", position_ms: 20_000 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(player.positionNow()).toBe(21_000);
   });
 
   it("trusts a local pause over a stale poll for 2.5 s", async () => {

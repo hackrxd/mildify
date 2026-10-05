@@ -30,6 +30,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Periodic position reports closer than this to our running clock are just jitter. */
 const LOCAL_RESYNC_THRESHOLD_MS = 80;
+/**
+ * Reports further off than this mean the clock is wrong, not noisy: it jumps to them. Closer ones are
+ * eased in, half the difference over the next report interval, since each is an estimate of how much
+ * audio the output still holds: on Linux the output takes it in bursts, which throws the estimate off by
+ * a hundred ms or more either way. Jumping to every one moved the lyrics back and forth once a second.
+ */
+const LOCAL_JUMP_MS = 1000;
+const LOCAL_EASE_MS = 1000;
+const LOCAL_EASE_SHARE = 0.5;
 
 function fromWebTrack(t: Track): NowPlaying {
   const images = t.album?.images ?? (t as unknown as { images?: [] }).images;
@@ -60,19 +69,27 @@ class Player {
 
   #positionMs = $state(0);
   #positionAt = $state(0);
+  /** A correction being eased in from `#easeAt` (see `LOCAL_JUMP_MS`). */
+  #easeMs = $state(0);
+  #easeAt = $state(0);
   #now = $state(performance.now());
   #lastLocalEvent = -Infinity;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #backoffUntil = 0;
 
-  position = $derived.by(() => {
-    const p = this.isPlaying ? this.#positionMs + (this.#now - this.#positionAt) : this.#positionMs;
-    return Math.max(0, Math.min(p, this.track?.durationMs ?? p));
-  });
+  position = $derived.by(() => this.#at(this.#now));
 
   /** Position interpolated to this instant (for per-frame consumers like the lyrics renderer). */
   positionNow(): number {
-    const p = this.isPlaying ? this.#positionMs + (performance.now() - this.#positionAt) : this.#positionMs;
+    return this.#at(performance.now());
+  }
+
+  #at(t: number): number {
+    let p = this.#positionMs;
+    if (this.isPlaying) {
+      const eased = Math.min(1, Math.max(0, (t - this.#easeAt) / LOCAL_EASE_MS));
+      p += t - this.#positionAt + this.#easeMs * eased;
+    }
     return Math.max(0, Math.min(p, this.track?.durationMs ?? p));
   }
 
@@ -98,6 +115,14 @@ class Player {
     this.#positionMs = ms;
     this.#positionAt = performance.now();
     this.#now = this.#positionAt;
+    this.#easeMs = 0;
+  }
+
+  /** Moves the clock `ms` over the next `LOCAL_EASE_MS`, from wherever it is now. */
+  #ease(ms: number) {
+    this.#setPosition(this.positionNow());
+    this.#easeMs = ms;
+    this.#easeAt = this.#positionAt;
   }
 
   refreshSoon(ms = 600) {
@@ -183,9 +208,12 @@ class Player {
       case "seeked":
         this.#setPosition(ev.position_ms);
         break;
-      case "position":
-        if (Math.abs(this.positionNow() - ev.position_ms) > LOCAL_RESYNC_THRESHOLD_MS) this.#setPosition(ev.position_ms);
+      case "position": {
+        const off = ev.position_ms - this.positionNow();
+        if (Math.abs(off) > LOCAL_JUMP_MS) this.#setPosition(ev.position_ms);
+        else if (Math.abs(off) > LOCAL_RESYNC_THRESHOLD_MS) this.#ease(off * LOCAL_EASE_SHARE);
         break;
+      }
       case "stopped":
         // Usually means playback was transferred away from us.
         this.isPlaying = false;
