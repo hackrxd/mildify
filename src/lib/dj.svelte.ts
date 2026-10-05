@@ -20,6 +20,11 @@ import {
   nextSegment,
   readAnswer,
   segmentMessages,
+  lookUpMessages,
+  lookUpsAsked,
+  lookUpTool,
+  songFacts,
+  type SegmentAsk,
   segmentSchema,
   type Candidate,
   type Listening,
@@ -43,6 +48,7 @@ const INSTRUCTIONS_KEY = "nativify:djInstructions";
 const OVER_START_KEY = "nativify:djOverStart";
 const OVER_END_KEY = "nativify:djOverEnd";
 const LIVE_KEY = "nativify:djLive";
+const NAME_ALL_KEY = "nativify:djNameAll";
 const PLAYED_KEY = "nativify:djPlayed";
 /** Songs the DJ played this recently aren't picked again in a new session. */
 const PLAYED_MEMORY_MS = 3 * 24 * 60 * 60 * 1000;
@@ -324,6 +330,8 @@ class Dj {
   overEnd = $state(load(OVER_END_KEY, true, (raw) => raw !== "false"));
   /** Settings → AI DJ: pick each song while the one before it plays, so likes and skips change what's next. */
   live = $state(load(LIVE_KEY, false, (raw) => raw === "true"));
+  /** Settings → AI DJ: the DJ may name every song in the set, not just the first. */
+  nameAll = $state(load(NAME_ALL_KEY, false, (raw) => raw === "true"));
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
@@ -513,6 +521,11 @@ class Dj {
   setLive(on: boolean) {
     this.live = on;
     persist(LIVE_KEY, on ? "true" : null);
+  }
+
+  setNameAll(on: boolean) {
+    this.nameAll = on;
+    persist(NAME_ALL_KEY, on ? "true" : null);
   }
 
   /** ms into the line the DJ is speaking, per frame, for captions. */
@@ -714,7 +727,7 @@ class Dj {
       if (run !== this.#run) return;
       this.#played = new Set(playedLately().keys());
       this.activity = "Picking your first songs…";
-      const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS);
+      const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS, true);
       if (run !== this.#run) return;
       if (!first) {
         throw new Error("There isn't enough in your listening for the DJ yet. Play and like some songs, then try again.");
@@ -819,7 +832,7 @@ class Dj {
   }
 
   /** Picks a set, asks the model for its talk (or uses a template), and reads it aloud. */
-  async #prepare(run: number, previous: Candidate | null, timeoutMs: number): Promise<DjSet | null> {
+  async #prepare(run: number, previous: Candidate | null, timeoutMs: number, opening = false): Promise<DjSet | null> {
     const avoid = { played: this.#played, skippedArtists: this.#skippedArtists };
     let segment = nextSegment(this.#segments, this.#pool, avoid);
     if (!segment && this.#played.size) {
@@ -834,12 +847,35 @@ class Dj {
     let pick: Pick | null = null;
     const live = this.live;
     const reactions = live ? this.#news() : undefined;
+    const ask: SegmentAsk = {
+      segment,
+      choices,
+      listener,
+      previous: prev,
+      instructions: this.instructions,
+      opening,
+      setNumber: this.#setIds + 1,
+      earlier: this.said.slice(-2).map((s) => s.talk),
+      nameAll: this.nameAll,
+      live,
+      reactions,
+    };
+    // Given up on (too slow, or the music can't wait): what's still on its way isn't asked for.
+    let gaveUp = false;
     try {
-      const messages = segmentMessages({ segment, choices, listener, previous: prev, instructions: this.instructions, live, reactions });
-      const answer = await this.#rushable(backend.djGenerate(messages, segmentSchema(choices.length), 300), timeoutMs);
+      const answer = await this.#rushable(
+        (async () => {
+          // A model that can call tools may look some of the songs up first.
+          const lookedUp = this.status?.tools ? await this.#lookUp(ask) : undefined;
+          if (gaveUp || run !== this.#run) throw new Error("given up");
+          return backend.djGenerate(segmentMessages({ ...ask, lookedUp }), segmentSchema(choices.length), 300);
+        })(),
+        timeoutMs,
+      );
       pick = readAnswer(answer, choices, segment);
       if (!pick) console.warn("DJ: the model's answer wasn't usable", answer);
     } catch (e) {
+      gaveUp = true;
       console.warn("DJ: no answer from the model, talking from a template:", e);
     }
     if (run !== this.#run) return null;
@@ -870,6 +906,28 @@ class Dj {
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
+  /** Lets the model ask about some of the songs before it picks; what was found, as lines for the prompt. Nothing
+   * found, or no look-up, goes on without. */
+  async #lookUp(ask: SegmentAsk): Promise<string[] | undefined> {
+    try {
+      const answer = await backend.djLookUp(lookUpMessages(ask), [lookUpTool(ask.choices.length)], 300);
+      const asked = lookUpsAsked(answer.calls, ask.choices);
+      if (!asked.length) return undefined;
+      const found = await backend.djSongInfo(
+        asked.map((c) => ({ uri: c.uri, name: c.name, artist: c.artists[0] ?? "", artist_id: c.artistIds?.[0] ?? null })),
+      );
+      const byUri = new Map(found.map((info) => [info.uri, info]));
+      const lines = asked.flatMap((c) => {
+        const info = byUri.get(c.uri);
+        return info ? [songFacts(ask.choices.indexOf(c) + 1, c, info)] : [];
+      });
+      return lines.length ? lines : undefined;
+    } catch (e) {
+      console.warn("DJ: couldn't look songs up, picking without:", e);
+      return undefined;
+    }
+  }
+
   #rushable<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("the model took too long")), timeoutMs);

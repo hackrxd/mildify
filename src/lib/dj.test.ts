@@ -12,6 +12,8 @@ const backend = vi.hoisted(() => ({
   djRemove: vi.fn(),
   djWarm: vi.fn(async () => {}),
   djGenerate: vi.fn(),
+  djLookUp: vi.fn(),
+  djSongInfo: vi.fn(),
   djSpeak: vi.fn(),
   djVoice: vi.fn(async (_command: unknown) => {}),
   djDuck: vi.fn(async () => {}),
@@ -255,6 +257,104 @@ async function started() {
   expect(dj.upNext).not.toBeNull();
   return first;
 }
+
+describe("what the DJ is asked", () => {
+  const lastPrompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0];
+
+  it("says hello at the opening, then carries on the show with what it said before", async () => {
+    const first = await started();
+    const [opening] = backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]];
+    expect(opening[1].content).toContain("greet the listener first");
+    const [system, user] = lastPrompt();
+    expect(user.content).toContain("This is set 2 of the show, already under way.");
+    expect(user.content).toContain(`What you said before: "${first.talk}"`);
+    expect(user.content).not.toContain("greet the listener");
+    expect(system.content).toContain("Don't greet the listener");
+    expect(system.content).toContain("Name only that first song");
+  });
+
+  it("lets the DJ name every song when the listener allows it", async () => {
+    dj.setNameAll(true);
+    expect(localStorage.getItem("nativify:djNameAll")).toBe("true");
+    await started();
+    expect(lastPrompt()[0].content).not.toContain("Name only that first song");
+  });
+
+  describe("with a model that can look songs up", () => {
+    const info = (uri: string) => ({
+      uri,
+      genres: ["synth-pop"],
+      tags: [],
+      released: "2011-09-30",
+      label: "Mute",
+      album: null,
+      album_type: null,
+      popularity: null,
+      languages: [],
+      artist_bio: null,
+      artist_active: null,
+      related_artists: [],
+    });
+    beforeEach(() => {
+      dj.status = { ...readyStatus, tools: true };
+      backend.djLookUp.mockImplementation(async () => ({ calls: [{ name: "look_up_songs", arguments: { songs: [2, 2, 1] } }] }));
+      backend.djSongInfo.mockImplementation(async (songs: { uri: string }[]) => songs.map((s) => info(s.uri)));
+    });
+
+    it("looks up the songs it asks about, and picks knowing what was found", async () => {
+      await started();
+      expect(backend.djLookUp).toHaveBeenCalled();
+      const [messages, tools] = backend.djLookUp.mock.calls[0] as unknown as [{ content: string }[], { name: string }[]];
+      expect(messages[1].content).toContain("look_up_songs");
+      expect(tools[0].name).toBe("look_up_songs");
+      const [songs] = backend.djSongInfo.mock.calls[0] as unknown as [{ uri: string; name: string; artist: string; artist_id: string }[]];
+      expect(songs.map((s) => s.name)).toHaveLength(2);
+      expect(songs[0].artist_id).toMatch(/^a\d+$/);
+      expect(songs[0].artist).toMatch(/^Artist \d+$/);
+      const [, user] = (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0];
+      expect(user.content).toContain("What you looked up:");
+      expect(user.content).toMatch(/\n2\. Song \d+ by Artist \d+: genres synth-pop; released 2011-09-30 on Mute/);
+      expect(dj.said[0].byModel).toBe(true);
+    });
+
+    it("picks without look-ups when the model doesn't want any", async () => {
+      backend.djLookUp.mockImplementation(async () => ({ text: "I know these." }));
+      const first = await started();
+      expect(backend.djSongInfo).not.toHaveBeenCalled();
+      expect(lastPrompt()[1].content).not.toContain("What you looked up");
+      expect(first.byModel).toBe(true);
+    });
+
+    it("picks without look-ups when they fail", async () => {
+      backend.djSongInfo.mockRejectedValue(new Error("offline"));
+      const first = await started();
+      expect(backend.djSongInfo).toHaveBeenCalled();
+      expect(lastPrompt()[1].content).not.toContain("What you looked up");
+      expect(first.byModel).toBe(true);
+      expect(dj.upNext?.byModel).toBe(true);
+    });
+
+    it("talks from a template, and asks nothing more, when the music can't wait for a look-up", async () => {
+      player.isPlaying = false;
+      // The look-up answers, but only once the DJ has stopped waiting.
+      backend.djLookUp.mockImplementation(
+        () => new Promise((r) => setTimeout(() => r({ calls: [] }), mod.OPENING_TIMEOUT_MS + 5)),
+      );
+      const asked = backend.djGenerate.mock.calls.length;
+      const starting = dj.start();
+      await vi.advanceTimersByTimeAsync(mod.OPENING_TIMEOUT_MS + 10);
+      await starting;
+      expect(backend.djGenerate.mock.calls.length).toBe(asked);
+      expect(dj.said[0]?.byModel ?? dj.upNext?.byModel).toBe(false);
+    });
+  });
+
+  it("doesn't offer look-ups to a model that can't do them", async () => {
+    await started();
+    expect(backend.djLookUp).not.toHaveBeenCalled();
+    expect(backend.djSongInfo).not.toHaveBeenCalled();
+  });
+});
 
 describe("the voice", () => {
   let v: InstanceType<typeof mod.Voice>;
