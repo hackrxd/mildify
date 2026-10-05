@@ -113,9 +113,11 @@ as it goes") a set keeps the model's picks as `plan` and grows song by song (a n
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
 picked only as the last song starts. Only songs a set was started with sit behind the player, so Next and
 Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving. `dj.request(text)` makes the next set a
-requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet introduced (its queue cleared, its
-plan dropped by `#replan`, a set still being picked ignored through `#prepareGen`); `dj.skipSet()` holds the music
-and plays the next set now, or waits `SKIP_WAIT_MS` for one before rushing to a template.
+requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet introduced (its queue cleared after
+what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
+through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
+playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
+names).
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
