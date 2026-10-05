@@ -38,6 +38,11 @@ Small edits to otherwise verbatim files:
 | `src/utils/Lyrics/Global/Applyer.ts` | A "sign in to the lyrics service" notice; the footer linking upstream's Discord is removed (it's upstream's support channel, not this port's) |
 | `src/utils/Lyrics/Applyer/Credits/ApplyIsByCommunity.tsx` | Uploader/maker links use the profile `url` from the public API, as its attribution terms require |
 
+Taken from a later upstream commit, `9136b03` (2026-09-27, "Cut per-frame compositor work while lyrics
+animate"): `src/css/Lyrics/Mixed.css` and `src/utils/Lyrics/Animator/Lyrics/LyricsAnimator.ts` are
+upstream's files at that commit, unmodified. Before it every word on the page was its own compositor
+layer, a few hundred of them, which WebKitGTK composites every frame while the lyrics animate.
+
 Additions: `src/components/Pages/PageState.ts` holds the page element outside an import cycle.
 Upstream's esbuild bundle rewrites top-level `let` to `var`, which hides a temporal-dead-zone
 read; native ES modules (Vite) don't, so the binding lives in a module with no imports.
