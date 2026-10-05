@@ -7,6 +7,10 @@ import {
   fallbackPick,
   INSTRUCTIONS_MAX,
   kinship,
+  LOOK_UP_MAX,
+  lookUpMessages,
+  lookUpsAsked,
+  lookUpTool,
   MAX_CHOICES,
   nextInSet,
   nextSegment,
@@ -17,6 +21,7 @@ import {
   SET_MAX,
   shuffled,
   SKIPS_TO_MOVE_ON,
+  songFacts,
   type Candidate,
   type Listening,
   type SetSoFar,
@@ -293,11 +298,114 @@ describe("segmentMessages", () => {
     expect(plain.content).not.toContain("Name only the first song");
   });
 
+  it("carries on the show after the opening: no new hello, and nothing it said before again", () => {
+    const [system, user] = segmentMessages({
+      segment: seg("throwbacks"),
+      choices,
+      listener: "Sam",
+      previous: { name: "Midnight City", artists: ["M83"] },
+      instructions: "",
+      setNumber: 3,
+      earlier: ["Hey Sam, welcome to the show.", "That was a good one. Next up, some favorites.", "Here's Song 9."],
+      now: NOW,
+    });
+    expect(user.content).toContain("This is set 3 of the show, already under way.");
+    expect(user.content).toContain('coming out of "Midnight City" by M83');
+    expect(user.content).toContain('What you said before: "That was a good one. Next up, some favorites." Then: "Here\'s Song 9."');
+    expect(user.content).not.toContain("welcome to the show");
+    expect(user.content).not.toContain("greet the listener");
+    expect(user.content).not.toContain("name is Sam");
+    expect(system.content).toContain("Don't greet the listener, welcome them or open the show again");
+    // The opening is where it says hello.
+    const [opening] = segmentMessages({ segment: seg("onRepeat"), choices, listener: "Sam", previous: null, instructions: "", now: NOW });
+    expect(opening.content).not.toContain("Don't greet");
+  });
+
+  it("names only the first song unless it's allowed to name them all", () => {
+    const ask = { segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW };
+    const [system] = segmentMessages(ask);
+    expect(system.content).toContain("Name only that first song. Don't read out the rest of the set");
+    const [all] = segmentMessages({ ...ask, nameAll: true });
+    expect(all.content).not.toContain("Name only that first song");
+  });
+
+  it("gives what was looked up beside the list", () => {
+    const [, user] = segmentMessages({
+      segment: seg("onRepeat"),
+      choices,
+      listener: null,
+      previous: null,
+      instructions: "",
+      lookedUp: ["2. Song 1 by Artist 1: genres synth-pop"],
+      now: NOW,
+    });
+    expect(user.content).toContain("What you looked up:\n2. Song 1 by Artist 1: genres synth-pop");
+    expect(user.content.indexOf("What you looked up")).toBeGreaterThan(user.content.indexOf("4. Song 3"));
+  });
+
   it("passes on the listener's instructions, fenced and capped", () => {
     const long = "Talk like a pirate. " + "x".repeat(INSTRUCTIONS_MAX * 2);
     const [system] = segmentMessages({ segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: `  ${long}  `, now: NOW });
     expect(system.content).toContain('"""\nTalk like a pirate.');
     expect(system.content.length).toBeLessThan(3000);
+  });
+});
+
+describe("looking songs up", () => {
+  const choices = candidates(6, ["onRepeat"]);
+  const ask = { segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW };
+
+  it("offers a tool for up to five of the numbered songs", () => {
+    const tool = lookUpTool(choices.length);
+    expect(tool.name).toBe("look_up_songs");
+    const songs = (tool.parameters as { properties: { songs: { maxItems: number; items: { maximum: number } } } }).properties.songs;
+    expect(songs.maxItems).toBe(LOOK_UP_MAX);
+    expect(songs.items.maximum).toBe(6);
+  });
+
+  it("asks which songs to look up, with the same list, before asking for the picks", () => {
+    const [system, user] = lookUpMessages({ ...ask, lookedUp: ["1. stale"] });
+    expect(system.content).toContain("radio DJ");
+    expect(user.content).toContain("6. Song 5 by Artist 5");
+    expect(user.content).toContain("look up to 5 of these songs with look_up_songs");
+    expect(user.content).not.toContain("Answer in JSON");
+    expect(user.content).not.toContain("stale");
+  });
+
+  it("reads which songs the model asked about, without repeats or strays", () => {
+    const calls = [
+      { name: "look_up_songs", arguments: { songs: [2, 2, 9, "3", 1.5, 4] } },
+      { name: "something_else", arguments: { songs: [5] } },
+      { name: "look_up_songs", arguments: { songs: [1, 3, 5, 6] } },
+      { name: "look_up_songs", arguments: null },
+    ];
+    expect(lookUpsAsked(calls, choices).map((c) => c.name)).toEqual(["Song 1", "Song 3", "Song 0", "Song 2", "Song 4"]);
+    expect(lookUpsAsked(undefined, choices)).toEqual([]);
+  });
+
+  it("puts what was found into one line per song", () => {
+    const info = {
+      uri: choices[1].uri,
+      genres: ["synth-pop", "electronic"],
+      tags: ["80s"],
+      released: "2011-09-30",
+      label: "Mute",
+      album: "Hurry Up, We're Dreaming",
+      album_type: "album",
+      popularity: 23,
+      languages: ["en"],
+      artist_bio: "French electronic band.",
+      artist_active: "since 2001",
+      related_artists: ["Air", "Justice"],
+    };
+    expect(songFacts(2, choices[1], info)).toBe(
+      '2. Song 1 by Artist 1: genres synth-pop, electronic; tagged 80s; released 2011-09-30 on Mute; from the album ' +
+        '"Hurry Up, We\'re Dreaming"; a lesser-known track (popularity 23 of 100); sung in en; artist active since 2001; ' +
+        "for fans of Air, Justice; about the artist: French electronic band.",
+    );
+    const empty = { ...info, genres: [], tags: [], released: null, label: null, album: null, album_type: null, popularity: null, languages: [], artist_bio: null, artist_active: null, related_artists: [] };
+    expect(songFacts(1, choices[0], empty)).toBe("1. Song 0 by Artist 0: nothing more found");
+    expect(songFacts(1, choices[0], { ...empty, popularity: 81 })).toContain("a big hit (popularity 81 of 100)");
   });
 });
 
