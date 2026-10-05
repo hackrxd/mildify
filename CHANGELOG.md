@@ -14,6 +14,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   the artist's story, from Spotify, and from MusicBrainz if you allow it. Cloud models and Qwen3 4B do this, and so
   can your own model server if you say its model supports it.
 - "Let the DJ name every song in a set", in Settings → AI DJ.
+- Ask the DJ for its next set in your own words ("something upbeat", "more Radiohead", "the 90s") on the DJ page,
+  and skip the rest of a set you aren't feeling with "Skip this set".
 
 ### Changed
 
