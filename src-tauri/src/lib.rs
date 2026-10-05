@@ -355,16 +355,33 @@ async fn dj_warm(state: State<'_, AppState>) -> Result<()> {
     state.dj.warm(&state.config().dj).await
 }
 
-/// Asks the DJ's model; with a JSON schema, the answer is JSON that fits it.
+/// Asks the DJ's model: with a JSON schema, for JSON that fits it; offered tools, for the calls it wants to
+/// make before answering.
 #[tauri::command]
 async fn dj_generate(
     state: State<'_, AppState>,
-    messages: Vec<dj::engine::Message>,
+    messages: Vec<dj::chat::Message>,
     schema: Option<Value>,
+    tools: Option<Vec<dj::chat::Tool>>,
     max_tokens: Option<u32>,
-) -> Result<Value> {
+) -> Result<dj::chat::Answer> {
     let cfg = state.config().dj;
-    state.dj.generate(&cfg, &messages, schema.as_ref(), max_tokens.unwrap_or(400).min(2000)).await
+    let max_tokens = max_tokens.unwrap_or(400).min(2000);
+    state.dj.generate(&cfg, &messages, schema.as_ref(), tools.as_deref(), max_tokens).await
+}
+
+/// Saves the API key for a cloud model provider in the system keychain, or removes it with `None`. The key
+/// never comes back to the UI; the status says only whether one is saved.
+#[tauri::command]
+async fn dj_set_key(state: State<'_, AppState>, provider: String, key: Option<String>) -> Result<dj::DjStatus> {
+    state.dj.set_key(&provider, key.as_deref())?;
+    Ok(state.dj.status(&state.config().dj))
+}
+
+/// The models a cloud provider offers with the saved key.
+#[tauri::command]
+async fn dj_models(state: State<'_, AppState>, provider: String) -> Result<Vec<dj::chat::ModelChoice>> {
+    state.dj.models(&provider).await
 }
 
 /// Reads a line in the DJ's voice; `dj_voice` plays it.
@@ -533,6 +550,8 @@ pub fn run() {
             dj_remove,
             dj_warm,
             dj_generate,
+            dj_set_key,
+            dj_models,
             dj_speak,
             dj_voice,
             dj_duck,
