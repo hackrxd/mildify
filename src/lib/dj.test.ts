@@ -693,6 +693,90 @@ describe("asking for a set, and skipping one", () => {
     expect(log.filter((l) => l.startsWith("add") || l === "clear_queue")).toEqual([...adds(old).slice(0, 1), "clear_queue", ...adds(asked)]);
   });
 
+  it("gives the model its few seconds when a set is skipped near the end of its last song", async () => {
+    const first = await started();
+    await playing(first.songs[first.songs.length - 1].uri, DURATION - 20_000);
+    await vi.advanceTimersByTimeAsync(0);
+    backend.djGenerate.mockImplementationOnce(
+      () => new Promise((r) => setTimeout(() => r({ name: "Worth the wait", songs: [1, 2, 3], talk: "Here's something else." }), 3000)),
+    );
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(dj.said.at(-1)?.name).toBe("Worth the wait");
+    expect(dj.said.at(-1)?.byModel).toBe(true);
+  });
+
+  it("skips once: a second press while it picks doesn't start over", async () => {
+    const first = await started();
+    await playing(first.songs[0].uri, 30_000);
+    backend.djGenerate.mockImplementationOnce(
+      () => new Promise((r) => setTimeout(() => r({ name: "Worth the wait", songs: [1, 2, 3], talk: "Here's something else." }), 6000)),
+    );
+    const asked = backend.djGenerate.mock.calls.length;
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(5000);
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(backend.djGenerate.mock.calls.length).toBe(asked + 1);
+    expect(dj.said.at(-1)?.name).toBe("Worth the wait");
+  });
+
+  it("Next while it picks after a skip stops waiting for the model; Previous goes nowhere", async () => {
+    const first = await started();
+    await playing(first.songs[0].uri, 30_000);
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(dj.onAir).toBeNull();
+    await dj.previous();
+    expect(player.prev).not.toHaveBeenCalled();
+    dj.skipTalk();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.next).not.toHaveBeenCalled();
+    expect(dj.onAir).not.toBeNull();
+    expect(dj.said.at(-1)?.byModel).toBe(false);
+  });
+
+  it("takes a set it's still queueing back out of the queue when Next starts it with a play request", async () => {
+    const first = await started();
+    const log: string[] = [];
+    backend.device.mockImplementation(async (c: unknown) => void log.push((c as { action: string }).action));
+    sp.addToQueue.mockImplementation((uri: string) => {
+      log.push(`add ${uri}`);
+      return new Promise((r) => setTimeout(() => r(null), 1000));
+    });
+    await playing(first.songs[1].uri, 0);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    await tick();
+    const next = dj.upNext!;
+    expect(log).toEqual([`add ${next.songs[0].uri}`]);
+    dj.skipTalk();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(log.filter((l) => l.startsWith("add") || l === "clear_queue")).toEqual([`add ${next.songs[0].uri}`, "clear_queue"]);
+  });
+
+  it("takes what made it into the queue back out when the rest of the set wouldn't go in", async () => {
+    const first = await started();
+    const log: string[] = [];
+    backend.device.mockImplementation(async (c: unknown) => void log.push((c as { action: string }).action));
+    let adds = 0;
+    sp.addToQueue.mockImplementation(async (uri: string) => {
+      log.push(`add ${uri}`);
+      if (++adds > 1) throw new Error("the queue is full");
+      return null;
+    });
+    await playing(first.songs[1].uri, 0);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    await tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(adds).toBe(2);
+    player.pos = DURATION - 500;
+    await tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(log).toContain("pause");
+    expect(log.filter((l) => l === "clear_queue")).toHaveLength(1);
+  });
+
   it("doesn't skip a set while its own talk is on", async () => {
     speechMs = 20_000;
     const first = await started();
@@ -1567,6 +1651,29 @@ describe("picking as it goes", () => {
     await playing(first.songs[1].uri, 0);
     await nextSet();
     expect(prompt()).not.toContain("They skipped");
+  });
+
+  it("tells the model about a skip again when the set that heard it is let go of", async () => {
+    const set = await liveStarted();
+    await playing(dj.current!.songs[1].uri, 0);
+    // The set picked next takes a while to read aloud, and is let go of meanwhile.
+    backend.djSpeak.mockImplementationOnce(() => new Promise(() => {}));
+    const asked = backend.djGenerate.mock.calls.length;
+    for (let i = 0; i < 10 && backend.djGenerate.mock.calls.length === asked; i++) {
+      const songs = dj.current!.songs;
+      const at = songs.findIndex((s) => s.uri === player.track?.uri);
+      if (at === songs.length - 1) await tick();
+      else {
+        await finish();
+        await playing(songs[at + 1].uri, 0);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(prompt()).toContain(`They skipped "${set.songs[0].name}"`);
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prompt()).toContain("something calm");
+    expect(prompt()).toContain(`They skipped "${set.songs[0].name}"`);
   });
 
   it("tells the model about a skip once", async () => {
