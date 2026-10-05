@@ -64,6 +64,26 @@ impl Keychain for SystemKeychain {
     }
 }
 
+/// A keychain that forgets everything when the app stops, for tests that mustn't touch the real one.
+#[cfg(test)]
+#[derive(Default)]
+pub struct Memory(Mutex<HashMap<String, String>>);
+
+#[cfg(test)]
+impl Keychain for Memory {
+    fn get(&self, name: &str) -> std::result::Result<Option<String>, String> {
+        Ok(self.0.lock().unwrap().get(name).cloned())
+    }
+    fn set(&self, name: &str, secret: &str) -> std::result::Result<(), String> {
+        self.0.lock().unwrap().insert(name.into(), secret.into());
+        Ok(())
+    }
+    fn delete(&self, name: &str) -> std::result::Result<(), String> {
+        self.0.lock().unwrap().remove(name);
+        Ok(())
+    }
+}
+
 /// The DJ's API keys, by provider id.
 pub struct Keys {
     chain: Box<dyn Keychain>,
