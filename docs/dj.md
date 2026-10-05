@@ -38,7 +38,8 @@ you do changes what comes next:
 - **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
   last one, so it can mention it.
-- **Previous** goes back to the set's song before, as it would in an album, and that doesn't count as a skip.
+- **Previous** goes back to the set's song before, as it would in an album, and that doesn't count as a skip. On a
+  set's first song, it starts the song again.
 
 The DJ takes over the queue while it plays this way: songs you queue yourself are replaced by its next pick. If you
 skip a set's last song before the next set is ready, the music waits and the DJ starts it as soon as it can,
