@@ -5,6 +5,14 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Fixed
+
+- Sung words in the lyrics no longer jitter on Linux. The playback position from Mildify's own player was
+  jumping back and forth a little about once a second, and the words being sung followed it. It now eases
+  small corrections in.
+- The lyrics animate with less work per frame: only the line being sung keeps its words on their own layers,
+  and a line's hover highlight blurs what's behind it only while hovered.
+
 ## 1.2.0 - 2026-10-04
 
 ### Added
