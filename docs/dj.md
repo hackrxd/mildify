@@ -1,7 +1,8 @@
 # The AI DJ
 
 The DJ is a radio host for your own music, in the spirit of Spotify's DJ. It plays sets of songs from your
-listening and talks between them, and both the talking and the voice are made on your computer.
+listening and talks between them. The voice is always made on your computer, and so is the talking, unless you
+have a cloud model write it ([Cloud models](#cloud-models)).
 
 It's **off by default**, and nothing of it is installed with Mildify. Turning it on (Settings → AI DJ, or
 the DJ page) downloads what it runs on, once. Turning it off stops a download and unloads the model; Settings
@@ -19,7 +20,8 @@ From these it builds segments, the way Spotify's DJ does: **On repeat**, **Your 
 **Throwbacks** (all-time favorites and songs you liked long ago), **Fresh in your library** and
 **Rediscover** (liked songs you haven't played lately). Each segment offers the model up to 14 songs, with what's
 true about each ("on repeat the last few weeks", "liked in March 2019", "explicit"). The model picks 3 to 5,
-names the segment and writes what to say. It's only allowed to use those facts, not made-up trivia.
+names the segment and writes what to say. It's only allowed to use those facts, and what it looked up
+([Looking songs up](#looking-songs-up)), not made-up trivia.
 
 Songs the DJ played in the last three days aren't picked again at the start of a session. When you skip a DJ
 song before halfway, that artist sits out the rest of the session.
@@ -46,6 +48,22 @@ skip a set's last song before the next set is ready, the music waits and the DJ 
 talking from a template if the model is still working. When the DJ stops, or you play something else, the song it
 lined up comes out of the queue again.
 
+### Looking songs up
+
+Models that can call tools look songs up before they pick: the cloud models, Qwen3 4B, and your own model server
+if you turn on **Its model can look things up**. The model is shown the songs on offer and asks about up to five
+of them; then it picks, knowing what it found. For each song it can learn:
+
+- from Spotify: when it came out and on what label, the album, how popular it is, the languages it's sung in, and
+  the artist's biography, active years and similar artists (read through the built-in player, so these need it
+  running), plus the artist's genres from the Web API,
+- from [MusicBrainz](https://musicbrainz.org), with **Look up genres on MusicBrainz** on (Settings → AI DJ, on by
+  default): the song's genres and tags. The song's title, artist and ISRC code go to musicbrainz.org, at most one
+  request a second, as MusicBrainz asks.
+
+What's found is kept for a month, so a song is looked up once. If a look-up fails or takes too long, the DJ picks
+without it. Qwen2.5 1.5B doesn't look songs up: it picks from what it's given.
+
 ## How it talks
 
 The DJ plays one set at a time. While a set plays, it prepares the next one: the model writes the line, and the
@@ -55,6 +73,11 @@ Between sets, the DJ's talk is an **item of its own**, as long as the line takes
 song: the segment's name, "Your DJ", its own progress bar and length. Play/pause pauses the DJ (and any music
 under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces. Starting
 the DJ fades out whatever was playing, so its greeting is an item of its own too.
+
+The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
+what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
+introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
+in a set** (Settings → AI DJ) lets it mention them all.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.
@@ -141,13 +164,39 @@ Enter its address and model name; nothing is downloaded for the model then. Anyt
 | llama.cpp's `llama-server` | `http://127.0.0.1:8080` | anything |
 
 The DJ asks for JSON that fits a schema. A server that ignores that still works if the model answers in JSON.
-The voice still runs on this computer.
+The voice still runs on this computer. If the model supports tool calls, turn on **Its model can look things up**
+so it can look songs up before picking.
+
+## Cloud models
+
+Under Settings → AI DJ → Language model you can pick **OpenAI**, **Anthropic** or **Google Gemini** instead.
+They usually write better than the downloaded models. You need your own API key from that provider:
+
+| Provider | Where to get a key | Models |
+| --- | --- | --- |
+| OpenAI | [platform.openai.com](https://platform.openai.com/api-keys) | the chat models your key can use |
+| Anthropic | [console.anthropic.com](https://console.anthropic.com/settings/keys) | Claude models; Claude Opus 5.5 until you pick another |
+| Google Gemini | [aistudio.google.com](https://aistudio.google.com/apikey) | Gemini models |
+
+Paste the key and press Save. It's kept in your system's keychain (macOS Keychain, Windows Credential Manager, or
+the Secret Service on Linux, such as GNOME Keyring or KWallet). Where there's no keychain, it's kept in a file in
+the app's data folder that only you can read. The key is sent only to its provider, never shown again, and
+**Remove key** deletes it. Once a key is saved, Settings lists the models it can use, newest first.
+
+What the DJ uses is billed to your account with the provider; each set is one or two short requests. Nothing is
+downloaded for a cloud model, and the voice is still made on your computer. For Anthropic's newest models, the DJ
+asks for a short think, and lets Anthropic hand a request its model declines to another model rather than fail.
+If a request fails anyway, the DJ talks from a template and says why in the log.
 
 ## Privacy
 
-The model and the voice run on your computer. Your listening, your instructions and what the DJ says never
-leave it, except to a model server you set up yourself. The local model server listens on 127.0.0.1 only,
-behind a random key, and is started with `--offline`.
+With a downloaded model, the model and the voice run on your computer. Your listening, your instructions and what
+the DJ says never leave it, except to a model server you set up yourself. The local model server listens on
+127.0.0.1 only, behind a random key, and is started with `--offline`.
+
+With a cloud model, what the DJ is asked goes to that provider: your first name, the songs it's choosing from
+with when you played or liked them, what it looked up about them, what it said before, and your instructions.
+Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ## Platforms
 
