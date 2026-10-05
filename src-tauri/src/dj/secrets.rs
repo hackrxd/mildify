@@ -67,11 +67,20 @@ impl Keychain for SystemKeychain {
 /// A keychain that forgets everything when the app stops, for tests that mustn't touch the real one.
 #[cfg(test)]
 #[derive(Default)]
-pub struct Memory(Mutex<HashMap<String, String>>);
+pub struct Memory(Mutex<HashMap<String, String>>, std::sync::atomic::AtomicUsize);
 
 #[cfg(test)]
-impl Keychain for Memory {
+impl Memory {
+    /// How many times it's been read.
+    pub fn reads(&self) -> usize {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+impl Keychain for std::sync::Arc<Memory> {
     fn get(&self, name: &str) -> std::result::Result<Option<String>, String> {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(self.0.lock().unwrap().get(name).cloned())
     }
     fn set(&self, name: &str, secret: &str) -> std::result::Result<(), String> {
@@ -90,7 +99,15 @@ pub struct Keys {
     /// Where keys go when the keychain won't take them.
     file: PathBuf,
     /// What's been read, so the keychain (which may ask the user) is asked once.
-    cache: Mutex<HashMap<String, Option<String>>>,
+    cache: Mutex<HashMap<String, Slot>>,
+}
+
+#[derive(Default)]
+struct Slot {
+    /// The key as last read or saved; `None` until then.
+    known: Option<Option<String>>,
+    /// Bumped by every save, so a read that started before it doesn't overwrite it.
+    saves: u64,
 }
 
 impl Keys {
@@ -106,21 +123,43 @@ impl Keys {
         format!("dj-{provider}")
     }
 
-    /// The key for `provider`, if one is saved.
+    /// The key for `provider`, if one is saved. This may wait on the keychain, which may ask the user to unlock
+    /// it: call it off the async runtime's workers.
     pub fn get(&self, provider: &str) -> Option<String> {
-        if let Some(known) = self.cache.lock().unwrap().get(provider) {
-            return known.clone();
-        }
+        let saves = match self.known(provider) {
+            Ok(known) => return known,
+            Err(saves) => saves,
+        };
         let key = match self.chain.get(&Self::entry(provider)) {
             Ok(Some(k)) => Some(k),
             Ok(None) => self.read_file().remove(provider),
             Err(e) => {
+                // Not kept: the keychain may answer next time (unlocked, or its service up by then).
                 log::warn!("DJ: couldn't read the keychain, looking in the keys file: {e}");
-                self.read_file().remove(provider)
+                return self.read_file().remove(provider);
             }
         };
-        self.cache.lock().unwrap().insert(provider.to_owned(), key.clone());
+        self.remember(provider, saves, key.clone());
         key
+    }
+
+    /// The key as last read or saved; else how many saves there have been, to read it against.
+    fn known(&self, provider: &str) -> std::result::Result<Option<String>, u64> {
+        let cache = self.cache.lock().unwrap();
+        let slot = cache.get(provider);
+        match slot.and_then(|s| s.known.clone()) {
+            Some(known) => Ok(known),
+            None => Err(slot.map_or(0, |s| s.saves)),
+        }
+    }
+
+    /// Keeps what a read found, unless a save landed while it waited.
+    fn remember(&self, provider: &str, saves: u64, key: Option<String>) {
+        let mut cache = self.cache.lock().unwrap();
+        let slot = cache.entry(provider.to_owned()).or_default();
+        if slot.saves == saves {
+            slot.known = Some(key);
+        }
     }
 
     pub fn has(&self, provider: &str) -> bool {
@@ -154,7 +193,10 @@ impl Keys {
                 }
             }
         }
-        self.cache.lock().unwrap().insert(provider.to_owned(), key.map(str::to_owned));
+        let mut cache = self.cache.lock().unwrap();
+        let slot = cache.entry(provider.to_owned()).or_default();
+        slot.saves += 1;
+        slot.known = Some(key.map(str::to_owned));
         Ok(())
     }
 
@@ -209,13 +251,15 @@ mod tests {
     struct Fake {
         entries: Mutex<HashMap<String, String>>,
         broken: bool,
+        /// Reads fail while this is set, as a locked keychain's do.
+        locked: std::sync::atomic::AtomicBool,
         reads: Mutex<u32>,
     }
 
     impl Keychain for Arc<Fake> {
         fn get(&self, name: &str) -> std::result::Result<Option<String>, String> {
             *self.reads.lock().unwrap() += 1;
-            if self.broken {
+            if self.broken || self.locked.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err("no secret service".into());
             }
             Ok(self.entries.lock().unwrap().get(name).cloned())
@@ -285,6 +329,28 @@ mod tests {
         keys.set("gemini", Some("new")).unwrap();
         assert!(!path.exists());
         assert_eq!(keys.get("gemini").as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn asks_a_locked_keychain_again_later() {
+        let chain = Arc::new(Fake::default());
+        chain.entries.lock().unwrap().insert("dj-anthropic".into(), "sk-ant".into());
+        chain.locked.store(true, std::sync::atomic::Ordering::SeqCst);
+        let keys = Keys::with(Box::new(chain.clone()), file());
+        assert_eq!(keys.get("anthropic"), None);
+        chain.locked.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(keys.get("anthropic").as_deref(), Some("sk-ant"));
+    }
+
+    #[test]
+    fn a_read_that_started_before_a_save_doesnt_undo_it() {
+        let chain = Arc::new(Fake::default());
+        let keys = Keys::with(Box::new(chain.clone()), file());
+        // A read starts and finds nothing, but a save lands while it waits on the keychain.
+        let saves = keys.known("openai").unwrap_err();
+        keys.set("openai", Some("sk-new")).unwrap();
+        keys.remember("openai", saves, None);
+        assert_eq!(keys.get("openai").as_deref(), Some("sk-new"));
     }
 
     #[test]
