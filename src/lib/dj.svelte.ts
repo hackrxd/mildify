@@ -33,7 +33,7 @@ import {
   type SegmentId,
 } from "./djPicks";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
-import { backend, errorMessage, type DjConfig, type DjInstall, type DjStatus, type DjVoiceEvent, type RepeatMode } from "./ipc";
+import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type DjVoiceEvent, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { liked } from "./liked.svelte";
 import { lyrics } from "./lyrics.svelte";
@@ -464,12 +464,29 @@ class Dj {
   }
 
   async configure(patch: Partial<DjConfig>) {
-    if (patch.enabled === false || patch.model !== undefined || patch.voice !== undefined) this.stop();
+    const switching = patch.provider !== undefined || patch.model !== undefined || patch.voice !== undefined;
+    if (patch.enabled === false || switching) this.stop();
     try {
       this.status = await backend.djConfigure(patch);
     } catch (e) {
       toasts.error(e);
     }
+  }
+
+  /** Saves a cloud provider's API key in the system keychain, or removes it with null. */
+  async setKey(provider: DjCloud, key: string | null) {
+    try {
+      this.status = await backend.djSetKey(provider, key);
+      return true;
+    } catch (e) {
+      toasts.error(e);
+      return false;
+    }
+  }
+
+  /** The models a cloud provider offers with the saved key. */
+  models(provider: DjCloud): Promise<DjModelChoice[]> {
+    return backend.djModels(provider);
   }
 
   setEnabled(on: boolean) {
