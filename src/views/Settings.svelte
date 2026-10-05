@@ -98,6 +98,8 @@
   const cloudModel = $derived(cloud ? (djSettings?.api_models[cloud] ?? DEFAULT_CLOUD_MODEL[cloud] ?? "") : "");
 
   function pickModel(value: string) {
+    // A key typed for one provider isn't the next one's.
+    apiKey = "";
     if (value.startsWith("local:")) dj.configure({ provider: "local", model: value.slice("local:".length) });
     else dj.configure({ provider: value as DjCloud | "own" });
   }
@@ -106,11 +108,21 @@
   async function saveKey() {
     const key = apiKey.trim();
     if (!cloud || !key) return;
-    if (await dj.setKey(cloud, key)) {
-      apiKey = "";
-      cloudModels = null;
-      modelsFor = null;
-    }
+    // The key's models are listed again once it's in: the status that says so brings the list's effect round.
+    forgetModels();
+    if (await dj.setKey(cloud, key)) apiKey = "";
+  }
+
+  function removeKey() {
+    if (!cloud) return;
+    forgetModels();
+    dj.setKey(cloud, null);
+  }
+
+  function forgetModels() {
+    modelsFor = null;
+    cloudModels = null;
+    modelsError = null;
   }
 
   let cloudModels = $state<DjModelChoice[] | null>(null);
@@ -129,9 +141,10 @@
       const list = await dj.models(provider);
       if (modelsFor !== provider) return;
       cloudModels = list;
-      // Nothing picked yet: the newest the key can use.
+      // Nothing picked yet: the newest the key can use, past previews and experiments, which come and go.
       if (list.length && !djSettings?.api_models[provider] && !DEFAULT_CLOUD_MODEL[provider]) {
-        dj.configure({ api_models: { [provider]: list[0].id } });
+        const pick = list.find((m) => !/preview|exp/i.test(m.id)) ?? list[0];
+        dj.configure({ api_models: { [provider]: pick.id } });
       }
     } catch (e) {
       if (modelsFor === provider) modelsError = errorMessage(e);
@@ -503,7 +516,7 @@
               <span class="label">{CLOUD_NAMES[cloud]} API key</span>
               <span class="muted small">Saved in your system's keychain. It never leaves this computer except to {CLOUD_NAMES[cloud]}.</span>
             </span>
-            <button class="btn quiet" onclick={() => cloud && dj.setKey(cloud, null)}>Remove key</button>
+            <button class="btn quiet" onclick={removeKey}>Remove key</button>
           </div>
 
           <div class="row">
