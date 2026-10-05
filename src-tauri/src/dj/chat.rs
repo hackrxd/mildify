@@ -393,6 +393,17 @@ pub async fn models(http: &reqwest::Client, api: Api, key: &str) -> Result<Vec<M
     Ok(model_list(api, &parse(&text)?))
 }
 
+/// Whether an OpenAI model takes the JSON schema the DJ asks for its answer against: the ones from before
+/// Structured Outputs turn it down.
+fn answers_in_json(id: &str) -> bool {
+    !(id.starts_with("gpt-3")
+        || id == "gpt-4"
+        || id.starts_with("gpt-4-")
+        || id == "gpt-4o-2024-05-13"
+        || id.starts_with("o1-mini")
+        || id.starts_with("o1-preview"))
+}
+
 /// The chat models in a provider's model list.
 fn model_list(api: Api, list: &Value) -> Vec<ModelChoice> {
     let mut found: Vec<(i64, ModelChoice)> = list["data"]
@@ -403,11 +414,12 @@ fn model_list(api: Api, list: &Value) -> Vec<ModelChoice> {
             let id = m["id"].as_str()?.trim_start_matches("models/").to_owned();
             let chat = match api {
                 Api::OpenAi => {
-                    (id.starts_with("gpt-") || id.starts_with('o') && id[1..].starts_with(char::is_numeric) || id.starts_with("chatgpt-"))
+                    (id.starts_with("gpt-") || id.starts_with('o') && id[1..].starts_with(char::is_numeric))
                         // Nor the ones only OpenAI's Responses API serves.
                         && !["audio", "realtime", "transcribe", "tts", "image", "search", "embedding", "instruct", "codex", "-pro", "deep-research"]
                             .iter()
                             .any(|w| id.contains(w))
+                        && answers_in_json(&id)
                 }
                 Api::Gemini => {
                     id.starts_with("gemini")
@@ -648,9 +660,17 @@ mod tests {
             { "id": "gpt-new-pro", "created": 9 },
             { "id": "gpt-new-codex", "created": 9 },
             { "id": "o3-deep-research", "created": 9 },
+            // These turn down the JSON schema the DJ answers against.
+            { "id": "gpt-3.5-turbo", "created": 9 },
+            { "id": "gpt-4", "created": 9 },
+            { "id": "gpt-4-turbo", "created": 9 },
+            { "id": "gpt-4o-2024-05-13", "created": 9 },
+            { "id": "chatgpt-4o-latest", "created": 9 },
+            { "id": "o1-mini", "created": 9 },
+            { "id": "gpt-4o", "created": 4 },
         ]});
         let ids: Vec<String> = model_list(Api::OpenAi, &openai).into_iter().map(|m| m.id).collect();
-        assert_eq!(ids, ["gpt-new", "o4-mini", "gpt-old"]);
+        assert_eq!(ids, ["gpt-4o", "gpt-new", "o4-mini", "gpt-old"]);
         let gemini = json!({ "data": [
             { "id": "models/gemini-2.0-flash" },
             { "id": "models/gemini-embedding-001" },
