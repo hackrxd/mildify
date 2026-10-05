@@ -173,7 +173,7 @@
             <li class:live={i === 0 && dj.speaking} in:rise={{ y: -8, delay: 60 }} animate:settle={{ duration: 320 }}>
               <span class="segment">{line.name}</span>
               <p>{line.talk}</p>
-              {#if !line.byModel}<span class="muted small">From a template: the model didn't answer in time.</span>{/if}
+              {#if !line.byModel}<span class="muted small">From a template: {line.why ?? "the model didn't answer in time"}.</span>{/if}
             </li>
           {/each}
         </ul>
