@@ -17,7 +17,7 @@ pub mod songinfo;
 pub mod speaker;
 pub mod voice;
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -56,6 +56,9 @@ pub struct DjConfig {
     pub own_tools: bool,
     /// The model picked for each cloud provider.
     pub api_models: BTreeMap<String, String>,
+    /// The cloud providers with a key saved in the keychain. The keys themselves stay there; this only spares
+    /// asking the keychain (which may ask the user to unlock it) when nothing needs a key.
+    pub api_keys: BTreeSet<String>,
     /// Song look-ups may ask MusicBrainz for genres.
     pub musicbrainz: bool,
 }
@@ -88,6 +91,7 @@ impl Default for DjConfig {
             server_model: String::new(),
             own_tools: false,
             api_models: BTreeMap::new(),
+            api_keys: BTreeSet::new(),
             musicbrainz: true,
         }
     }
@@ -183,6 +187,13 @@ impl DjConfig {
         api(&self.provider)
     }
 
+    /// Whether a change from `other` to these settings leaves the model and the downloads as they are: picking a
+    /// cloud model, look-up options and the like don't unload the model or restart a download.
+    pub fn same_engine(&self, other: &DjConfig) -> bool {
+        (self.enabled, &self.provider, &self.model, &self.voice, &self.server_url, &self.server_model)
+            == (other.enabled, &other.provider, &other.model, &other.voice, &other.server_url, &other.server_model)
+    }
+
     /// The model picked for the cloud provider in use.
     fn api_model(&self) -> Option<String> {
         self.api_models
@@ -193,7 +204,7 @@ impl DjConfig {
 
     /// What the settings still need before the DJ can ask its model anything: an own server's address and
     /// model name (servers refuse a request without one), a cloud provider's key and model.
-    fn setup_problem(&self, keys: &Keys) -> Option<String> {
+    fn setup_problem(&self) -> Option<String> {
         let api = self.api();
         match api {
             Api::Local => None,
@@ -203,7 +214,7 @@ impl DjConfig {
                 }
                 self.server_model.trim().is_empty().then(|| "Enter the model name your server uses".to_owned())
             }
-            _ if !keys.has(&self.provider) => Some(format!("Add your {} API key", api.name())),
+            _ if !self.api_keys.contains(&self.provider) => Some(format!("Add your {} API key", api.name())),
             _ => self.api_model().is_none().then(|| format!("Pick which {} model the DJ uses", api.name())),
         }
     }
@@ -279,7 +290,7 @@ pub struct Dj {
     speech: Mutex<VecDeque<(u64, Arc<Vec<u8>>)>>,
     next_speech: AtomicU64,
     speaker: Speaker,
-    keys: Keys,
+    keys: Arc<Keys>,
     /// Whether each Anthropic model takes `effort`, once asked.
     effort: Mutex<HashMap<String, bool>>,
     songs: SongLookup,
@@ -302,7 +313,7 @@ impl Dj {
             next_speech: AtomicU64::new(1),
             speaker: Speaker::default(),
             // Beside the DJ's folder, not in it: removing the DJ's downloads keeps the keys.
-            keys: Keys::new(root.with_file_name("dj_keys.json")),
+            keys: Arc::new(Keys::new(root.with_file_name("dj_keys.json"))),
             effort: Mutex::default(),
             songs: SongLookup::new(http.clone(), root.join("song_info.json")),
             root,
@@ -336,13 +347,13 @@ impl Dj {
                 installed: install::is_installed(&self.root, c),
             })
             .collect();
-        let setup = cfg.setup_problem(&self.keys);
+        let setup = cfg.setup_problem();
         DjStatus {
             supported: self.runtime.is_some(),
             settings: cfg.clone(),
             ready: self.runtime.is_some() && setup.is_none() && needed.iter().all(|n| n.installed),
             setup,
-            keys: CLOUD.iter().map(|p| (*p, self.keys.has(p))).collect(),
+            keys: CLOUD.iter().map(|p| (*p, cfg.api_keys.contains(*p))).collect(),
             tools: can_look_up(cfg),
             needed,
             install: self.install.lock().unwrap().clone(),
@@ -443,6 +454,7 @@ impl Dj {
     pub async fn remove(&self) -> Result<()> {
         self.cancel_install();
         self.engine.stop().await;
+        self.songs.clear();
         // Let a cancelled download close its file first (Windows can't delete open files).
         let _done = tokio::time::timeout(Duration::from_secs(5), self.installing.lock()).await;
         for dir in [&self.root, &self.scratch] {
@@ -468,7 +480,7 @@ impl Dj {
         if !cfg.enabled {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
-        if let Some(problem) = cfg.setup_problem(&self.keys) {
+        if let Some(problem) = cfg.setup_problem() {
             return Err(AppError::Other(problem));
         }
         let tools = can_look_up(cfg);
@@ -485,7 +497,7 @@ impl Dj {
                 });
             }
             api => {
-                let key = self.keys.get(&cfg.provider);
+                let key = Some(self.key(&cfg.provider).await?);
                 let model = cfg.api_model().unwrap_or_default();
                 let url = match api {
                     Api::OpenAi => chat::OPENAI_URL,
@@ -528,12 +540,33 @@ impl Dj {
         }
     }
 
-    /// Saves, or with `None` removes, the API key for a cloud provider.
-    pub fn set_key(&self, provider: &str, key: Option<&str>) -> Result<()> {
+    /// The saved key for a cloud provider, read off the async runtime's workers: the keychain may wait on the
+    /// user to unlock it.
+    async fn key(&self, provider: &str) -> Result<String> {
+        let (keys, p) = (self.keys.clone(), provider.to_owned());
+        let key = tokio::task::spawn_blocking(move || keys.get(&p))
+            .await
+            .map_err(|e| AppError::Other(format!("Couldn't read the keychain: {e}")))?;
+        key.ok_or_else(|| {
+            AppError::Other(format!(
+                "Your {} API key isn't in the keychain any more. Add it again in Settings → AI DJ.",
+                api(provider).name()
+            ))
+        })
+    }
+
+    /// Saves, or with `None` removes, the API key for a cloud provider; whether one is saved now.
+    pub async fn set_key(&self, provider: &str, key: Option<String>) -> Result<bool> {
         if !CLOUD.contains(&provider) {
             return Err(AppError::Other(format!("Unknown DJ model provider {provider}")));
         }
-        self.keys.set(provider, key)
+        let key = key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty());
+        let saved = key.is_some();
+        let (keys, p) = (self.keys.clone(), provider.to_owned());
+        tokio::task::spawn_blocking(move || keys.set(&p, key.as_deref()))
+            .await
+            .map_err(|e| AppError::Other(format!("Couldn't reach the keychain: {e}")))??;
+        Ok(saved)
     }
 
     /// The models a cloud provider offers with the saved key.
@@ -541,9 +574,8 @@ impl Dj {
         if !CLOUD.contains(&provider) {
             return Err(AppError::Other(format!("Unknown DJ model provider {provider}")));
         }
-        let api = api(provider);
-        let key = self.keys.get(provider).ok_or_else(|| AppError::Other(format!("Add your {} API key", api.name())))?;
-        chat::models(&self.http, api, &key).await
+        let key = self.key(provider).await?;
+        chat::models(&self.http, api(provider), &key).await
     }
 
     /// Loads the model ahead of the first request, so the DJ starts sooner.
@@ -719,9 +751,13 @@ mod tests {
 
     fn dj() -> Dj {
         let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
+        dj_with(Arc::default(), root)
+    }
+
+    /// A DJ whose keys are in `chain`, never the real keychain.
+    fn dj_with(chain: Arc<secrets::Memory>, root: PathBuf) -> Dj {
         let mut d = Dj::new(root.join("dj"), root.join("cache"), reqwest::Client::new());
-        // Tests never touch the real keychain.
-        d.keys = Keys::with(Box::<secrets::Memory>::default(), root.join("dj_keys.json"));
+        d.keys = Arc::new(Keys::with(Box::new(chain), root.join("dj_keys.json")));
         d
     }
 
@@ -842,15 +878,58 @@ mod tests {
         let status = d.status(&cfg);
         assert_eq!(status.setup.as_deref(), Some("Add your OpenAI API key"));
         assert_eq!(status.keys.get("openai"), Some(&false));
-        d.set_key("openai", Some("sk-test")).unwrap();
-        let status = d.status(&cfg);
+        let keyed = DjConfig { api_keys: BTreeSet::from(["openai".to_owned()]), ..cfg };
+        let status = d.status(&keyed);
         assert_eq!(status.keys.get("openai"), Some(&true));
         assert_eq!(status.setup.as_deref(), Some("Pick which OpenAI model the DJ uses"));
-        let picked = DjConfig { api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]), ..cfg };
+        let picked = DjConfig { api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]), ..keyed };
         assert_eq!(d.status(&picked).setup, None);
-        assert!(d.set_key("skynet", Some("x")).is_err());
-        d.set_key("openai", None).unwrap();
-        assert_eq!(d.status(&picked).setup.as_deref(), Some("Add your OpenAI API key"));
+    }
+
+    #[tokio::test]
+    async fn keeps_keys_in_the_keychain_and_asks_it_only_when_a_key_is_needed() {
+        let chain = Arc::<secrets::Memory>::default();
+        let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
+        let d = dj_with(chain.clone(), root);
+        assert!(d.set_key("openai", Some("  sk-test ".into())).await.unwrap());
+        assert!(d.set_key("skynet", Some("x".into())).await.is_err());
+        let cfg = DjConfig {
+            enabled: true,
+            provider: "openai".into(),
+            api_keys: BTreeSet::from(["openai".to_owned()]),
+            api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
+            ..DjConfig::default()
+        };
+        // Showing the settings, with any provider, leaves the keychain alone.
+        for provider in ["openai", "anthropic", "local"] {
+            d.status(&DjConfig { provider: provider.into(), ..cfg.clone() });
+        }
+        assert_eq!(chain.reads(), 0);
+        assert_eq!(d.target(&cfg).await.unwrap().key.as_deref(), Some("sk-test"));
+        assert!(!d.set_key("openai", None).await.unwrap());
+        // Gone from the keychain behind the settings' back: said plainly, not sent without a key.
+        match d.target(&cfg).await {
+            Err(AppError::Other(m)) => assert!(m.contains("isn't in the keychain any more"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_model_and_download_changes_unload_the_model() {
+        let old = DjConfig { enabled: true, ..DjConfig::default() };
+        let picks = DjConfig {
+            musicbrainz: false,
+            own_tools: true,
+            api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
+            api_keys: BTreeSet::from(["openai".to_owned()]),
+            ..old.clone()
+        };
+        assert!(picks.same_engine(&old));
+        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.same_engine(&old));
+        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.same_engine(&old));
+        assert!(!DjConfig { voice: "emma".into(), ..old.clone() }.same_engine(&old));
+        assert!(!DjConfig { enabled: false, ..old.clone() }.same_engine(&old));
+        assert!(!DjConfig { server_url: "http://x".into(), ..old.clone() }.same_engine(&old));
     }
 
     #[test]
@@ -866,10 +945,11 @@ mod tests {
     #[tokio::test]
     async fn asks_a_cloud_provider_with_the_saved_key_and_model() {
         let d = dj();
-        d.set_key("gemini", Some("g-key")).unwrap();
+        d.set_key("gemini", Some("g-key".into())).await.unwrap();
         let cfg = DjConfig {
             enabled: true,
             provider: "gemini".into(),
+            api_keys: BTreeSet::from(["gemini".to_owned()]),
             api_models: BTreeMap::from([("gemini".into(), "gemini-x".into())]),
             ..DjConfig::default()
         };
@@ -915,6 +995,14 @@ mod tests {
             Err(AppError::Other(m)) => assert!(m.contains("downloading"), "{m}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn removing_the_djs_files_forgets_its_song_look_ups() {
+        let d = dj();
+        d.songs.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true);
+        d.remove().await.unwrap();
+        assert_eq!(d.songs.kept("spotify:track:a"), None);
     }
 
     #[tokio::test]
