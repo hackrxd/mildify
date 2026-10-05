@@ -90,7 +90,7 @@ function validDate(s: string | null | undefined): Date | null {
   return d && Number.isFinite(d.getTime()) ? d : null;
 }
 
-export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover";
+export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover" | "request";
 
 export interface Segment {
   id: SegmentId;
@@ -259,6 +259,74 @@ export function choicesFor(
   return out;
 }
 
+/** The longest request the DJ takes for its next set. */
+export const REQUEST_MAX = 200;
+/** A request offers more songs than a segment does, for the model to find what fits. */
+export const REQUEST_CHOICES = 20;
+
+/** A set the listener asked for. */
+export function requestSegment(request: string): Segment {
+  return {
+    id: "request",
+    label: "Your request",
+    brief: `the listener's request: "${request}"`,
+    phrase: "what you asked for",
+    fits: () => true,
+  };
+}
+
+/** Words that don't help find songs. */
+const FILLER = new Set(["the", "and", "some", "more", "songs", "song", "music", "play", "like", "with", "from", "that", "this", "please", "something", "anything", "any", "for", "stuff", "tracks", "by"]);
+
+/** The decade a request names ("90s", "the 1980s", "2010s"), as its first year. */
+function decadeIn(request: string): number | null {
+  const m = request.toLowerCase().match(/\b(19|20)?(\d)0'?s\b/);
+  if (!m) return null;
+  const century = m[1] ? Number(m[1]) * 100 : Number(m[2]) >= 3 ? 1900 : 2000;
+  return century + Number(m[2]) * 10;
+}
+
+/** The songs a request can choose from: those whose title, artist, album or decade it names first, then a spread
+ * of the rest of the listening (one per artist, as a segment's are), for the model to judge a mood or a genre by. */
+export function requestChoices(
+  request: string,
+  pool: Candidate[],
+  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  random: () => number = Math.random,
+): Candidate[] {
+  const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
+  const words = request
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 3 && !FILLER.has(w));
+  const decade = decadeIn(request);
+  const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
+  const score = (c: Candidate) => {
+    let n = 0;
+    for (const w of words) {
+      if (c.artists.some((a) => has(a, w))) n += 3;
+      if (has(c.album, w)) n += 2;
+      if (has(c.name, w)) n += 1;
+    }
+    const year = Number(c.year);
+    if (decade !== null && year >= decade && year < decade + 10) n += 2;
+    return n;
+  };
+  const scored = shuffled(open, random).map((c) => ({ c, n: score(c) }));
+  const named = scored.filter((s) => s.n > 0).sort((a, b) => b.n - a.n).map((s) => s.c).slice(0, REQUEST_CHOICES);
+  const rest = scored.filter((s) => s.n === 0).map((s) => s.c);
+  // The rest, one per artist where possible.
+  const byArtist = new Map<string, Candidate[]>();
+  for (const c of rest) byArtist.set(c.artists[0] ?? "", [...(byArtist.get(c.artists[0] ?? "") ?? []), c]);
+  const out = [...named];
+  for (let round = 0; out.length < REQUEST_CHOICES && out.length < named.length + rest.length; round++) {
+    for (const songs of byArtist.values()) {
+      if (songs[round] && out.length < REQUEST_CHOICES) out.push(songs[round]);
+    }
+  }
+  return out;
+}
+
 /** The next segment: one that has songs left, not one of the last two, the opener first when it can be. */
 export function nextSegment(
   history: SegmentId[],
@@ -323,6 +391,10 @@ export interface SegmentAsk {
   nameAll?: boolean;
   /** What the DJ looked up about some of the choices, as `songFacts` lines. */
   lookedUp?: string[];
+  /** What the listener asked for this set. */
+  request?: string;
+  /** The set the listener skipped the rest of since the last prompt, by name. */
+  skippedSet?: string;
   /** The DJ picks the set's songs after the first as it goes. */
   live?: boolean;
   reactions?: Reactions;
@@ -383,7 +455,21 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
     const earlier = (ask.earlier ?? []).filter((t) => t.trim()).slice(-2);
     if (earlier.length) where.push(`What you said before: ${earlier.map((t) => `"${t.trim()}"`).join(" Then: ")}`);
   }
-  where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions), "", "Songs you can pick from:", ...list);
+  if (ask.skippedSet) {
+    where.push(`The listener skipped the rest of the set "${ask.skippedSet}": they weren't feeling it, so take the show somewhere else.`);
+  }
+  where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions));
+  const request = ask.request?.trim().slice(0, REQUEST_MAX);
+  if (request) {
+    where.push(
+      "The listener asked for this set:",
+      '"""',
+      request,
+      '"""',
+      "Pick the songs that fit it best. If none really do, pick the closest and say so. Mention that it's their request.",
+    );
+  }
+  where.push("", "Songs you can pick from:", ...list);
   if (ask.lookedUp?.length) where.push("", "What you looked up:", ...ask.lookedUp);
   return where;
 }

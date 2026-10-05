@@ -15,6 +15,9 @@ import {
   nextInSet,
   nextSegment,
   readAnswer,
+  REQUEST_CHOICES,
+  requestChoices,
+  requestSegment,
   SEGMENTS,
   segmentMessages,
   segmentSchema,
@@ -124,6 +127,55 @@ function candidates(n: number, reasons: Candidate["reasons"], artist?: (i: numbe
     playedAt: null,
   }));
 }
+
+describe("requests", () => {
+  const none = { played: new Set<string>(), skippedArtists: new Set<string>() };
+  const pool = [
+    ...candidates(30, ["favorite"]),
+    { ...candidates(1, ["favorite"])[0], uri: "spotify:track:rh1", name: "Reckoner", artists: ["Radiohead"], album: "In Rainbows", year: "2007" },
+    { ...candidates(1, ["allTime"])[0], uri: "spotify:track:rh2", name: "Idioteque", artists: ["Radiohead"], album: "Kid A", year: "2000" },
+    { ...candidates(1, ["allTime"])[0], uri: "spotify:track:n1", name: "Nineties", artists: ["Band"], album: "x", year: "1994" },
+    { ...candidates(1, ["allTime"])[0], uri: "spotify:track:rain", name: "Rain", artists: ["Someone"], album: "In Rainbows Cover", year: null },
+  ];
+  const first = (request: string, avoid = none) => requestChoices(request, pool, avoid, () => 0).map((c) => c.uri);
+
+  it("offers what the request names first: its artists, albums and titles, then its decade", () => {
+    const radiohead = first("more Radiohead please");
+    expect(radiohead.slice(0, 2).sort()).toEqual(["spotify:track:rh1", "spotify:track:rh2"]);
+    expect(first("songs from In Rainbows")[0]).toBe("spotify:track:rh1");
+    expect(first("90s stuff")[0]).toBe("spotify:track:n1");
+    expect(first("the 2000s")).toContain("spotify:track:rh2");
+  });
+
+  it("fills up with the rest of the listening, for the model to judge a mood by, and leaves out what it shouldn't", () => {
+    const calm = first("something calm");
+    expect(calm).toHaveLength(REQUEST_CHOICES);
+    expect(new Set(calm).size).toBe(REQUEST_CHOICES);
+    const avoided = first("Radiohead", { played: new Set(["spotify:track:rh1"]), skippedArtists: new Set(["Artist 0"]) });
+    expect(avoided).not.toContain("spotify:track:rh1");
+    expect(avoided).not.toContain("spotify:track:c0");
+    expect(avoided[0]).toBe("spotify:track:rh2");
+  });
+
+  it("asks the model for the request, fenced, and says when the last set was skipped", () => {
+    const [, user] = segmentMessages({
+      segment: requestSegment("something calm"),
+      choices: pool.slice(0, 5),
+      listener: null,
+      previous: { name: "Loud", artists: ["Band"] },
+      instructions: "",
+      request: "something calm",
+      skippedSet: "Throwbacks",
+      now: NOW,
+    });
+    expect(user.content).toContain('The listener asked for this set:\n"""\nsomething calm\n"""');
+    expect(user.content).toContain("Mention that it's their request.");
+    expect(user.content).toContain('The listener skipped the rest of the set "Throwbacks"');
+    const [, plain] = segmentMessages({ segment: seg("onRepeat"), choices: pool.slice(0, 5), listener: null, previous: null, instructions: "", now: NOW });
+    expect(plain.content).not.toContain("asked for this set");
+    expect(plain.content).not.toContain("skipped the rest");
+  });
+});
 
 describe("choicesFor", () => {
   it("leaves out what's been played and artists the listener skipped", () => {
