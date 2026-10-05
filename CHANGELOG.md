@@ -5,6 +5,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## 1.2.0
 
+## 1.2.0 - 2026-10-04
+
 ### Added
 
 - An AI DJ, off until you turn it on in Settings → AI DJ. It plays sets from your top tracks, recent plays and
