@@ -86,7 +86,8 @@ models, unpacked beside its folder and moved in once complete). `engine.rs` runs
 port with an API key, `--jinja` and `--offline`. `chat.rs` asks it, the user's own OpenAI-style server, or a cloud
 provider (`DjConfig.provider`: OpenAI, Gemini through its OpenAI-compatible endpoint, Anthropic's Messages API)
 with the user's key, which `secrets.rs` keeps in the system keychain (`keyring`; a 0600 file without one) and never
-hands the UI; `voice.rs` reads lines to WAV
+hands the UI (`DjConfig.api_keys` only flags which are saved, so the keychain is read, off the async workers, only
+when a cloud model is asked); `voice.rs` reads lines to WAV
 and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
 output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
