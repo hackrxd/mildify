@@ -105,7 +105,9 @@ everything it said this session.
 
 If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template
 ("That was … Up next, …"). If the voice fails, it plays on without talking, and says why. The DJ page marks lines
-that came from a template.
+that came from a template, and why. When the model fails in a way you can fix, such as a cloud provider refusing
+your key or your account running out of credit, the DJ says so once and plays on from templates. Removing the key
+the DJ is using stops it.
 
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.
