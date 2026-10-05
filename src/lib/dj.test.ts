@@ -14,6 +14,7 @@ const backend = vi.hoisted(() => ({
   djGenerate: vi.fn(),
   djLookUp: vi.fn(),
   djSongInfo: vi.fn(),
+  djSetKey: vi.fn(),
   djSpeak: vi.fn(),
   djVoice: vi.fn(async (_command: unknown) => {}),
   djDuck: vi.fn(async () => {}),
@@ -274,6 +275,56 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("counts its sets from the start of each session", async () => {
+    await started();
+    dj.stop();
+    backend.djGenerate.mockClear();
+    await started();
+    expect(lastPrompt()[1].content).toContain("This is set 2 of the show");
+  });
+
+  it("knows what it's about to say for the set playing, when that set is still waiting for its talk", async () => {
+    const first = await started();
+    // The set playing hasn't had its say yet: as when the listener skipped into it and it waits for its line.
+    dj.announced = null;
+    dj.said = [];
+    dj.upNext = null;
+    backend.djGenerate.mockClear();
+    await playing(first.songs[first.songs.length - 1].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(backend.djGenerate).toHaveBeenCalled();
+    expect(lastPrompt()[1].content).toContain(`What you said before: "${first.talk}"`);
+  });
+
+  it("says once, and on the DJ page, why it talks from templates when the model refuses", async () => {
+    backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key: Incorrect API key" });
+    await started();
+    expect(toasts.show).toHaveBeenCalledWith(expect.stringContaining("OpenAI didn't accept your API key"), "error", 8000);
+    expect(dj.modelTrouble).toContain("didn't accept your API key");
+    expect(dj.said[0].why).toContain("didn't accept your API key");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.show.mock.calls.filter(([m]) => String(m).includes("talking from templates"))).toHaveLength(1);
+  });
+
+  it("doesn't blame the model for the music not waiting", async () => {
+    player.isPlaying = false;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(mod.OPENING_TIMEOUT_MS + 10);
+    await starting;
+    expect(dj.modelTrouble).toBeNull();
+    expect(toasts.show).not.toHaveBeenCalledWith(expect.stringContaining("talking from templates"), "error", 8000);
+    expect((dj.said[0] ?? dj.upNext)?.why).toBe("the model didn't answer in time");
+  });
+
+  it("stops when the key it's using is removed", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    backend.djSetKey.mockImplementation(async () => readyStatus);
+    await started();
+    await dj.setKey("openai", null);
+    expect(dj.phase).toBe("off");
+  });
+
   it("lets the DJ name every song when the listener allows it", async () => {
     dj.setNameAll(true);
     expect(localStorage.getItem("nativify:djNameAll")).toBe("true");
@@ -471,7 +522,7 @@ describe("starting", () => {
     expect(schema).toHaveProperty("properties.songs");
     expect(voice.played).toHaveLength(1);
     expect(backend.djDuck).toHaveBeenCalledWith(timing.DUCK_LEVEL, 0, timing.DUCK_DOWN_MS);
-    expect(dj.said).toEqual([{ name: "Set 1", talk: "Here's set number 1, nice and easy.", byModel: true }]);
+    expect(dj.said).toEqual([{ name: "Set 1", talk: "Here's set number 1, nice and easy.", byModel: true, why: null }]);
     expect(dj.caption?.[0].text).toBe("Here's set number 1, nice and easy.");
     const set = dj.upNext!;
     expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0] });

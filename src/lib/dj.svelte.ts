@@ -100,6 +100,9 @@ export interface Spoken {
   lines: LyricLine[];
 }
 
+/** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
+class GaveUp extends Error {}
+
 export interface DjSet {
   /** The same while a set picked as it goes grows song by song (each step is a new object). */
   id: number;
@@ -117,6 +120,8 @@ export interface DjSet {
   talk: string;
   /** Written by the model, or from a template. */
   byModel: boolean;
+  /** Why it's from a template, when it is. */
+  why: string | null;
   /** The talk, read aloud; null when the voice failed and the DJ plays on without it. */
   speech: Spoken | null;
   /** The first song's vocals, for timing the talk. */
@@ -342,7 +347,9 @@ class Dj {
   /** The set whose talk the DJ has given, or is giving. */
   announced = $state.raw<DjSet | null>(null);
   /** What the DJ has said this session, oldest first. */
-  said = $state.raw<{ name: string; talk: string; byModel: boolean }[]>([]);
+  said = $state.raw<{ name: string; talk: string; byModel: boolean; why: string | null }[]>([]);
+  /** The model's last failure this session that the listener can do something about (a refused key, no credit). */
+  modelTrouble = $state<string | null>(null);
   speaking = $state(false);
   /** The line being spoken, as lyric lines timed from its start. */
   caption = $state.raw<LyricLine[] | null>(null);
@@ -404,6 +411,10 @@ class Dj {
   #pausedMusic = false;
   #outOfSongs = false;
   #setIds = 0;
+  /** Sets picked this session, for the model to know how far into the show it is. */
+  #setsThisSession = 0;
+  /** The listener has been told the model isn't answering, this session. */
+  #modelWarned = false;
   /** What the listener did with the DJ's songs this session, most recent first. */
   #liked: Candidate[] = [];
   #skippedSongs: Candidate[] = [];
@@ -473,8 +484,10 @@ class Dj {
     }
   }
 
-  /** Saves a cloud provider's API key in the system keychain, or removes it with null. */
+  /** Saves a cloud provider's API key in the system keychain, or removes it with null. Removing the key the DJ is
+   * using stops it. */
   async setKey(provider: DjCloud, key: string | null) {
+    if (key === null && provider === this.status?.settings.provider) this.stop();
     try {
       this.status = await backend.djSetKey(provider, key);
       return true;
@@ -723,6 +736,9 @@ class Dj {
     }
     const run = ++this.#run;
     this.#voiceWarned = false;
+    this.#modelWarned = false;
+    this.modelTrouble = null;
+    this.#setsThisSession = 0;
     this.phase = "starting";
     this.said = [];
     this.current = null;
@@ -871,32 +887,41 @@ class Dj {
       previous: prev,
       instructions: this.instructions,
       opening,
-      setNumber: this.#setIds + 1,
-      earlier: this.said.slice(-2).map((s) => s.talk),
+      setNumber: this.#setsThisSession + 1,
+      earlier: this.#earlier(),
       nameAll: this.nameAll,
       live,
       reactions,
     };
     // Given up on (too slow, or the music can't wait): what's still on its way isn't asked for.
     let gaveUp = false;
+    let why: string | null = "the model didn't answer in time";
     try {
       const answer = await this.#rushable(
         (async () => {
           // A model that can call tools may look some of the songs up first.
           const lookedUp = this.status?.tools ? await this.#lookUp(ask) : undefined;
-          if (gaveUp || run !== this.#run) throw new Error("given up");
+          if (gaveUp || run !== this.#run) throw new GaveUp("given up");
           return backend.djGenerate(segmentMessages({ ...ask, lookedUp }), segmentSchema(choices.length), 300);
         })(),
         timeoutMs,
       );
       pick = readAnswer(answer, choices, segment);
-      if (!pick) console.warn("DJ: the model's answer wasn't usable", answer);
+      if (!pick) {
+        console.warn("DJ: the model's answer wasn't usable", answer);
+        why = "the model's answer wasn't usable";
+      }
     } catch (e) {
       gaveUp = true;
       console.warn("DJ: no answer from the model, talking from a template:", e);
+      if (!(e instanceof GaveUp)) {
+        why = errorMessage(e);
+        this.#modelTroubled(why);
+      }
     }
     if (run !== this.#run) return null;
     const byModel = !!pick;
+    if (byModel) why = null;
     // A template doesn't mention them: the next prompt still does.
     if (byModel && reactions) this.#toldOf(reactions);
     pick ??= fallbackPick(segment, choices, listener, prev);
@@ -907,6 +932,7 @@ class Dj {
     const [speech, firstVocals] = await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
     if (run !== this.#run) return null;
     const rest = choices.filter((c) => !pick.songs.includes(c));
+    this.#setsThisSession++;
     return {
       id: ++this.#setIds,
       segment: segment.id,
@@ -917,9 +943,28 @@ class Dj {
       choices: rest,
       talk: pick.talk,
       byModel,
+      why,
       speech,
       firstVocals,
     };
+  }
+
+  /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
+   * held for its talk), and what it's about to say comes last. */
+  #earlier(): string[] {
+    const spoken = this.said.map((s) => s.talk);
+    const cur = this.current;
+    if (cur && this.announced !== cur && !spoken.includes(cur.talk)) spoken.push(cur.talk);
+    return spoken.slice(-2);
+  }
+
+  /** The model failed in a way the listener can fix (a refused key, no credit, a model that doesn't exist): said once
+   * a session, and shown on the DJ page, as the DJ plays on from templates. */
+  #modelTroubled(why: string) {
+    this.modelTrouble = why;
+    if (this.#modelWarned) return;
+    this.#modelWarned = true;
+    toasts.show(`Your DJ is talking from templates: ${why}`, "error", 8000);
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
@@ -947,8 +992,8 @@ class Dj {
 
   #rushable<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("the model took too long")), timeoutMs);
-      this.#rush = () => reject(new Error("the music can't wait"));
+      const t = setTimeout(() => reject(new GaveUp("the model took too long")), timeoutMs);
+      this.#rush = () => reject(new GaveUp("the music can't wait"));
       promise.then(resolve, reject).finally(() => {
         clearTimeout(t);
         this.#rush = null;
@@ -1035,7 +1080,7 @@ class Dj {
   #announce(run: number, set: DjSet) {
     if (run !== this.#run || this.announced === set) return;
     this.announced = set;
-    this.said = [...this.said, { name: set.name, talk: set.talk, byModel: set.byModel }];
+    this.said = [...this.said, { name: set.name, talk: set.talk, byModel: set.byModel, why: set.why }];
     if (set.speech) this.#talk(run, set, set.speech);
   }
 
