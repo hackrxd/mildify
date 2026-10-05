@@ -23,6 +23,7 @@ import {
   MIN_CHOICES,
   REQUEST_MAX,
   requestChoices,
+  requestScore,
   requestSegment,
   type Segment,
   lookUpMessages,
@@ -657,19 +658,32 @@ class Dj {
     const run = this.#run;
     const next = this.upNext;
     if (next) {
-      // Its songs may be on their way into the player's queue: they come out once they're in.
+      // Its songs may be on their way into the player's queue: they come out once they're in, before anything
+      // else is queued.
       if (this.#queued !== "no" && player.isLocal) {
-        void this.#queuing.then(() => backend.device({ action: "clear_queue" }).catch(() => {}));
+        this.#queuing = this.#queuing.then(() => backend.device({ action: "clear_queue" }).then(() => {}, () => {}));
       }
       this.#queued = "no";
-      // What was planned over the end of the song playing, to bring that set in, is off.
-      this.#replan();
+      this.#dropHandOver();
       for (const s of next.songs) this.#played.delete(s.uri);
       this.upNext = null;
     }
     this.#preparing = null;
     this.#prepareGen++;
     this.#prepareNext(run);
+  }
+
+  /** Lets go of what was planned over the end of the song playing to bring the next set in; the set playing's own
+   * talk and music stay as they are. */
+  #dropHandOver() {
+    if (!this.#plannedOn) return;
+    this.#cues = [];
+    this.#bringIn = null;
+    this.#holdFor = null;
+    this.#muteAtEnd = null;
+    this.#silentAt = 0;
+    this.#plannedOn = null;
+    if (!this.speaking && !this.#heldMusic) this.#unduck();
   }
 
   /** Skips the rest of the set playing, when the listener isn't feeling it: the next set comes in now, or as soon as
@@ -684,23 +698,36 @@ class Dj {
     const run = this.#run;
     // A song on its way into the player's queue lands before the queue is cleared.
     await Promise.all([this.#linedUpDone, this.#queuing]);
-    if (run !== this.#run || this.current?.id !== cur.id || this.onAir || this.#awaiting) return;
+    const now = this.current;
+    if (run !== this.#run || now?.id !== cur.id || this.onAir || this.#awaiting) return;
+    // A Next on its way into the next set, or the player already past this one: there's nothing left to skip.
+    const heading = this.#headed();
+    const on = heading ?? player.track?.uri;
+    const song = now.songs.find((s) => s.uri === on);
+    if ((heading && this.upNext?.songs.some((s) => s.uri === heading)) || !song) return;
     this.#setSkipped = cur.name;
-    this.#leftSet = cur;
-    // What's lined up after the song playing (the set's next song, or the next set's) goes: the next set starts
-    // with a play request of its own.
-    if (cur.live || this.#queued !== "no") backend.device({ action: "clear_queue" }).catch(() => {});
+    this.#leftSet = now;
+    // What's lined up after the song playing (the set's next song, the next set's, or what was left there) goes:
+    // the next set starts with a play request of its own.
+    backend.device({ action: "clear_queue" }).catch(() => {});
     this.#queued = "no";
     // A set picked as it goes lines nothing more up.
     this.#setEnds = true;
     this.#replan();
     this.#heldMusic = true;
     backend.device({ action: "pause" }).catch(() => {});
+    // The next set was picked to follow this one: it's picked again, from the song skipped, knowing the set was.
     const next = this.upNext;
-    if (next) return void this.#playSet(run, next);
+    if (next && (this.announced === next || this.#awaiting === next)) return void this.#playSet(run, next);
+    if (next) {
+      for (const s of next.songs) this.#played.delete(s.uri);
+      this.upNext = null;
+    }
+    this.#preparing = null;
+    this.#prepareGen++;
     this.#waitingForSet = true;
+    this.#prepareNext(run, song);
     this.activity = "Your DJ is picking something else…";
-    if (!this.#preparing) this.#prepareNext(run);
     // The music is waiting: past a few seconds, the DJ stops waiting for the model.
     this.#after(SKIP_WAIT_MS, () => {
       if (run === this.#run && this.#waitingForSet) this.#rush?.();
@@ -959,7 +986,15 @@ class Dj {
   }
 
   /** Picks a set, asks the model for its talk (or uses a template), and reads it aloud. */
-  async #prepare(run: number, previous: Candidate | null, timeoutMs: number, opening = false): Promise<DjSet | null> {
+  async #prepare(
+    run: number,
+    previous: Candidate | null,
+    timeoutMs: number,
+    opening = false,
+    gen?: number,
+  ): Promise<DjSet | null> {
+    /** Given up on: a new session, or another set wanted instead. */
+    const stale = () => run !== this.#run || (gen !== undefined && gen !== this.#prepareGen);
     const avoid = { played: this.#played, skippedArtists: this.#skippedArtists };
     const request = this.requested;
     let segment: Segment | null = null;
@@ -970,17 +1005,12 @@ class Dj {
       if (choices.length >= MIN_CHOICES) segment = requestSegment(request);
     }
     if (!segment) {
-      segment = nextSegment(this.#segments, this.#pool, avoid);
-      if (!segment && this.#played.size) {
-        // Everything's been played: start over, leaving out only what's playing now.
-        this.#played = new Set(this.current?.songs.map((s) => s.uri) ?? []);
-        segment = nextSegment(this.#segments, this.#pool, { ...avoid, played: this.#played });
-      }
-      if (!segment) return null;
-      choices = choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#skippedArtists });
+      const ordinary = this.#ordinarySegment();
+      if (!ordinary) return null;
+      ({ segment, choices } = ordinary);
     }
+    // Said until a set that says it is on its way: one given up on leaves it for the one picked instead.
     const skippedSet = this.#setSkipped ?? undefined;
-    this.#setSkipped = null;
     const listener = session.user?.display_name?.split(" ")[0] ?? null;
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     let pick: Pick | null = null;
@@ -1009,7 +1039,7 @@ class Dj {
         (async () => {
           // A model that can call tools may look some of the songs up first.
           const lookedUp = this.status?.tools ? await this.#lookUp(ask) : undefined;
-          if (gaveUp || run !== this.#run) throw new GaveUp("given up");
+          if (gaveUp || stale()) throw new GaveUp("given up");
           return backend.djGenerate(segmentMessages({ ...ask, lookedUp }), segmentSchema(choices.length), 300);
         })(),
         timeoutMs,
@@ -1027,18 +1057,34 @@ class Dj {
         this.#modelTroubled(why);
       }
     }
-    if (run !== this.#run) return null;
+    if (stale()) return null;
     const byModel = !!pick;
     if (byModel) why = null;
     // A template doesn't mention them: the next prompt still does.
     if (byModel && reactions) this.#toldOf(reactions);
+    if (!pick && segment.id === "request") {
+      // A template can't tell which songs fit a mood: it plays only what the request names, or an ordinary set
+      // while the request waits for the model.
+      const score = requestScore(request ?? "");
+      const named = choices.filter((c) => score(c) > 0);
+      if (named.length >= MIN_CHOICES) choices = named;
+      else {
+        const ordinary = this.#ordinarySegment();
+        if (!ordinary) return null;
+        ({ segment, choices } = ordinary);
+      }
+    }
     pick ??= fallbackPick(segment, choices, listener, prev);
-    this.#segments.push(segment.id);
     // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
     const songs = live ? pick.songs.slice(0, 1) : pick.songs;
     for (const s of songs) this.#played.add(s.uri);
     const [speech, firstVocals] = await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
-    if (run !== this.#run) return null;
+    if (stale()) {
+      for (const s of songs) this.#played.delete(s.uri);
+      return null;
+    }
+    if (skippedSet !== undefined && this.#setSkipped === skippedSet) this.#setSkipped = null;
+    this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));
     this.#setsThisSession++;
     return {
@@ -1056,6 +1102,19 @@ class Dj {
       speech,
       firstVocals,
     };
+  }
+
+  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. */
+  #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
+    const avoid = { played: this.#played, skippedArtists: this.#skippedArtists };
+    let segment = nextSegment(this.#segments, this.#pool, avoid);
+    if (!segment && this.#played.size) {
+      // Everything's been played: start over, leaving out only what's playing now.
+      this.#played = new Set(this.current?.songs.map((s) => s.uri) ?? []);
+      segment = nextSegment(this.#segments, this.#pool, { ...avoid, played: this.#played });
+    }
+    if (!segment) return null;
+    return { segment, choices: choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#skippedArtists }) };
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
@@ -1102,10 +1161,12 @@ class Dj {
   #rushable<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const t = setTimeout(() => reject(new GaveUp("the model took too long")), timeoutMs);
-      this.#rush = () => reject(new GaveUp("the music can't wait"));
+      // A newer wait may have taken the rush over: that one stays.
+      const rush = () => reject(new GaveUp("the music can't wait"));
+      this.#rush = rush;
       promise.then(resolve, reject).finally(() => {
         clearTimeout(t);
-        this.#rush = null;
+        if (this.#rush === rush) this.#rush = null;
       });
     });
   }
@@ -1671,12 +1732,14 @@ class Dj {
     this.#unduck();
   }
 
-  #prepareNext(run: number) {
+  /** Picks the next set, to follow `previous` (the set playing's last song, unless said). */
+  #prepareNext(run: number, previous?: Candidate) {
     if (this.#preparing || this.upNext) return;
     const cur = this.current;
     const gen = ++this.#prepareGen;
     this.activity = "Picking what's next…";
-    this.#preparing = this.#prepare(run, cur?.songs[cur.songs.length - 1] ?? null, MODEL_TIMEOUT_MS).then((set) => {
+    const after = previous ?? cur?.songs[cur.songs.length - 1] ?? null;
+    this.#preparing = this.#prepare(run, after, MODEL_TIMEOUT_MS, false, gen).then((set) => {
       if (run !== this.#run) return;
       if (gen !== this.#prepareGen) {
         // The listener asked for something else meanwhile: this set's songs go back in the pool.
@@ -1687,6 +1750,12 @@ class Dj {
       this.activity = null;
       if (!set) {
         this.#outOfSongs = true;
+        // The music is waiting for a set that won't come.
+        if (this.#waitingForSet) {
+          this.#waitingForSet = false;
+          toasts.show("That's all your DJ had for now. Listen and like some more, and it'll have more to play.");
+          this.stop();
+        }
         return;
       }
       this.upNext = set;
@@ -1700,15 +1769,19 @@ class Dj {
 
   /** Adds the next set to Spotify's queue, so it can follow the last song without a gap. */
   #queue(run: number, set: DjSet) {
-    this.#queuing = this.#queueSongs(run, set);
+    this.#queued = "pending";
+    // After whatever's on its way to the queue already, a clear included.
+    this.#queuing = this.#queuing.then(() => this.#queueSongs(run, set));
   }
 
   async #queueSongs(run: number, set: DjSet) {
-    this.#queued = "pending";
+    // Let go of while it waited its turn.
+    if (run !== this.#run || this.upNext !== set) return;
     const device = session.device?.device_id;
     try {
       for (const s of set.songs) {
-        if (run !== this.#run) return;
+        // Let go of meanwhile: the rest of it isn't wanted. Skipped into, it is.
+        if (run !== this.#run || (this.upNext !== set && this.current !== set)) return;
         await sp.addToQueue(s.uri, device);
       }
       // The listener may have skipped into this set meanwhile: then the next one is queued in its turn.
