@@ -412,6 +412,9 @@ fn model_list(api: Api, list: &Value) -> Vec<ModelChoice> {
                     id.starts_with("gemini")
                         && !["embedding", "tts", "image", "live", "audio"].iter().any(|w| id.contains(w))
                 }
+                // The DJ asks for its answer as JSON fitting a schema; models that can't do that are left out. A
+                // list without capabilities says nothing either way.
+                Api::Anthropic => m["capabilities"]["structured_outputs"]["supported"].as_bool() != Some(false),
                 _ => true,
             };
             let label = m["display_name"].as_str().map(str::to_owned).unwrap_or_else(|| id.clone());
@@ -635,8 +638,13 @@ mod tests {
         assert_eq!(ids, ["gpt-new", "o4-mini", "gpt-old"]);
         let gemini = json!({ "data": [{ "id": "models/gemini-flash" }, { "id": "models/gemini-embedding-001" }] });
         assert_eq!(model_list(Api::Gemini, &gemini), vec![ModelChoice { id: "gemini-flash".into(), label: "gemini-flash".into() }]);
-        let anthropic = json!({ "data": [{ "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5" }] });
-        assert_eq!(model_list(Api::Anthropic, &anthropic)[0].label, "Claude Opus 5.5");
+        let anthropic = json!({ "data": [
+            { "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "capabilities": { "structured_outputs": { "supported": true } } },
+            { "id": "claude-old", "display_name": "Claude Old", "capabilities": { "structured_outputs": { "supported": false } } },
+            { "id": "claude-unknown", "display_name": "Claude Unknown" },
+        ]});
+        let labels: Vec<String> = model_list(Api::Anthropic, &anthropic).into_iter().map(|m| m.label).collect();
+        assert_eq!(labels, ["Claude Opus 5.5", "Claude Unknown"]);
         assert!(takes_effort(&json!({ "capabilities": { "effort": { "low": { "supported": true } } } })));
         assert!(!takes_effort(&json!({ "capabilities": { "effort": { "supported": false } } })));
     }
