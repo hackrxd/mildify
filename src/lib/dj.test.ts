@@ -777,6 +777,34 @@ describe("asking for a set, and skipping one", () => {
     expect(log.filter((l) => l === "clear_queue")).toHaveLength(1);
   });
 
+  it("hurries a set asked for while the music waits after a skip", async () => {
+    const first = await started();
+    await playing(first.songs[0].uri, 30_000);
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    // The template after the wait takes a while to read aloud: the listener asks for something meanwhile.
+    backend.djSpeak.mockImplementationOnce(() => new Promise(() => {}));
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(mod.SKIP_WAIT_MS + 100);
+    expect(dj.onAir).toBeNull();
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(mod.SKIP_WAIT_MS - 200);
+    expect(dj.onAir).toBeNull();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(dj.onAir).not.toBeNull();
+  });
+
+  it("Play while it picks after a skip stops waiting for the model, and doesn't play the skipped set on", async () => {
+    const first = await started();
+    await playing(first.songs[0].uri, 30_000);
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(1000);
+    dj.togglePause();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.togglePlay).not.toHaveBeenCalled();
+    expect(dj.onAir).not.toBeNull();
+  });
+
   it("doesn't skip a set while its own talk is on", async () => {
     speechMs = 20_000;
     const first = await started();
@@ -1259,6 +1287,30 @@ describe("between sets", () => {
     expect(backend.device).toHaveBeenCalledWith({ action: "seek", position_ms: 0 });
     expect(backend.device).toHaveBeenLastCalledWith({ action: "play" });
     expect(backend.djDuck).toHaveBeenLastCalledWith(1, 0, 0);
+  });
+
+  it("doesn't introduce a set it let go of just as its talk was due", async () => {
+    // Where the talk starts over a song's end, found in a first session.
+    let first = await started();
+    await lastSong(first);
+    let at = DURATION - 20_000;
+    for (; at < DURATION && !dj.speaking; at += 100) {
+      player.pos = at;
+      await tick();
+    }
+    expect(dj.speaking).toBe(true);
+    dj.stop();
+    // A second session, up to just before then: the talk's start is armed, not yet due.
+    first = await started();
+    const next = dj.upNext!;
+    await lastSong(first);
+    player.pos = at - 400;
+    await tick();
+    expect(dj.speaking).toBe(false);
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(1000);
+    // What it says, if anything yet, is the set asked for.
+    expect(dj.said.map((s) => s.name)).not.toContain(next.name);
   });
 
   it("says a short line between the songs, and brings the next in under its second half", async () => {

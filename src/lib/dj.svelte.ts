@@ -584,6 +584,8 @@ class Dj {
 
   /** Play/pause while the DJ's item is up pauses the DJ, and any music under it. */
   togglePause() {
+    // Waiting after a skip: Play is for the next set, so it doesn't wait any longer for the model.
+    if (!this.onAir && this.#skipping()) return void this.#rush?.();
     if (!this.onAir) {
       // Playing on toward a song's end that goes silent: the silence is timed anew from where it resumes.
       if (!player.isPlaying) this.#refreshGain();
@@ -670,6 +672,15 @@ class Dj {
     this.#preparing = null;
     this.#prepareGen++;
     this.#prepareNext(run);
+    // The music is waiting for it: the set asked for gets the same few seconds a skip gives.
+    if (this.#waitingForSet) this.#hurry(run);
+  }
+
+  /** Past a few seconds, the waiting music stops waiting for the model. */
+  #hurry(run: number) {
+    this.#after(SKIP_WAIT_MS, () => {
+      if (run === this.#run && this.#waitingForSet) this.#rush?.();
+    });
   }
 
   /** Lets go of what was planned over the end of the song playing to bring the next set in; the set playing's own
@@ -731,9 +742,7 @@ class Dj {
     this.#prepareNext(run, song);
     this.activity = "Your DJ is picking something else…";
     // The music is waiting: past a few seconds, the DJ stops waiting for the model.
-    this.#after(SKIP_WAIT_MS, () => {
-      if (run === this.#run && this.#waitingForSet) this.#rush?.();
-    });
+    this.#hurry(run);
   }
 
   /** The set playing was skipped, and the music waits for the next one to be picked. */
@@ -1860,7 +1869,8 @@ class Dj {
     for (const c of cues) {
       if (c.fired) continue;
       const fire = () => {
-        if (run !== this.#run || c.fired) return;
+        // Dropped since it was armed (a plan let go of, or made anew): not due any more.
+        if (run !== this.#run || c.fired || !(this.#cues.includes(c) || this.#speechCues.includes(c))) return;
         // Armed ahead, then the clock stopped (a pause): not due after all.
         if (clock() < c.at - 5) {
           c.armed = false;
