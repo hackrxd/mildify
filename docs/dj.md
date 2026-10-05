@@ -124,10 +124,14 @@ judge a mood or genre by, and the set it picks says it's your request. If the ne
 introduced, the request takes its place; once its introduction has started, the request is the set after it. Never
 mind takes a request back.
 
-**Skip this set**, beside the set playing, moves on to the next set straight away: its introduction, then its
-songs. If the next set isn't picked yet, the music waits up to 8 seconds for the model before the DJ talks from a
-template. The model hears that you skipped the last set, so it goes somewhere else, and leaving the set doesn't
-count as skipping the song that was playing.
+Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, more Future". When the
+model doesn't answer, the DJ plays only songs the request names, and if there aren't enough of those it plays an
+ordinary set while your request waits for the next one.
+
+**Skip this set**, beside the set playing, stops the music and has the model pick the next set again, from the song
+you skipped: it hears that you skipped the set, so it goes somewhere else. The music waits up to 8 seconds for it
+before the DJ talks from a template. A next set whose introduction has already started plays as it is. Leaving the
+set doesn't count as skipping the song that was playing.
 
 ## Telling it what to do
 
