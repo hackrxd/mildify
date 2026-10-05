@@ -157,6 +157,7 @@ const readyStatus = {
     server_model: "",
     own_tools: false,
     api_models: {},
+    api_keys: [],
     musicbrainz: true,
   },
   keys: { openai: false, anthropic: false, gemini: false },

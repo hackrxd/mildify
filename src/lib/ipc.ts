@@ -63,6 +63,8 @@ export interface DjConfig {
   own_tools: boolean;
   /** The model picked for each cloud provider. */
   api_models: Partial<Record<DjCloud, string>>;
+  /** The cloud providers with a key saved; the keys stay in the system keychain. */
+  api_keys: DjCloud[];
   /** Song look-ups may ask MusicBrainz for genres. */
   musicbrainz: boolean;
 }
