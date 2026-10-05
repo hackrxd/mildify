@@ -404,7 +404,8 @@ fn model_list(api: Api, list: &Value) -> Vec<ModelChoice> {
             let chat = match api {
                 Api::OpenAi => {
                     (id.starts_with("gpt-") || id.starts_with('o') && id[1..].starts_with(char::is_numeric) || id.starts_with("chatgpt-"))
-                        && !["audio", "realtime", "transcribe", "tts", "image", "search", "embedding", "instruct"]
+                        // Nor the ones only OpenAI's Responses API serves.
+                        && !["audio", "realtime", "transcribe", "tts", "image", "search", "embedding", "instruct", "codex", "-pro", "deep-research"]
                             .iter()
                             .any(|w| id.contains(w))
                 }
@@ -422,11 +423,21 @@ fn model_list(api: Api, list: &Value) -> Vec<ModelChoice> {
             chat.then_some((created, ModelChoice { id, label }))
         })
         .collect();
-    // OpenAI's list isn't in order; the others are already newest first.
-    if api == Api::OpenAi {
-        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
+    // OpenAI's list isn't in order and Gemini's has no dates; Anthropic's is newest first already.
+    match api {
+        Api::OpenAi => found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id))),
+        Api::Gemini => found.sort_by(|a, b| {
+            let rank = |id: &str| (gemini_version(id), !id.contains("preview") && !id.contains("exp"));
+            rank(&b.1.id).partial_cmp(&rank(&a.1.id)).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.1.id.cmp(&b.1.id))
+        }),
+        _ => {}
     }
     found.into_iter().map(|(_, m)| m).collect()
+}
+
+/// The version in a Gemini model's name: 2.5 for gemini-2.5-flash; 0 without one.
+fn gemini_version(id: &str) -> f64 {
+    id.trim_start_matches("gemini-").split('-').next().and_then(|v| v.parse().ok()).unwrap_or(0.0)
 }
 
 /// Whether an Anthropic model takes `effort`, from its entry in the Models API.
@@ -633,11 +644,22 @@ mod tests {
             { "id": "text-embedding-3-large", "created": 5 },
             { "id": "gpt-realtime", "created": 6 },
             { "id": "omni-moderation-latest", "created": 7 },
+            // Only the Responses API serves these, and they're often the newest.
+            { "id": "gpt-new-pro", "created": 9 },
+            { "id": "gpt-new-codex", "created": 9 },
+            { "id": "o3-deep-research", "created": 9 },
         ]});
         let ids: Vec<String> = model_list(Api::OpenAi, &openai).into_iter().map(|m| m.id).collect();
         assert_eq!(ids, ["gpt-new", "o4-mini", "gpt-old"]);
-        let gemini = json!({ "data": [{ "id": "models/gemini-flash" }, { "id": "models/gemini-embedding-001" }] });
-        assert_eq!(model_list(Api::Gemini, &gemini), vec![ModelChoice { id: "gemini-flash".into(), label: "gemini-flash".into() }]);
+        let gemini = json!({ "data": [
+            { "id": "models/gemini-2.0-flash" },
+            { "id": "models/gemini-embedding-001" },
+            { "id": "models/gemini-3-pro-preview" },
+            { "id": "models/gemini-3-flash" },
+            { "id": "models/gemini-2.5-pro" },
+        ]});
+        let ids: Vec<String> = model_list(Api::Gemini, &gemini).into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, ["gemini-3-flash", "gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash"]);
         let anthropic = json!({ "data": [
             { "id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "capabilities": { "structured_outputs": { "supported": true } } },
             { "id": "claude-old", "display_name": "Claude Old", "capabilities": { "structured_outputs": { "supported": false } } },
