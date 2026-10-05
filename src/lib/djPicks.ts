@@ -269,14 +269,62 @@ export function requestSegment(request: string): Segment {
   return {
     id: "request",
     label: "Your request",
-    brief: `the listener's request: "${request}"`,
+    brief: "a set the listener asked for, in their words below",
     phrase: "what you asked for",
     fits: () => true,
   };
 }
 
 /** Words that don't help find songs. */
-const FILLER = new Set(["the", "and", "some", "more", "songs", "song", "music", "play", "like", "with", "from", "that", "this", "please", "something", "anything", "any", "for", "stuff", "tracks", "by"]);
+const FILLER = new Set([
+  "the", "and", "some", "more", "songs", "song", "music", "play", "like", "with", "from", "that", "this", "please",
+  "something", "anything", "any", "for", "stuff", "tracks", "by", "can", "you", "your", "want", "wanna", "hear", "give",
+  "need", "feel", "feeling", "mood", "vibe", "vibes", "kind", "bit", "all", "now", "just", "maybe", "let", "lets",
+  "get", "put", "have", "got", "into", "there", "what", "how", "about", "really", "very", "too", "again",
+]);
+/** Words that turn the next ones around: "no more Drake", "anything but Drake", "without the 80s". */
+const NEGATIONS = new Set(["no", "not", "without", "except", "but", "less", "nothing", "never", "stop", "skip", "avoid"]);
+/** Words that turn them back, unless right after one: "no Drake, more Radiohead", "less Drake and more Future". */
+const TURNS = new Set(["more", "instead", "only", "just", "rather"]);
+
+/** How well a song fits what a request names: its artists, album, title or decade. Below zero for what the request
+ * says to leave out. */
+export function requestScore(request: string): (c: Candidate) => number {
+  // Words, and the punctuation that ends a clause.
+  const tokens = request.toLowerCase().match(/[\p{L}\p{N}']+|[.,;!?]/gu) ?? [];
+  const wanted: string[] = [];
+  const unwanted: string[] = [];
+  let against = false;
+  let prev = "";
+  for (const t of tokens) {
+    const w = t.replace(/'/g, "");
+    const after = prev;
+    prev = w;
+    if (NEGATIONS.has(w)) {
+      against = true;
+      continue;
+    }
+    if (/^[.,;!?]$/.test(w) || (TURNS.has(w) && !NEGATIONS.has(after))) {
+      against = false;
+      continue;
+    }
+    if (w.length < 3 || FILLER.has(w)) continue;
+    (against ? unwanted : wanted).push(w);
+  }
+  const decade = decadeIn(request);
+  const decadeUnwanted = decade !== null && /\b(no|not|without|except|but|less|never|avoid|skip)\b[^.,;!?]*\b(19|20)?\d0'?s\b/i.test(request);
+  const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
+  const about = (c: Candidate, w: string) =>
+    (c.artists.some((a) => has(a, w)) ? 3 : 0) + (has(c.album, w) ? 2 : 0) + (has(c.name, w) ? 1 : 0);
+  return (c) => {
+    let n = 0;
+    for (const w of wanted) n += about(c, w);
+    for (const w of unwanted) if (about(c, w) > 0) n -= 10;
+    const year = Number(c.year);
+    if (decade !== null && year >= decade && year < decade + 10) n += decadeUnwanted ? -10 : 2;
+    return n;
+  };
+}
 
 /** The decade a request names ("90s", "the 1980s", "2010s"), as its first year. */
 function decadeIn(request: string): number | null {
@@ -295,25 +343,10 @@ export function requestChoices(
   random: () => number = Math.random,
 ): Candidate[] {
   const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
-  const words = request
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length >= 3 && !FILLER.has(w));
-  const decade = decadeIn(request);
-  const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
-  const score = (c: Candidate) => {
-    let n = 0;
-    for (const w of words) {
-      if (c.artists.some((a) => has(a, w))) n += 3;
-      if (has(c.album, w)) n += 2;
-      if (has(c.name, w)) n += 1;
-    }
-    const year = Number(c.year);
-    if (decade !== null && year >= decade && year < decade + 10) n += 2;
-    return n;
-  };
+  const score = requestScore(request);
   const scored = shuffled(open, random).map((c) => ({ c, n: score(c) }));
   const named = scored.filter((s) => s.n > 0).sort((a, b) => b.n - a.n).map((s) => s.c).slice(0, REQUEST_CHOICES);
+  // What the request says to leave out (below zero) isn't offered at all.
   const rest = scored.filter((s) => s.n === 0).map((s) => s.c);
   // The rest, one per artist where possible.
   const byArtist = new Map<string, Candidate[]>();
@@ -459,7 +492,8 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
     where.push(`The listener skipped the rest of the set "${ask.skippedSet}": they weren't feeling it, so take the show somewhere else.`);
   }
   where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions));
-  const request = ask.request?.trim().slice(0, REQUEST_MAX);
+  // Their words stay inside the fence.
+  const request = ask.request?.trim().slice(0, REQUEST_MAX).replaceAll('"""', '"');
   if (request) {
     where.push(
       "The listener asked for this set:",
