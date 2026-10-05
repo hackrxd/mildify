@@ -54,6 +54,7 @@ impl Config {
         if cfg.device_name == "Native Spotify" {
             cfg.device_name = Config::default().device_name;
         }
+        cfg.dj.migrate();
         if let Err(e) = cfg.save(path) {
             log::warn!("couldn't write config to {}: {e}", path.display());
         }
