@@ -5,7 +5,7 @@
   import Icon from "../components/Icon.svelte";
   import OnAirLamp from "../components/OnAirLamp.svelte";
   import { dj, type DjSet } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX } from "../lib/djPicks";
+  import { INSTRUCTIONS_MAX, REQUEST_MAX } from "../lib/djPicks";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -23,6 +23,12 @@
   const share = $derived(install?.running && install.total ? Math.min(1, install.received / install.total) : null);
   const said = $derived([...dj.said].reverse());
   const ready = $derived(!!status?.supported && dj.enabled && !missing.length && !status.setup);
+  let request = $state("");
+  function ask() {
+    if (!request.trim()) return;
+    dj.request(request);
+    request = "";
+  }
   const CLOUD_NAMES: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
   /** The cloud provider writing the talk, if one is. */
   const cloud = $derived(status ? (CLOUD_NAMES[status.settings.provider] ?? null) : null);
@@ -153,15 +159,44 @@
                 <Icon name="close" size={18} /> Stop the DJ
               </button>
               {#if dj.activity}{#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}{/if}
+              {#if dj.phase === "on"}
+                <form class="ask" onsubmit={(e) => (e.preventDefault(), ask())}>
+                  <label class="muted small" for="dj-request">Ask for the next set</label>
+                  <div class="ask-row">
+                    <input
+                      id="dj-request"
+                      class="field"
+                      maxlength={REQUEST_MAX}
+                      placeholder="Something upbeat, more Radiohead, the 90s…"
+                      bind:value={request}
+                    />
+                    <button class="btn primary" type="submit" disabled={!request.trim()}>Ask</button>
+                  </div>
+                </form>
+                {#if dj.requested}
+                  <p class="small requested" in:rise={{ y: 4, duration: 240 }}>
+                    Your request is next: “{dj.requested}”
+                    <button class="link" onclick={() => dj.cancelRequest()}>Never mind</button>
+                  </p>
+                {/if}
+              {/if}
             {/if}
           </section>
         {/if}
       {:else if b.kind === "set"}
         {@const now = b.set.id === dj.current?.id}
-        <h2>
-          {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
-          {b.set.name}
-        </h2>
+        <div class="set-head">
+          <h2>
+            {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
+            {b.set.name}
+          </h2>
+          {#if now && dj.phase === "on" && !dj.onAir}
+            <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
+              <Icon name="next" size={16} /> Skip this set
+            </button>
+          {/if}
+        </div>
+        {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
         <DjSongs songs={b.set.songs} />
         {#if b.set.live}
           <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>
@@ -298,6 +333,37 @@
   }
   .when {
     display: inline-block;
+  }
+  .set-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .request-note {
+    padding: 0 10px;
+  }
+  .ask {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    max-width: 520px;
+    margin-top: 6px;
+  }
+  .ask-row {
+    display: flex;
+    gap: 8px;
+  }
+  .ask-row .field {
+    flex: 1;
+    min-width: 0;
+  }
+  .requested {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
   }
   .said {
     display: grid;
