@@ -152,6 +152,8 @@ pub struct Model {
     pub id: &'static str,
     pub label: &'static str,
     pub detail: &'static str,
+    /// It calls tools well enough to look songs up before picking.
+    pub tools: bool,
     pub component: Component,
 }
 
@@ -163,6 +165,7 @@ pub const MODELS: &[Model] = &[
         id: "qwen2.5-1.5b",
         label: "Qwen2.5 1.5B",
         detail: "Quick on any computer. About 2 GB of memory while the DJ is on.",
+        tools: false,
         component: Component {
             id: "model-qwen2.5-1.5b-q4km",
             label: "Language model (Qwen2.5 1.5B Instruct)",
@@ -176,6 +179,7 @@ pub const MODELS: &[Model] = &[
         id: "qwen3-4b",
         label: "Qwen3 4B",
         detail: "Better writing, slower without a graphics card. About 4 GB of memory while the DJ is on.",
+        tools: true,
         component: Component {
             id: "model-qwen3-4b-q4km",
             label: "Language model (Qwen3 4B)",

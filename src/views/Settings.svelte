@@ -4,6 +4,7 @@
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
   import { dj } from "../lib/dj.svelte";
   import { INSTRUCTIONS_MAX } from "../lib/djPicks";
+  import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
@@ -86,6 +87,72 @@
     if (serverUrl.trim() !== djSettings?.server_url || serverModel.trim() !== djSettings?.server_model) {
       dj.configure({ server_url: serverUrl.trim(), server_model: serverModel.trim() });
     }
+  }
+
+  const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
+  const DEFAULT_CLOUD_MODEL: Partial<Record<DjCloud, string>> = { anthropic: "claude-opus-5-5" };
+  /** The cloud provider in use, if any. */
+  const cloud = $derived(djSettings && djSettings.provider in CLOUD_NAMES ? (djSettings.provider as DjCloud) : null);
+  /** The model picker's value: a downloaded model, the own server, or a cloud provider. */
+  const modelChoice = $derived(!djSettings ? "" : djSettings.provider === "local" ? `local:${djSettings.model}` : djSettings.provider);
+  const cloudModel = $derived(cloud ? (djSettings?.api_models[cloud] ?? DEFAULT_CLOUD_MODEL[cloud] ?? "") : "");
+
+  function pickModel(value: string) {
+    // A key typed for one provider isn't the next one's.
+    apiKey = "";
+    if (value.startsWith("local:")) dj.configure({ provider: "local", model: value.slice("local:".length) });
+    else dj.configure({ provider: value as DjCloud | "own" });
+  }
+
+  let apiKey = $state("");
+  async function saveKey() {
+    const key = apiKey.trim();
+    if (!cloud || !key) return;
+    // The key's models are listed again once it's in: the status that says so brings the list's effect round.
+    forgetModels();
+    if (await dj.setKey(cloud, key)) apiKey = "";
+  }
+
+  function removeKey() {
+    if (!cloud) return;
+    forgetModels();
+    dj.setKey(cloud, null);
+  }
+
+  function forgetModels() {
+    modelsFor = null;
+    cloudModels = null;
+    modelsError = null;
+  }
+
+  let cloudModels = $state<DjModelChoice[] | null>(null);
+  let modelsError = $state<string | null>(null);
+  let modelsFor: DjCloud | null = null;
+  // Lists the provider's models once its key is in.
+  $effect(() => {
+    if (cloud && djStatus?.keys[cloud] && modelsFor !== cloud) loadModels(cloud);
+  });
+
+  async function loadModels(provider: DjCloud) {
+    modelsFor = provider;
+    cloudModels = null;
+    modelsError = null;
+    try {
+      const list = await dj.models(provider);
+      if (modelsFor !== provider) return;
+      cloudModels = list;
+      // Nothing picked yet: the newest the key can use, past previews and experiments, which come and go.
+      if (list.length && !djSettings?.api_models[provider] && !DEFAULT_CLOUD_MODEL[provider]) {
+        const pick = list.find((m) => !/preview|exp/i.test(m.id)) ?? list[0];
+        dj.configure({ api_models: { [provider]: pick.id } });
+      }
+    } catch (e) {
+      if (modelsFor === provider) modelsError = errorMessage(e);
+    }
+  }
+
+  function pickCloudModel(id: string) {
+    if (cloud && id.trim() && id.trim() !== cloudModel) dj.configure({ api_models: { [cloud]: id.trim() } });
   }
 
   function saveName() {
@@ -360,9 +427,10 @@
       <span>
         <span class="label">Turn on the DJ</span>
         <span class="muted small">
-          Plays songs from your listening and talks between them, like a radio host, with a language model and voice
-          that run on this computer. Turning it on downloads them{djToDownload ? `, about ${formatBytes(djToDownload)}` : ""};
-          nothing is downloaded before.
+          Plays songs from your listening and talks between them, like a radio host. Its voice is made on this computer,
+          and so is its talk unless you pick a cloud model below. Turning it on downloads what it needs{djToDownload
+            ? `, about ${formatBytes(djToDownload)}`
+            : ""}; nothing is downloaded before.
         </span>
       </span>
       <input
@@ -390,7 +458,7 @@
           {:else if djMissing.length}
             <span class="label">{formatBytes(djToDownload)} left to download</span>
           {:else if djStatus?.setup}
-            <span class="label">Set up your model server</span>
+            <span class="label">{cloud ? `Set up ${CLOUD_NAMES[cloud]}` : "Set up your model server"}</span>
             <span class="small error">{djStatus.setup}</span>
           {:else}
             <span class="label">Ready</span>
@@ -414,22 +482,107 @@
         <span>
           <span class="label">Language model</span>
           <span class="muted small">
-            {#if djSettings.model === "own"}
+            {#if djSettings.provider === "own"}
               Any server with an OpenAI-style chat API: Ollama, LM Studio, llama.cpp. Nothing is downloaded for it.
+            {:else if cloud}
+              Usually smarter than the downloaded models, with your own {CLOUD_NAMES[cloud]} API key; what it uses is
+              billed to your account. Nothing is downloaded for it.
             {:else}
               {djStatus?.models.find((m) => m.id === djSettings.model)?.detail ?? ""}
             {/if}
           </span>
         </span>
-        <select class="field" value={djSettings.model} onchange={(e) => dj.configure({ model: e.currentTarget.value })}>
-          {#each djStatus?.models ?? [] as m (m.id)}
-            <option value={m.id}>{m.label} ({formatBytes(m.bytes)})</option>
-          {/each}
-          <option value="own">Your own model server</option>
+        <select class="field" value={modelChoice} onchange={(e) => pickModel(e.currentTarget.value)}>
+          <optgroup label="On this computer">
+            {#each djStatus?.models ?? [] as m (m.id)}
+              <option value="local:{m.id}">{m.label} ({formatBytes(m.bytes)})</option>
+            {/each}
+          </optgroup>
+          <optgroup label="Your own">
+            <option value="own">Your own model server</option>
+          </optgroup>
+          <optgroup label="Cloud, with your API key">
+            {#each Object.entries(CLOUD_NAMES) as [id, name] (id)}
+              <option value={id}>{name}</option>
+            {/each}
+          </optgroup>
         </select>
       </label>
 
-      {#if djSettings.model === "own"}
+      {#if cloud}
+        {#if djStatus?.keys[cloud]}
+          <div class="row">
+            <span>
+              <span class="label">{CLOUD_NAMES[cloud]} API key</span>
+              <span class="muted small">Saved in your system's keychain. It never leaves this computer except to {CLOUD_NAMES[cloud]}.</span>
+            </span>
+            <button class="btn quiet" onclick={removeKey}>Remove key</button>
+          </div>
+
+          <div class="row">
+            <span>
+              <span class="label">Model</span>
+              <span class="muted small">
+                {#if modelsError}
+                  Couldn't list the models: {modelsError}. Type a model name instead.
+                {:else}
+                  The models your key can use, newest first.
+                {/if}
+              </span>
+            </span>
+            <span class="buttons">
+              {#if cloudModels?.length}
+                <select class="field" value={cloudModel} onchange={(e) => pickCloudModel(e.currentTarget.value)}>
+                  {#if cloudModel && !cloudModels.some((m) => m.id === cloudModel)}
+                    <option value={cloudModel}>{cloudModel}</option>
+                  {/if}
+                  {#each cloudModels as m (m.id)}
+                    <option value={m.id}>{m.label}</option>
+                  {/each}
+                </select>
+              {:else if modelsError || cloudModels}
+                <input
+                  class="field"
+                  value={cloudModel}
+                  placeholder="Model name"
+                  onblur={(e) => pickCloudModel(e.currentTarget.value)}
+                  onkeydown={(e) => e.key === "Enter" && pickCloudModel(e.currentTarget.value)}
+                />
+              {:else}
+                <span class="muted small">Listing models…</span>
+              {/if}
+              <button class="btn quiet" title="List the models again" onclick={() => cloud && loadModels(cloud)}>Refresh</button>
+            </span>
+          </div>
+        {:else}
+          <label class="row">
+            <span>
+              <span class="label">{CLOUD_NAMES[cloud]} API key</span>
+              <span class="muted small">Kept in your system's keychain, and only ever sent to {CLOUD_NAMES[cloud]}.</span>
+            </span>
+            <span class="buttons">
+              <input
+                class="field"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Paste your key"
+                bind:value={apiKey}
+                onkeydown={(e) => e.key === "Enter" && saveKey()}
+              />
+              <button class="btn primary" disabled={!apiKey.trim()} onclick={saveKey}>Save</button>
+            </span>
+          </label>
+        {/if}
+        <div class="row">
+          <span class="muted small">
+            With {CLOUD_NAMES[cloud]}, what the DJ is asked goes to {CLOUD_NAMES[cloud]}: your first name, the songs it's
+            choosing from with when you played or liked them, what it looked up about them, and your instructions below.
+          </span>
+        </div>
+      {/if}
+
+      {#if djSettings.provider === "own"}
         <label class="row">
           <span>
             <span class="label">Server address</span>
@@ -443,6 +596,29 @@
             <span class="muted small">As your server lists it, for example llama3.2 or qwen2.5:7b.</span>
           </span>
           <input class="field" bind:value={serverModel} onblur={saveServer} onkeydown={(e) => e.key === "Enter" && saveServer()} />
+        </label>
+        <label class="row">
+          <span>
+            <span class="label">Its model can look things up</span>
+            <span class="muted small">
+              Turn this on if the model supports tool calls, as most recent Llama, Qwen and Mistral models do. The DJ
+              can then ask about songs before picking them.
+            </span>
+          </span>
+          <input type="checkbox" class="switch" checked={djSettings.own_tools} onchange={(e) => dj.configure({ own_tools: e.currentTarget.checked })} />
+        </label>
+      {/if}
+
+      {#if djStatus?.tools}
+        <label class="row">
+          <span>
+            <span class="label">Look up genres on MusicBrainz</span>
+            <span class="muted small">
+              When the DJ looks songs up, it reads what Spotify says about them, and can ask MusicBrainz for their
+              genres too. The songs' titles, artists and ISRC codes go to musicbrainz.org.
+            </span>
+          </span>
+          <input type="checkbox" class="switch" checked={djSettings.musicbrainz} onchange={(e) => dj.configure({ musicbrainz: e.currentTarget.checked })} />
         </label>
       {/if}
 
@@ -491,6 +667,14 @@
           </span>
         </span>
         <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Let the DJ name every song in a set</span>
+          <span class="muted small">Off, it introduces only the first song and lets the rest of the set speak for itself.</span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.nameAll} onchange={(e) => dj.setNameAll(e.currentTarget.checked)} />
       </label>
 
       <label class="row stacked">

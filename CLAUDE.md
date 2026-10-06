@@ -83,12 +83,21 @@ window focus re-reads the folders, so edits apply live. `--safe-mode` loads none
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
 while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, or the Hub's published hash for
 models, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
-port with an API key and `--offline`, or talks to the user's own OpenAI-style server; `voice.rs` reads lines to WAV
+port with an API key, `--jinja` and `--offline`. `chat.rs` asks it, the user's own OpenAI-style server, or a cloud
+provider (`DjConfig.provider`: OpenAI, Gemini through its OpenAI-compatible endpoint, Anthropic's Messages API)
+with the user's key, which `secrets.rs` keeps in the system keychain (`keyring`; a 0600 file without one) and never
+hands the UI (`DjConfig.api_keys` only flags which are saved, so the keychain is read, off the async workers, only
+when a cloud model is asked); `voice.rs` reads lines to WAV
 and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
 output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
 segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
-(llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates;
+(llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates. Later
+sets are told their number and what was said before, so they don't greet again, and only the first song is named
+unless `dj.nameAll`. When `DjStatus.tools` says the model can call tools, a first request offers `look_up_songs`;
+`dj_song_info` (`songinfo.rs`: librespot metadata through the device's session, Web API artist genres, MusicBrainz
+at 1 request/s, kept a month) answers, and the facts go into the JSON request as plain text, the same for every
+provider;
 `djTiming.ts` plans the talk around both songs' synced lyrics (shifted by the song's own `songOffsets` nudge): the
 talk is an item of its own (`dj.onAir`, shown by the player bar and queue), overlapping 1.5 to 5 s of the finishing
 song's outro and of the next song's intro (under at most half the line), or none, each behind a setting
@@ -103,7 +112,12 @@ as it goes") a set keeps the model's picks as `plan` and grows song by song (a n
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
 picked only as the last song starts. Only songs a set was started with sit behind the player, so Next and
-Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving.
+Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving. `dj.request(text)` makes the next set a
+requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet introduced (its queue cleared after
+what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
+through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
+playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
+names).
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's

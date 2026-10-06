@@ -119,6 +119,8 @@ pub struct ConnectDevice {
     paths: Paths,
     http: reqwest::Client,
     spirc: Mutex<Option<Spirc>>,
+    /// The signed-in session while the device runs, which also reads Spotify's metadata (the DJ's song look-ups).
+    session: Mutex<Option<Session>>,
     status: Mutex<DeviceStatus>,
     /// Bumped on every start/stop so stale supervisors exit.
     generation: AtomicU64,
@@ -134,6 +136,7 @@ impl ConnectDevice {
             paths,
             http,
             spirc: Mutex::new(None),
+            session: Mutex::new(None),
             status: Mutex::new(DeviceStatus {
                 state: DeviceState::Offline,
                 device_id: config.device_id.clone(),
@@ -156,6 +159,11 @@ impl ConnectDevice {
 
     pub fn status(&self) -> DeviceStatus {
         self.status.lock().unwrap().clone()
+    }
+
+    /// The signed-in session, while the device runs.
+    pub fn session(&self) -> Option<Session> {
+        self.session.lock().unwrap().clone()
     }
 
     fn set_status(&self, app: &AppHandle, state: DeviceState, error: Option<String>) {
@@ -341,6 +349,7 @@ impl ConnectDevice {
             return Ok(Ended::Normally);
         }
         *self.spirc.lock().unwrap() = Some(spirc);
+        *self.session.lock().unwrap() = Some(session.clone());
         {
             let mut s = self.status.lock().unwrap();
             s.device_id = session.device_id().to_owned();
@@ -361,6 +370,7 @@ impl ConnectDevice {
         };
 
         self.spirc.lock().unwrap().take();
+        self.session.lock().unwrap().take();
         Ok(ended)
     }
 
@@ -369,6 +379,7 @@ impl ConnectDevice {
         if let Some(spirc) = self.spirc.lock().unwrap().take() {
             let _ = spirc.shutdown();
         }
+        self.session.lock().unwrap().take();
     }
 
     pub fn command(&self, cmd: DeviceCommand) -> Result<()> {

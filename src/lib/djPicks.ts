@@ -3,7 +3,7 @@
 // the prompt for the model, and checking its answer. Without a usable answer, the DJ picks and talks
 // from templates, so it never stalls on the model.
 
-import type { DjMessage } from "./ipc";
+import type { DjMessage, DjSongInfo, DjTool, DjToolCall } from "./ipc";
 import type { PlayHistory, SavedTrack, Track } from "./types";
 
 /** Why a song is in the pool. */
@@ -13,6 +13,8 @@ export interface Candidate {
   uri: string;
   name: string;
   artists: string[];
+  /** The artists' Spotify ids, for looking them up. */
+  artistIds?: string[];
   album: string;
   year: string | null;
   durationMs: number;
@@ -49,6 +51,7 @@ export function buildPool(l: Listening, now = new Date()): Candidate[] {
         uri: t.uri,
         name: t.name,
         artists: (t.artists ?? []).map((a) => a.name),
+        artistIds: (t.artists ?? []).map((a) => a.id),
         album: t.album?.name ?? "",
         year: t.album?.release_date?.slice(0, 4) || null,
         durationMs: t.duration_ms,
@@ -87,7 +90,7 @@ function validDate(s: string | null | undefined): Date | null {
   return d && Number.isFinite(d.getTime()) ? d : null;
 }
 
-export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover";
+export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover" | "request";
 
 export interface Segment {
   id: SegmentId;
@@ -256,6 +259,124 @@ export function choicesFor(
   return out;
 }
 
+/** The longest request the DJ takes for its next set. */
+export const REQUEST_MAX = 200;
+/** A request offers more songs than a segment does, for the model to find what fits. */
+export const REQUEST_CHOICES = 20;
+
+/** A set the listener asked for. */
+export function requestSegment(request: string): Segment {
+  return {
+    id: "request",
+    label: "Your request",
+    brief: "a set the listener asked for, in their words below",
+    phrase: "what you asked for",
+    fits: () => true,
+  };
+}
+
+/** Words that don't help find songs. */
+const FILLER = new Set([
+  "the", "and", "some", "more", "songs", "song", "music", "play", "like", "with", "from", "that", "this", "please",
+  "something", "anything", "any", "for", "stuff", "tracks", "by", "can", "you", "your", "want", "wanna", "hear", "give",
+  "need", "feel", "feeling", "mood", "vibe", "vibes", "kind", "bit", "all", "now", "just", "maybe", "let", "lets",
+  "get", "put", "have", "got", "into", "there", "what", "how", "about", "really", "very", "too", "again",
+]);
+/** Words that turn the next ones around: "no more Drake", "anything but Drake", "without the 80s", "don't play
+ * Drake". */
+const NEGATIONS = new Set([
+  "no", "not", "without", "except", "but", "less", "nothing", "never", "stop", "skip", "avoid", "dont", "doesnt",
+  "cant", "wont", "nor",
+]);
+/** Words that turn them back, unless right after one: "no Drake, more Radiohead", "less Drake and more Future". */
+const TURNS = new Set(["more", "instead", "only", "just", "rather"]);
+
+/** How well a song fits what a request names: its artists, album, title or decade. Below zero for what the request
+ * says to leave out. */
+export function requestScore(request: string): (c: Candidate) => number {
+  // Words, and the punctuation that ends a clause. A typographic apostrophe is a plain one.
+  const tokens = request.toLowerCase().replace(/[\u2018\u2019]/g, "'").match(/[\p{L}\p{N}']+|[.,;!?]/gu) ?? [];
+  const wanted: string[] = [];
+  const unwanted: string[] = [];
+  /** Decades, by their first year. */
+  const decades: number[] = [];
+  const notDecades: number[] = [];
+  let against = false;
+  let prev = "";
+  for (const t of tokens) {
+    const w = t.replace(/'/g, "");
+    const after = prev;
+    prev = w;
+    // "Nothing but Radiohead" is only Radiohead.
+    if (w === "but" && after === "nothing") {
+      against = false;
+      continue;
+    }
+    if (NEGATIONS.has(w)) {
+      against = true;
+      continue;
+    }
+    if (/^[.,;!?]$/.test(w) || (TURNS.has(w) && !NEGATIONS.has(after))) {
+      against = false;
+      continue;
+    }
+    const decade = decadeOf(w);
+    if (decade !== null) {
+      (against ? notDecades : decades).push(decade);
+      continue;
+    }
+    if (w.length < 3 || FILLER.has(w)) continue;
+    (against ? unwanted : wanted).push(w);
+  }
+  const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
+  const about = (c: Candidate, w: string) =>
+    (c.artists.some((a) => has(a, w)) ? 3 : 0) + (has(c.album, w) ? 2 : 0) + (has(c.name, w) ? 1 : 0);
+  return (c) => {
+    let n = 0;
+    for (const w of wanted) n += about(c, w);
+    for (const w of unwanted) if (about(c, w) > 0) n -= 10;
+    const year = Number(c.year);
+    const inDecade = (d: number) => year >= d && year < d + 10;
+    if (decades.some(inDecade)) n += 2;
+    if (notDecades.some(inDecade)) n -= 10;
+    return n;
+  };
+}
+
+/** The decade a word names ("90s", "1980s", "2010s"), as its first year. */
+function decadeOf(word: string): number | null {
+  const m = word.match(/^(19|20)?(\d)0s$/);
+  if (!m) return null;
+  const century = m[1] ? Number(m[1]) * 100 : Number(m[2]) >= 3 ? 1900 : 2000;
+  return century + Number(m[2]) * 10;
+}
+
+/** The songs a request can choose from: those whose title, artist, album or decade it names first, then a spread
+ * of the rest of the listening (one per artist, as a segment's are), for the model to judge a mood or a genre by. */
+export function requestChoices(
+  request: string,
+  pool: Candidate[],
+  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  random: () => number = Math.random,
+): Candidate[] {
+  const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
+  const score = requestScore(request);
+  const scored = shuffled(open, random).map((c) => ({ c, n: score(c) }));
+  const named = scored.filter((s) => s.n > 0).sort((a, b) => b.n - a.n).map((s) => s.c).slice(0, REQUEST_CHOICES);
+  // What the request says to leave out (below zero) isn't offered at all.
+  const rest = scored.filter((s) => s.n === 0).map((s) => s.c);
+  // The rest, one per artist where possible.
+  const byArtist = new Map<string, Candidate[]>();
+  for (const c of rest) byArtist.set(c.artists[0] ?? "", [...(byArtist.get(c.artists[0] ?? "") ?? []), c]);
+  const out = [...named];
+  for (let round = 0; out.length < REQUEST_CHOICES && out.length < named.length + rest.length; round++) {
+    for (const songs of byArtist.values()) {
+      if (songs[round] && out.length < REQUEST_CHOICES) out.push(songs[round]);
+    }
+  }
+  return out;
+}
+
 /** The next segment: one that has songs left, not one of the last two, the opener first when it can be. */
 export function nextSegment(
   history: SegmentId[],
@@ -310,14 +431,28 @@ export interface SegmentAsk {
   /** The song playing out as the DJ talks; none for the opening. */
   previous: { name: string; artists: string[] } | null;
   instructions: string;
+  /** The show's first set, where the DJ says hello; by default, the one with no song before it. */
+  opening?: boolean;
+  /** Which set of the show this is, counting from 1. */
+  setNumber?: number;
+  /** What the DJ said before these, most recent last, so it doesn't say it again. */
+  earlier?: string[];
+  /** The DJ may name every song it picked, not just the first. */
+  nameAll?: boolean;
+  /** What the DJ looked up about some of the choices, as `songFacts` lines. */
+  lookedUp?: string[];
+  /** What the listener asked for this set. */
+  request?: string;
+  /** The set the listener skipped the rest of since the last prompt, by name. */
+  skippedSet?: string;
   /** The DJ picks the set's songs after the first as it goes. */
   live?: boolean;
   reactions?: Reactions;
   now?: Date;
 }
 
-export function segmentMessages(ask: SegmentAsk): DjMessage[] {
-  const now = ask.now ?? new Date();
+/** The system message: who the DJ is and how it talks. */
+function persona(ask: SegmentAsk, opening: boolean): string {
   const instructions = ask.instructions.trim().slice(0, INSTRUCTIONS_MAX);
   const system = [
     "You are the listener's personal radio DJ inside their music app. Between songs you say a few words out loud,",
@@ -327,9 +462,16 @@ export function segmentMessages(ask: SegmentAsk): DjMessage[] {
     "- One to three short sentences, under 50 words in all. It is spoken aloud: no lists, emojis, hashtags,",
     "  markdown, quotation marks around the whole thing, or stage directions.",
     "- Introduce the first song you picked by its title and artist, and say why it's here using only the",
-    "  facts given (when they played it, when they liked it).",
-    "- Never make up facts about artists, songs, charts or the listener.",
+    "  facts given or looked up (when they played it, when they liked it, what it is).",
   ];
+  if (!ask.nameAll) system.push("- Name only that first song. Don't read out the rest of the set: they'll hear it as it comes.");
+  if (!opening) {
+    system.push(
+      "- The show is already on. Don't greet the listener, welcome them or open the show again: carry on between",
+      '  songs the way a host does ("next up", "coming up", "here\'s"), without repeating what you said before.',
+    );
+  }
+  system.push("- Never make up facts about artists, songs, charts or the listener.");
   if (instructions) {
     system.push(
       "",
@@ -340,30 +482,141 @@ export function segmentMessages(ask: SegmentAsk): DjMessage[] {
       '"""',
     );
   }
+  return system.join("\n");
+}
+
+/** Where the show is, the songs on offer, and anything looked up about them. */
+function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
   const list = ask.choices.map((c, i) => {
     const about = [c.album && c.year ? `${c.album}, ${c.year}` : c.album || c.year].filter(Boolean).join("");
     const f = facts(c, now);
     return `${i + 1}. ${c.name} by ${c.artists.join(", ")}${about ? ` (${about})` : ""}${f.length ? `: ${f.join("; ")}` : ""}`;
   });
+  const where: string[] = [];
+  if (opening) {
+    where.push(
+      `It's ${partOfDay(now)}.${ask.listener ? ` The listener's name is ${ask.listener}.` : ""}`,
+      "This is the start of the session: greet the listener first.",
+    );
+  } else {
+    const set = ask.setNumber && ask.setNumber > 1 ? `set ${ask.setNumber} of the show` : "a new set in the show";
+    where.push(`It's ${partOfDay(now)}. This is ${set}, already under way.`);
+    if (ask.previous) where.push(`You're coming out of "${ask.previous.name}" by ${ask.previous.artists.join(", ")}.`);
+    const earlier = (ask.earlier ?? []).filter((t) => t.trim()).slice(-2);
+    if (earlier.length) where.push(`What you said before: ${earlier.map((t) => `"${t.trim()}"`).join(" Then: ")}`);
+  }
+  if (ask.skippedSet) {
+    where.push(`The listener skipped the rest of the set "${ask.skippedSet}": they weren't feeling it, so take the show somewhere else.`);
+  }
+  where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions));
+  // Their words stay inside the fence.
+  const request = ask.request?.trim().slice(0, REQUEST_MAX).replaceAll('"""', '"');
+  if (request) {
+    where.push(
+      "The listener asked for this set:",
+      '"""',
+      request,
+      '"""',
+      "Pick the songs that fit it best. If none really do, pick the closest and say so. Mention that it's their request.",
+    );
+  }
+  where.push("", "Songs you can pick from:", ...list);
+  if (ask.lookedUp?.length) where.push("", "What you looked up:", ...ask.lookedUp);
+  return where;
+}
+
+export function segmentMessages(ask: SegmentAsk): DjMessage[] {
+  const now = ask.now ?? new Date();
+  const opening = ask.opening ?? !ask.previous;
   const user = [
-    `It's ${partOfDay(now)}.${ask.listener ? ` The listener's name is ${ask.listener}.` : ""}`,
-    ask.previous
-      ? `You're coming out of "${ask.previous.name}" by ${ask.previous.artists.join(", ")}.`
-      : "This is the start of the session: greet the listener first.",
-    `This segment: ${ask.segment.brief}.`,
-    ...reactionLines(ask.reactions),
-    "",
-    "Songs you can pick from:",
-    ...list,
+    ...situation(ask, opening, now),
     "",
     `Pick ${SET_MIN} to ${SET_MAX} of them by number, in the order to play them. Give the segment a short name,`,
     "then write what you say before the first song you picked. Answer in JSON.",
   ];
   if (ask.live) user.push("Name only the first song when you talk: you pick the rest as the listener goes.");
   return [
-    { role: "system", content: system.join("\n") },
+    { role: "system", content: persona(ask, opening) },
     { role: "user", content: user.join("\n") },
   ];
+}
+
+/** The most songs one look-up covers. */
+export const LOOK_UP_MAX = 5;
+const LOOK_UP_TOOL = "look_up_songs";
+
+/** The tool the model can call before it picks. */
+export function lookUpTool(choices: number): DjTool {
+  return {
+    name: LOOK_UP_TOOL,
+    description:
+      "Look up songs from the list before picking: their genres, release date and label, how popular they are, and " +
+      "the artist's background. Give the numbers of the songs you want to know more about.",
+    parameters: {
+      type: "object",
+      properties: {
+        songs: {
+          type: "array",
+          items: { type: "integer", minimum: 1, maximum: Math.max(1, choices) },
+          maxItems: LOOK_UP_MAX,
+          description: `Up to ${LOOK_UP_MAX} song numbers from the list.`,
+        },
+      },
+      required: ["songs"],
+      additionalProperties: false,
+    },
+  };
+}
+
+/** The first question to a model that can look things up: which songs, if any, it wants to know more about. */
+export function lookUpMessages(ask: SegmentAsk): DjMessage[] {
+  const now = ask.now ?? new Date();
+  const opening = ask.opening ?? !ask.previous;
+  const user = [
+    ...situation({ ...ask, lookedUp: undefined }, opening, now),
+    "",
+    `Before you pick, you can look up to ${LOOK_UP_MAX} of these songs with ${LOOK_UP_TOOL}: what they are`,
+    "(genre, release, label, how popular) and who made them. Look up the ones you'd like to know more about to",
+    "pick well or say something worth hearing. If you know enough already, say so and don't call it.",
+  ];
+  return [
+    { role: "system", content: persona(ask, opening) },
+    { role: "user", content: user.join("\n") },
+  ];
+}
+
+/** The songs the model asked to look up, in its order, without repeats. */
+export function lookUpsAsked(calls: DjToolCall[] | undefined, choices: Candidate[]): Candidate[] {
+  const out: Candidate[] = [];
+  for (const call of calls ?? []) {
+    if (call.name !== LOOK_UP_TOOL) continue;
+    const songs = (call.arguments as { songs?: unknown } | null)?.songs;
+    for (const n of Array.isArray(songs) ? songs : []) {
+      const c = Number.isInteger(n) ? choices[(n as number) - 1] : undefined;
+      if (c && !out.includes(c) && out.length < LOOK_UP_MAX) out.push(c);
+    }
+  }
+  return out;
+}
+
+/** One looked-up song, by its number in the list, as a line the model can read. */
+export function songFacts(n: number, c: Candidate, info: DjSongInfo): string {
+  const out: string[] = [];
+  if (info.genres.length) out.push(`genres ${info.genres.join(", ")}`);
+  if (info.tags.length) out.push(`tagged ${info.tags.join(", ")}`);
+  const on = info.label ? ` on ${info.label}` : "";
+  if (info.released) out.push(`released ${info.released}${on}`);
+  else if (on) out.push(`released${on}`);
+  if (info.album && info.album_type) out.push(`from the ${info.album_type} "${info.album}"`);
+  if (info.popularity != null) {
+    const how = info.popularity >= 70 ? "a big hit" : info.popularity >= 45 ? "well known" : info.popularity >= 20 ? "a lesser-known track" : "a deep cut";
+    out.push(`${how} (popularity ${info.popularity} of 100)`);
+  }
+  if (info.languages.length) out.push(`sung in ${info.languages.join(", ")}`);
+  if (info.artist_active) out.push(`artist active ${info.artist_active}`);
+  if (info.related_artists.length) out.push(`for fans of ${info.related_artists.join(", ")}`);
+  if (info.artist_bio) out.push(`about the artist: ${info.artist_bio}`);
+  return `${n}. ${c.name} by ${c.artists.join(", ")}: ${out.length ? out.join("; ") : "nothing more found"}`;
 }
 
 /** What the listener just did, for the DJ to go by and mention. */

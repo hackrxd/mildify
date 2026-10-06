@@ -314,7 +314,7 @@ async fn dj_configure(
         cfg.save(&state.paths.config_file)?;
         (old, cfg.dj.clone())
     };
-    if old != new {
+    if !old.same_engine(&new) {
         // What's downloading may not be what's needed any more; partial downloads are kept.
         state.dj.cancel_install();
         state.dj.release().await;
@@ -355,16 +355,50 @@ async fn dj_warm(state: State<'_, AppState>) -> Result<()> {
     state.dj.warm(&state.config().dj).await
 }
 
-/// Asks the DJ's model; with a JSON schema, the answer is JSON that fits it.
+/// Asks the DJ's model: with a JSON schema, for JSON that fits it; offered tools, for the calls it wants to
+/// make before answering.
 #[tauri::command]
 async fn dj_generate(
     state: State<'_, AppState>,
-    messages: Vec<dj::engine::Message>,
+    messages: Vec<dj::chat::Message>,
     schema: Option<Value>,
+    tools: Option<Vec<dj::chat::Tool>>,
     max_tokens: Option<u32>,
-) -> Result<Value> {
+) -> Result<dj::chat::Answer> {
     let cfg = state.config().dj;
-    state.dj.generate(&cfg, &messages, schema.as_ref(), max_tokens.unwrap_or(400).min(2000)).await
+    let max_tokens = max_tokens.unwrap_or(400).min(2000);
+    state.dj.generate(&cfg, &messages, schema.as_ref(), tools.as_deref(), max_tokens).await
+}
+
+/// Saves the API key for a cloud model provider in the system keychain, or removes it with `None`. The key
+/// never comes back to the UI; the status says only whether one is saved.
+#[tauri::command]
+async fn dj_set_key(state: State<'_, AppState>, provider: String, key: Option<String>) -> Result<dj::DjStatus> {
+    let saved = state.dj.set_key(&provider, key).await?;
+    let cfg = {
+        let mut cfg = state.config.lock().unwrap();
+        if saved {
+            cfg.dj.api_keys.insert(provider);
+        } else {
+            cfg.dj.api_keys.remove(&provider);
+        }
+        cfg.save(&state.paths.config_file)?;
+        cfg.dj.clone()
+    };
+    Ok(state.dj.status(&cfg))
+}
+
+/// What the DJ's model can find out about songs it's choosing from, before it picks.
+#[tauri::command]
+async fn dj_song_info(state: State<'_, AppState>, songs: Vec<dj::songinfo::SongRef>) -> Result<Vec<dj::songinfo::SongInfo>> {
+    let cfg = state.config().dj;
+    state.dj.song_info(&cfg, &songs, state.device.session(), &state.webapi).await
+}
+
+/// The models a cloud provider offers with the saved key.
+#[tauri::command]
+async fn dj_models(state: State<'_, AppState>, provider: String) -> Result<Vec<dj::chat::ModelChoice>> {
+    state.dj.models(&provider).await
 }
 
 /// Reads a line in the DJ's voice; `dj_voice` plays it.
@@ -533,6 +567,9 @@ pub fn run() {
             dj_remove,
             dj_warm,
             dj_generate,
+            dj_set_key,
+            dj_models,
+            dj_song_info,
             dj_speak,
             dj_voice,
             dj_duck,

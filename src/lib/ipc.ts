@@ -52,12 +52,25 @@ export interface Config {
 export interface DjConfig {
   /** Off until turned on; nothing is downloaded before. */
   enabled: boolean;
-  /** A model id from `DjStatus.models`, or "own" for the server below. */
+  /** Who writes the talk: the downloaded model, the user's own server, or a cloud provider. */
+  provider: DjProvider;
+  /** The downloaded model the "local" provider runs, an id from `DjStatus.models`. */
   model: string;
   voice: string;
   server_url: string;
   server_model: string;
+  /** The own server's model can call tools, so it can look songs up. */
+  own_tools: boolean;
+  /** The model picked for each cloud provider. */
+  api_models: Partial<Record<DjCloud, string>>;
+  /** The cloud providers with a key saved; the keys stay in the system keychain. */
+  api_keys: DjCloud[];
+  /** Song look-ups may ask MusicBrainz for genres. */
+  musicbrainz: boolean;
 }
+
+export type DjCloud = "openai" | "anthropic" | "gemini";
+export type DjProvider = "local" | "own" | DjCloud;
 
 /** A download the DJ's settings need. */
 export interface DjNeeded {
@@ -89,8 +102,12 @@ export interface DjStatus {
   settings: DjConfig;
   /** Everything the settings need is downloaded, and an own server is set up. */
   ready: boolean;
-  /** What the own-server settings still need, if anything. */
+  /** What the model settings still need, if anything. */
   setup: string | null;
+  /** Which cloud providers have a key saved; the keys themselves stay in the backend. */
+  keys: Record<DjCloud, boolean>;
+  /** The model in use can look songs up. */
+  tools: boolean;
   needed: DjNeeded[];
   install: DjInstall;
   disk_bytes: number;
@@ -102,6 +119,54 @@ export interface DjStatus {
 export interface DjMessage {
   role: "system" | "user" | "assistant";
   content: string;
+}
+
+/** A tool the DJ's model may call, with its arguments as JSON Schema. */
+export interface DjTool {
+  name: string;
+  description: string;
+  parameters: object;
+}
+
+export interface DjToolCall {
+  name: string;
+  arguments: unknown;
+}
+
+/** The model's answer to a look-up question: the calls it made, or what it said instead. */
+export interface DjLookUp {
+  calls?: DjToolCall[];
+  text?: string;
+}
+
+/** A model a cloud provider offers. */
+export interface DjModelChoice {
+  id: string;
+  label: string;
+}
+
+/** A song to look up (src-tauri/src/dj/songinfo.rs). */
+export interface DjSongRef {
+  uri: string;
+  name: string;
+  artist: string;
+  artist_id: string | null;
+}
+
+/** What was found about a song. */
+export interface DjSongInfo {
+  uri: string;
+  genres: string[];
+  tags: string[];
+  released: string | null;
+  label: string | null;
+  album: string | null;
+  album_type: string | null;
+  popularity: number | null;
+  languages: string[];
+  artist_bio: string | null;
+  artist_active: string | null;
+  related_artists: string[];
 }
 
 /** A sentence of a spoken line and when it's said, from the start of the audio. */
@@ -271,8 +336,17 @@ export const backend = {
   /** Loads the model ahead of the first request. */
   djWarm: () => invoke<void>("dj_warm"),
   /** Asks the DJ's model; with a JSON schema, resolves to JSON that fits it. */
-  djGenerate: (messages: DjMessage[], schema?: object, maxTokens?: number) =>
-    invoke<unknown>("dj_generate", { messages, schema, maxTokens }),
+  djGenerate: async (messages: DjMessage[], schema?: object, maxTokens?: number) =>
+    (await invoke<{ json?: unknown }>("dj_generate", { messages, schema, maxTokens })).json,
+  /** Offers the DJ's model tools; resolves to the calls it wants to make before answering. */
+  djLookUp: (messages: DjMessage[], tools: DjTool[], maxTokens?: number) =>
+    invoke<DjLookUp>("dj_generate", { messages, tools, maxTokens }),
+  /** What can be found out about songs the model asked about. */
+  djSongInfo: (songs: DjSongRef[]) => invoke<DjSongInfo[]>("dj_song_info", { songs }),
+  /** Saves a cloud provider's API key in the system keychain, or removes it with null. */
+  djSetKey: (provider: DjCloud, key: string | null) => invoke<DjStatus>("dj_set_key", { provider, key }),
+  /** The models a cloud provider offers with the saved key. */
+  djModels: (provider: DjCloud) => invoke<DjModelChoice[]>("dj_models", { provider }),
   djSpeak: (text: string) => invoke<DjSpeech>("dj_speak", { text }),
   /** Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes. */
   djVoice: (command: DjVoiceCommand) => invoke<void>("dj_voice", { command }),

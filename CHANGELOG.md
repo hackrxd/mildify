@@ -5,6 +5,29 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Added
+
+- The AI DJ can write its talk with a cloud model: OpenAI, Anthropic or Google Gemini, with your own API key, which
+  is kept in your system's keychain. Pick the provider and model in Settings → AI DJ; the voice is still made on
+  your computer.
+- Before picking a set, the DJ can look songs up: their genres, release date and label, how popular they are, and
+  the artist's story, from Spotify, and from MusicBrainz if you allow it. Cloud models and Qwen3 4B do this, and so
+  can your own model server if you say its model supports it.
+- "Let the DJ name every song in a set", in Settings → AI DJ.
+- Ask the DJ for its next set in your own words ("something upbeat", "more Radiohead", "the 90s") on the DJ page,
+  and skip the rest of a set you aren't feeling with "Skip this set".
+
+### Changed
+
+- The DJ doesn't greet you again with every set: after the opening it carries on the show ("next up…") and doesn't
+  repeat what it said before.
+- The DJ introduces only the first song of a set, instead of reading out the whole set list.
+
+### Fixed
+
+- With "Pick songs as it goes" on, pressing Next or Previous several times quickly no longer runs past the DJ's set
+  or stops the music, and Previous on a set's first song starts it again.
+
 ## 1.2.0 - 2026-10-04
 
 ### Added
