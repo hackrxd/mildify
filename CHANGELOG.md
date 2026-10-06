@@ -22,9 +22,12 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - The DJ doesn't greet you again with every set: after the opening it carries on the show ("next up…") and doesn't
   repeat what it said before.
 - The DJ introduces only the first song of a set, instead of reading out the whole set list.
+- The Linux AppImage needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). On older systems,
+  install the .deb or .rpm instead.
 
 ### Fixed
 
+- In the Linux AppImage, sung lyrics no longer shimmy: it now comes with a newer WebKitGTK (2.52).
 - With "Pick songs as it goes" on, pressing Next or Previous several times quickly no longer runs past the DJ's set
   or stops the music, and Previous on a set's first song starts it again.
 
