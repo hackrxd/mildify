@@ -117,8 +117,16 @@ jobs:
             args: --target aarch64-apple-darwin
           - platform: macos-latest
             args: --target x86_64-apple-darwin
+          # .deb and .rpm run on the system's own WebKitGTK, so they're built on the oldest base, for
+          # its glibc. The interface bundle comes from this job.
           - platform: ubuntu-22.04
             args: ""
+            bundles: --bundles deb,rpm
+          # The AppImage carries the build system's WebKitGTK: 24.04 has 2.52, on which sung lyrics
+          # hold still (22.04's 2.50 made them shimmy). It needs glibc 2.39.
+          - platform: ubuntu-24.04
+            args: ""
+            bundles: --bundles appimage
     runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
@@ -156,14 +164,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ matrix.bundles }}
           releaseId: ${{ needs.prepare.outputs.release_id }}
 
       # Interface-only updates (src-tauri/src/ui.rs): the built UI, signed like the update bundles, and
       # ui.json, which names the backend it needs. Installed apps with that backend load it with a
       # reload, so their music keeps playing; the rest take the full update from latest.json.
       - name: Interface bundle
-        if: startsWith(matrix.platform, 'ubuntu')
+        if: matrix.platform == 'ubuntu-22.04'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -181,7 +189,7 @@ jobs:
             '{version: $version, backend: $backend, url: $url, signature: $signature}' > ui-bundle/ui.json
 
       - name: Attach the interface bundle
-        if: startsWith(matrix.platform, 'ubuntu') && github.ref_type == 'tag'
+        if: matrix.platform == 'ubuntu-22.04' && github.ref_type == 'tag'
         uses: actions/github-script@v7
         env:
           release_id: ${{ needs.prepare.outputs.release_id }}
