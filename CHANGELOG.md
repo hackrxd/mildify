@@ -5,6 +5,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+## 1.3.0 - 2026-10-06
+
 ### Added
 
 - The AI DJ can write its talk with a cloud model: OpenAI, Anthropic or Google Gemini, with your own API key, which
