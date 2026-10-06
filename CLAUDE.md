@@ -148,9 +148,11 @@ error is surfaced as the `premium_required` device state. See `vendor/librespot-
 
 **Linux WebKitGTK workaround.** `src-tauri/src/webkit.rs` runs before GTK starts. With NVIDIA's proprietary
 driver on Wayland, it sets `WEBKIT_FORCE_DMABUF_RENDERER=1` and `__NV_DISABLE_EXPLICIT_SYNC=1`. The AppImage
-bundles Ubuntu 22.04's WebKitGTK, whose Debian patch otherwise falls back to software rendering on NVIDIA; the
+bundles Ubuntu 24.04's WebKitGTK, whose Debian patch otherwise falls back to software rendering on NVIDIA; the
 lyrics view then drops to about 20 fps. Without the explicit-sync variable, KWin kills the app with a Wayland
-protocol error. Under X11 the forced renderer draws nothing, so the workaround is Wayland-only.
+protocol error. Under X11 the forced renderer draws nothing, so the workaround is Wayland-only. The AppImage is
+built on 24.04 for its WebKitGTK 2.52: 22.04's 2.50 made sung lyrics shimmy. `.deb` and `.rpm` use the system's
+WebKitGTK and are still built on 22.04, for its older glibc.
 
 ## Spotify API constraints (February 2026 development-mode rules)
 
@@ -172,11 +174,11 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
 3. Commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`.
 4. `.github/workflows/build.yml` fails early if the tag doesn't match `tauri.conf.json`, or if `CHANGELOG.md` has no
    section for it (`scripts/release-notes.mjs`, also a test against `package.json`'s version). That section is the
-   GitHub release's notes, above GitHub's generated list. It builds Windows, macOS
-   (arm64 and x64) and Linux (on ubuntu-22.04) into a draft release, then publishes it once all four builds
-   and the test job pass. Installed apps update from that release's `ui.json` (reload only, when `src-tauri` is
-   unchanged) or `latest.json`. Update bundles are signed with `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is
-   in `tauri.conf.json`.
+   GitHub release's notes, above GitHub's generated list. It builds Windows, macOS (arm64 and x64) and Linux
+   (`.deb`/`.rpm` and the interface bundle on ubuntu-22.04, the AppImage on ubuntu-24.04) into a draft release,
+   then publishes it once all five builds and the test job pass. Installed apps update from that release's
+   `ui.json` (reload only, when `src-tauri` is unchanged) or `latest.json`. Update bundles are signed with
+   `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
 
 Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
 starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
