@@ -2,7 +2,7 @@
 # Tauri can't cross-compile between operating systems, so each target builds on its own runner.
 # Pushing a tag like v0.1.0 (matching the version in src-tauri/tauri.conf.json) builds a GitHub
 # release with every installer attached, plus the signed update bundles and latest.json the in-app
-# updater reads. The release stays a draft until all four builds succeed, then it's published as
+# updater reads. The release stays a draft until all five builds succeed, then it's published as
 # the latest release, so installed copies never see a latest.json that's missing a platform.
 # The test job (Vitest, svelte-check, cargo test) has to pass too before a release is published.
 # Pushes to main and pull requests only run the tests; installers are built for version tags, or
