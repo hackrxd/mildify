@@ -952,6 +952,7 @@ class Dj {
     this.#preparing = null;
     this.#rush = null;
     this.#queued = "no";
+    this.#queueFor = null;
     this.#cues = [];
     this.#speechCues = [];
     this.#bringIn = null;
@@ -1826,6 +1827,9 @@ class Dj {
     } catch (e) {
       console.warn("DJ: couldn't queue the next set:", e);
       if (run === this.#run && this.upNext === set) this.#queued = "failed";
+    } finally {
+      // Done with it: nothing is on its way into the queue any more.
+      if (this.#queueFor === set) this.#queueFor = null;
     }
   }
 
