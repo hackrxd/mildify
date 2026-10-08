@@ -484,18 +484,28 @@ class Dj {
   /** Lets go of the next set, and of one being picked, for one picked anew. */
   #replaceNext() {
     const run = this.#run;
-    const next = this.upNext;
-    if (next) {
+    if (this.upNext) {
       this.#unqueue();
       this.#dropHandOver();
-      for (const s of next.songs) this.#played.delete(s.uri);
-      this.upNext = null;
     }
-    this.#preparing = null;
-    this.#prepareGen++;
+    this.#letGoOfNext();
     this.#prepareNext(run);
     // The music is waiting for it: the set asked for gets the same few seconds a skip gives.
     if (this.#waitingForSet) this.#hurry(run);
+  }
+
+  /** Lets go of the next set, and of one still being picked (its answer is ignored when it comes): their songs
+   * are up for picking again. The player's queue and any hand-over to it are the caller's to undo. */
+  #letGoOfNext() {
+    if (this.upNext) this.#unplayed(this.upNext.songs);
+    this.upNext = null;
+    this.#preparing = null;
+    this.#prepareGen++;
+  }
+
+  /** Songs picked for a set that won't play: up for picking again. */
+  #unplayed(songs: Candidate[]) {
+    for (const s of songs) this.#played.delete(s.uri);
   }
 
   /** Past a few seconds, the waiting music stops waiting for the model. */
@@ -554,12 +564,7 @@ class Dj {
     // The next set was picked to follow this one: it's picked again, from the song skipped, knowing the set was.
     const next = this.upNext;
     if (next && (this.announced === next || this.#awaiting === next)) return void this.#playSet(run, next);
-    if (next) {
-      for (const s of next.songs) this.#played.delete(s.uri);
-      this.upNext = null;
-    }
-    this.#preparing = null;
-    this.#prepareGen++;
+    this.#letGoOfNext();
     this.#waitingForSet = true;
     this.#prepareNext(run, song);
     this.activity = "Your DJ is picking something else…";
@@ -884,7 +889,7 @@ class Dj {
     const [speech, firstVocals] = await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
     if (stale()) {
       // A new session has its own.
-      if (run === this.#run) for (const s of songs) this.#played.delete(s.uri);
+      if (run === this.#run) this.#unplayed(songs);
       return null;
     }
     if (skippedSet !== undefined && this.#setSkipped === skippedSet) this.#setSkipped = null;
@@ -1653,7 +1658,7 @@ class Dj {
       if (run !== this.#run) return;
       if (gen !== this.#prepareGen) {
         // The listener asked for something else meanwhile: this set's songs go back in the pool.
-        for (const s of set?.songs ?? []) this.#played.delete(s.uri);
+        this.#unplayed(set?.songs ?? []);
         return;
       }
       this.#preparing = null;
