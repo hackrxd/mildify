@@ -118,7 +118,11 @@ requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet
 what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
 through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
 playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
-names).
+names). The session keeps its likes and skips in `djTaste.ts`, asks the model through `djPicker.ts`, remembers what it
+played lately in `djMemory.ts` and plays lines through `djVoice.ts`; `dj.on(fn)` tells whatever listens what happens
+(`DjEvent`: sets picked, started and skipped, songs started, skipped, unskipped and liked, lines spoken and withdrawn,
+stopped). Dev builds check the session's rules after every tick and stop (`#checkInvariants`), and every `dj.test.ts`
+case fails on a broken one.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
