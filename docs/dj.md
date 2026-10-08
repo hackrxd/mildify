@@ -119,12 +119,13 @@ another device. Songs it already added to Spotify's queue stay there; Spotify ha
 
 While the DJ is on, **Ask for the next set** on the DJ page takes a request in your own words: "something
 upbeat", "more Radiohead", "the 90s", "songs for a rainy evening". The DJ offers its model the songs from your
-listening that the request names (by artist, album, title or decade) first, then a spread of the rest for it to
+listening that the request names (by artist, album, title, decade or year: "U2", "the eighties", "2012") first, then a spread of the rest for it to
 judge a mood or genre by, and the set it picks says it's your request. If the next set is already picked but not yet
 introduced, the request takes its place; once its introduction has started, the request is the set after it. Never
 mind takes a request back.
 
-Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, more Future". When the
+Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, but Future". A "but"
+can turn the other way too: "Drake but also Future", "nothing but Radiohead". When the
 model doesn't answer, the DJ plays only songs the request names, and if there aren't enough of those it plays an
 ordinary set while your request waits for the next one.
 
@@ -164,9 +165,9 @@ on macOS, `%APPDATA%\dev.hackrxd.nativespotify\dj` on Windows).
 | Voices: Light | [KittenTTS](https://github.com/KittenML/KittenTTS) nano, via sherpa-onnx's release | 27 MB | Apache-2.0 |
 
 Only the parts your settings need are downloaded: the two runtimes, one model and one voice package. That's
-about 1.3 GB with the defaults. Downloads resume where they stopped. Each one is checked before it's used: the
-runtimes and voices against SHA-256 hashes pinned in the app (`src-tauri/src/dj/manifest.rs`), and the models
-against the hash Hugging Face publishes for the file.
+about 1.3 GB with the defaults. Downloads resume where they stopped. Each one is checked before it's used, against
+a SHA-256 hash pinned in the app (`src-tauri/src/dj/manifest.rs`); the models come from a fixed commit of their
+Hugging Face repository, so a file changed there later is never picked up.
 
 The Qwen2.5 model needs about 2 GB of memory while the DJ is on, and Qwen3 4B about 4 GB. The model is unloaded
 when you stop the DJ, or after 10 minutes without use.

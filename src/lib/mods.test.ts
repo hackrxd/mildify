@@ -1,3 +1,4 @@
+import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModInfo, ModList } from "./ipc";
 import type { ExtensionApi } from "./mods.svelte";
@@ -291,6 +292,43 @@ describe("extensions", () => {
     expect(mods.trackMenuItems).toEqual([]);
     expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
     expect(localStorage.getItem("nativify:extensions")).toBe("[]");
+  });
+
+  it("can't add anything once turned off, from a timer or callback left behind", async () => {
+    list.extensions = [mod("a.js")];
+    localStorage.setItem("nativify:extensions", '["a.js"]');
+    let ns: ExtensionApi | undefined;
+    modules["a.js"] = { default: (api: ExtensionApi) => void (ns = api) };
+    await boot();
+    await mods.startExtensions();
+    const ipc = await import("./ipc");
+    void ns!.api("GET", "/me");
+    expect(ipc.api).toHaveBeenCalledWith("GET", "/me", undefined);
+    vi.mocked(ipc.api).mockClear();
+    await mods.setEnabled("a.js", false);
+    // Nothing more goes to Spotify for it.
+    await expect(ns!.api("GET", "/me/player/queue")).rejects.toMatchObject({ kind: "cancelled" });
+    expect(ipc.api).not.toHaveBeenCalled();
+    const effect = vi.fn();
+    const unloaded = vi.fn();
+    const removers = [
+      ns!.addStyle(".late { color: red }"),
+      ns!.addPage({ id: "late", label: "Late", render: () => {} }),
+      ns!.addTrackMenuItem({ label: "Late", action: () => {} }),
+      ns!.watch(effect),
+    ];
+    ns!.toasts.show("still here");
+    ns!.onUnload(unloaded);
+    flushSync();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
+    expect(mods.pages).toEqual([]);
+    expect(mods.trackMenuItems).toEqual([]);
+    expect(effect).not.toHaveBeenCalled();
+    expect(show).not.toHaveBeenCalledWith("still here", "info");
+    // Its own clean-up still runs, at once.
+    expect(unloaded).toHaveBeenCalledOnce();
+    for (const remove of removers) remove();
   });
 
   it("removers returned by the API only run once", async () => {

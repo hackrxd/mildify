@@ -81,8 +81,8 @@ window focus re-reads the folders, so edits apply live. `--safe-mode` loads none
 
 **AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
-while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, or the Hub's published hash for
-models, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
+while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, models from a fixed Hugging
+Face commit, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
 port with an API key, `--jinja` and `--offline`. `chat.rs` asks it, the user's own OpenAI-style server, or a cloud
 provider (`DjConfig.provider`: OpenAI, Gemini through its OpenAI-compatible endpoint, Anthropic's Messages API)
 with the user's key, which `secrets.rs` keeps in the system keychain (`keyring`; a 0600 file without one) and never
@@ -91,7 +91,8 @@ when a cloud model is asked); `voice.rs` reads lines to WAV
 and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
 output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
-segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
+segments from top tracks, recent plays and liked songs (read by `djListening.ts`), and `djTalk.ts` asks for
+`{name, songs, talk}` against a JSON schema
 (llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates. Later
 sets are told their number and what was said before, so they don't greet again, and only the first song is named
 unless `dj.nameAll`. When `DjStatus.tools` says the model can call tools, a first request offers `look_up_songs`;
@@ -117,7 +118,11 @@ requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet
 what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
 through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
 playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
-names).
+names). The session keeps its likes and skips in `djTaste.ts`, asks the model through `djPicker.ts`, remembers what it
+played lately in `djMemory.ts` and plays lines through `djVoice.ts`; `dj.on(fn)` tells whatever listens what happens
+(`DjEvent`: sets picked, started and skipped, songs started, skipped, unskipped and liked, lines spoken and withdrawn,
+stopped). Dev builds check the session's rules after every tick and stop (`#checkInvariants`), and every `dj.test.ts`
+case fails on a broken one.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
@@ -180,7 +185,9 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
    `ui.json` (reload only, when `src-tauri` is unchanged) or `latest.json`. Update bundles are signed with
    `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
 
-Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
+Pushes to `main` and pull requests only run the test job, which also runs `scripts/platform-deps.mjs`: every release
+target must get the same direct dependencies, since a shared one written below a `[target.'cfg(…)'.dependencies]`
+table silently becomes that platform's only. Installers are built only for version tags, or by
 starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
 
 A tag run can't reuse another tag's caches, so `.github/workflows/rust-cache.yml` keeps the release builds'

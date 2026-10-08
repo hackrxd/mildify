@@ -101,7 +101,8 @@ async fn start(server: &Path, model: &Path, log: &Path) -> Result<Running> {
 
     let base = format!("http://127.0.0.1:{port}");
     let http = reqwest::Client::new();
-    let deadline = Instant::now() + LOAD_TIMEOUT;
+    let started = Instant::now();
+    let deadline = started + LOAD_TIMEOUT;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             return Err(AppError::Other(format!(
@@ -119,7 +120,7 @@ async fn start(server: &Path, model: &Path, log: &Path) -> Result<Running> {
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    log::info!("DJ model loaded from {}", model.display());
+    log::info!("DJ model loaded from {} in {:.1} s", model.display(), started.elapsed().as_secs_f64());
     Ok(Running {
         child,
         model: model.to_owned(),

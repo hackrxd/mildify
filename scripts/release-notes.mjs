@@ -1,8 +1,8 @@
 // Prints a release's section of CHANGELOG.md, for its GitHub release notes:
 //   node scripts/release-notes.mjs 1.2.0
 // Fails when the changelog has no section for that version, so a release can't go out without one.
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /** The body of `## <version>`, up to the next `## `, or null if there's none or it's empty. */
 export function releaseNotes(changelog, version) {
@@ -15,7 +15,16 @@ export function releaseNotes(changelog, version) {
   return body || null;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** Whether node was asked to run this file, by whatever path (a symlinked one included). */
+function isMain() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
   const version = (process.argv[2] ?? "").replace(/^v/, "");
   const notes = releaseNotes(readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8"), version);
   if (!notes) {

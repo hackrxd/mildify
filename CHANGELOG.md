@@ -5,6 +5,21 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Changed
+
+- Asking the DJ for a set understands short artist names like U2, decades in words ("the eighties") and single
+  years, and "but" both ways: "no Drake, but Future", "Drake but also Future".
+
+### Fixed
+
+- The DJ's Qwen3 4B model now downloads from a fixed version with a checked hash, like everything else it
+  downloads, so a later change to the file can't slip in.
+- Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
+- An extension you turn off can no longer add styles, pages or menu items back, or keep asking Spotify for things,
+  from a timer it left running.
+- When the DJ's model runs out of room or declines to answer, the DJ says so, instead of that it "didn't answer in
+  JSON"; and an API key a provider repeats in an error is never shown in full.
+
 ## 1.3.0 - 2026-10-06
 
 ### Added

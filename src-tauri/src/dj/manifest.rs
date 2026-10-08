@@ -18,9 +18,8 @@ pub struct Component {
     pub id: &'static str,
     pub label: &'static str,
     pub url: &'static str,
-    /// SHA-256 of the download. Hugging Face files have none pinned; they're checked against the hash
-    /// the Hub sends with them (`install::hub_sha256`).
-    pub sha256: Option<&'static str>,
+    /// SHA-256 of the download. Model weights come from a fixed Hugging Face commit, so theirs never changes either.
+    pub sha256: &'static str,
     /// Size in bytes, for the UI before the download says.
     pub bytes: u64,
     pub pack: Pack,
@@ -44,7 +43,7 @@ pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
         id: "llama-b11382",
         label: "Language model runtime (llama.cpp)",
         url: file,
-        sha256: Some(sha256),
+        sha256,
         bytes,
         pack,
     };
@@ -52,7 +51,7 @@ pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
         id: "sherpa-onnx-v1.13.8",
         label: "Speech runtime (sherpa-onnx)",
         url: file,
-        sha256: Some(sha256),
+        sha256,
         bytes,
         pack: Pack::TarBz2,
     };
@@ -170,8 +169,8 @@ pub const MODELS: &[Model] = &[
             id: "model-qwen2.5-1.5b-q4km",
             label: "Language model (Qwen2.5 1.5B Instruct)",
             url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/62a8d092b0a1047016f3edbd0fde387598727aa5/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-            sha256: None,
-            bytes: 1_120_000_000,
+            sha256: "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+            bytes: 1_117_320_736,
             pack: Pack::File,
         },
     },
@@ -183,9 +182,9 @@ pub const MODELS: &[Model] = &[
         component: Component {
             id: "model-qwen3-4b-q4km",
             label: "Language model (Qwen3 4B)",
-            url: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf",
-            sha256: None,
-            bytes: 2_500_000_000,
+            url: "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+            sha256: "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            bytes: 2_497_280_256,
             pack: Pack::File,
         },
     },
@@ -226,7 +225,7 @@ const KOKORO: Component = Component {
     id: "voice-kokoro-int8-en-v0_19",
     label: "Voices (Kokoro)",
     url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2",
-    sha256: Some("c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd"),
+    sha256: "c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd",
     bytes: 103_248_205,
     pack: Pack::TarBz2,
 };
@@ -235,7 +234,7 @@ const KITTEN: Component = Component {
     id: "voice-kitten-nano-en-v0_2",
     label: "Voices (KittenTTS nano)",
     url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_2-fp16.tar.bz2",
-    sha256: Some("0345a8a2f4a710cb8f7912c9a731ded8b3e1e69b33a871efa95c2e64651518fe"),
+    sha256: "0345a8a2f4a710cb8f7912c9a731ded8b3e1e69b33a871efa95c2e64651518fe",
     bytes: 26_586_708,
     pack: Pack::TarBz2,
 };
@@ -321,20 +320,21 @@ mod tests {
     }
 
     #[test]
-    fn code_downloads_are_pinned_by_hash() {
+    fn every_download_is_pinned_by_hash() {
         for c in all_components() {
             assert!(c.url.starts_with("https://"), "{}", c.url);
-            match c.sha256 {
-                Some(h) => {
-                    assert!(h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{h}")
-                }
-                // Only model weights come unpinned, from Hugging Face; programs and voices never do.
-                None => {
-                    assert!(c.url.starts_with("https://huggingface.co/"), "{}", c.url);
-                    assert_eq!(c.pack, Pack::File);
-                }
-            }
+            let h = c.sha256;
+            assert!(h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{h}");
             assert!(c.bytes > 1_000_000);
+        }
+    }
+
+    #[test]
+    fn model_weights_come_from_a_fixed_commit() {
+        for m in MODELS {
+            let url = m.component.url;
+            let revision = url.split("/resolve/").nth(1).and_then(|rest| rest.split('/').next()).unwrap_or_default();
+            assert!(revision.len() == 40 && revision.bytes().all(|b| b.is_ascii_hexdigit()), "{url}");
         }
     }
 

@@ -145,15 +145,16 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
     if target.api == Api::Anthropic && ANTHROPIC_FALLBACK_MODELS.contains(&target.model.as_str()) {
         request = request.header("anthropic-beta", "server-side-fallback-2026-07-01");
     }
+    let key = target.key.as_deref();
     let resp = request.send().await.map_err(|e| match target.api {
         Api::Local => AppError::Http(e),
-        Api::Own => AppError::Other(format!("Couldn't reach your model server at {}: {e}", target.url)),
-        api => AppError::Other(format!("Couldn't reach {}: {e}", api.name())),
+        Api::Own => AppError::Other(masked(&format!("Couldn't reach your model server at {}: {e}", target.url), key)),
+        api => AppError::Other(masked(&format!("Couldn't reach {}: {e}", api.name()), key)),
     })?;
     let status = resp.status().as_u16();
     let text = resp.text().await?;
     if !(200..300).contains(&status) {
-        return Err(refused(target.api, status, &error_message(&text)));
+        return Err(refused(target.api, status, &text, key));
     }
     let answer = match target.api {
         Api::Anthropic => anthropic_answer(&text)?,
@@ -169,9 +170,10 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
     }
 }
 
-/// An error answer, said the way the user can act on it.
-fn refused(api: Api, status: u16, message: &str) -> AppError {
+/// An error answer (`body`), said the way the user can act on it, with the `key` it was sent with hidden.
+fn refused(api: Api, status: u16, body: &str, key: Option<&str>) -> AppError {
     let who = api.name();
+    let message = masked(&error_message(body), key);
     AppError::Other(match (api.cloud(), status) {
         (true, 401 | 403) => format!("{who} didn't accept your API key: {message}"),
         (true, 402) => format!("Your {who} account is out of credit: {message}"),
@@ -286,9 +288,18 @@ fn parse(body: &str) -> Result<Value> {
 }
 
 /// `choices[0].message` of a chat completion: its text, and any tool calls (whose arguments are a JSON string).
+/// A refusal, or an answer cut off at the token limit, is no answer.
 fn openai_answer(body: &str) -> Result<Answer> {
     let v = parse(body)?;
     let message = &v["choices"][0]["message"];
+    if message["refusal"].as_str().is_some_and(|r| !r.trim().is_empty()) {
+        return Err(AppError::Other("The model declined to answer".into()));
+    }
+    match v["choices"][0]["finish_reason"].as_str() {
+        Some("length") => return Err(AppError::Other("The model ran out of room to answer".into())),
+        Some("content_filter") => return Err(AppError::Other("The model declined to answer".into())),
+        _ => {}
+    }
     let calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .into_iter()
@@ -350,6 +361,27 @@ fn json_in(content: &str) -> Option<Value> {
     serde_json::from_str::<Value>(content.get(start..=end)?).ok().filter(Value::is_object)
 }
 
+/// `text` with the key, and anything shaped like a provider's API key, shown only by its last four characters.
+fn masked(text: &str, key: Option<&str>) -> String {
+    let mut out = text.to_owned();
+    if let Some(key) = key.filter(|k| k.len() >= 8) {
+        out = out.replace(key, &hidden(key));
+    }
+    out.split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .map(|piece| {
+            let word = piece.trim_end_matches(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+            let looks_like_key =
+                word.len() >= 20 && ["sk-", "sk_", "AIza", "xai-", "gsk_"].iter().any(|p| word.starts_with(p));
+            if looks_like_key { piece.replacen(word, &hidden(word), 1) } else { piece.to_owned() }
+        })
+        .collect()
+}
+
+fn hidden(key: &str) -> String {
+    let tail: String = key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    format!("…{tail}")
+}
+
 /// The message in an error body: `{"error": {"message"}}`, `{"error": "…"}`, or Gemini's `[{"error": …}]`.
 fn error_message(text: &str) -> String {
     serde_json::from_str::<Value>(text)
@@ -384,11 +416,11 @@ pub async fn models(http: &reqwest::Client, api: Api, key: &str) -> Result<Vec<M
         .timeout(Duration::from_secs(20))
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Couldn't reach {}: {e}", api.name())))?;
+        .map_err(|e| AppError::Other(masked(&format!("Couldn't reach {}: {e}", api.name()), Some(key))))?;
     let status = resp.status().as_u16();
     let text = resp.text().await?;
     if !(200..300).contains(&status) {
-        return Err(refused(api, status, &error_message(&text)));
+        return Err(refused(api, status, &text, Some(key)));
     }
     Ok(model_list(api, &parse(&text)?))
 }
@@ -461,11 +493,11 @@ pub async fn anthropic_effort(http: &reqwest::Client, key: &str, model: &str) ->
         .timeout(Duration::from_secs(20))
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Couldn't reach Anthropic: {e}")))?;
+        .map_err(|e| AppError::Other(masked(&format!("Couldn't reach Anthropic: {e}"), Some(key))))?;
     let status = resp.status().as_u16();
     let text = resp.text().await?;
     if !(200..300).contains(&status) {
-        return Err(refused(Api::Anthropic, status, &error_message(&text)));
+        return Err(refused(Api::Anthropic, status, &text, Some(key)));
     }
     Ok(takes_effort(&parse(&text)?))
 }
@@ -611,6 +643,29 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_off_or_refused_completion_says_so() {
+        let cut = r#"{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"{\"songs\":[1,"}}]}"#;
+        assert_eq!(openai_answer(cut).unwrap_err().to_string(), "The model ran out of room to answer");
+        let refusal = r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":null,"refusal":"I can't help with that."}}]}"#;
+        assert_eq!(openai_answer(refusal).unwrap_err().to_string(), "The model declined to answer");
+        let filtered = r#"{"choices":[{"finish_reason":"content_filter","message":{"role":"assistant","content":"x"}}]}"#;
+        assert_eq!(openai_answer(filtered).unwrap_err().to_string(), "The model declined to answer");
+        let fine = r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{}","refusal":null}}]}"#;
+        assert!(openai_answer(fine).is_ok());
+    }
+
+    #[test]
+    fn hides_keys_in_what_a_provider_says() {
+        let key = "sk-proj-abcdefghijklmnopqrstuvwxyz1234";
+        assert_eq!(masked(&format!("Incorrect API key provided: {key}."), Some(key)), "Incorrect API key provided: …1234.");
+        // A key the provider names that isn't the one sent, by its shape.
+        assert_eq!(masked("bad key AIzaSyA1234567890abcdefghijklmnop here", None), "bad key …mnop here");
+        assert_eq!(masked("sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWX", None), "…UVWX");
+        // Ordinary words and short ids stay.
+        assert_eq!(masked("model sk-1 not found (request req_011CfjPXcS9wguPMcLBay9Vv)", None), "model sk-1 not found (request req_011CfjPXcS9wguPMcLBay9Vv)");
+    }
+
+    #[test]
     fn reads_anthropic_text_and_tool_use_blocks() {
         let body = r#"{"stop_reason":"tool_use","content":[
             {"type":"thinking","thinking":""},
@@ -638,13 +693,26 @@ mod tests {
         assert_eq!(error_message(r#"{"error":{"message":"model not found"}}"#), "model not found");
         assert_eq!(error_message(r#"[{"error":{"code":400,"message":"API key not valid"}}]"#), "API key not valid");
         assert_eq!(error_message("Bad Gateway"), "Bad Gateway");
-        let e = refused(Api::OpenAi, 401, "Incorrect API key").to_string();
+        let e = refused(Api::OpenAi, 401, "Incorrect API key", None).to_string();
         assert!(e.contains("OpenAI didn't accept your API key"), "{e}");
-        let e = refused(Api::Anthropic, 429, "rate_limit_error").to_string();
+        let e = refused(Api::Anthropic, 429, "rate_limit_error", None).to_string();
         assert!(e.contains("Anthropic is limiting your key"), "{e}");
-        let e = refused(Api::Own, 404, "model not found").to_string();
-        assert!(e.contains("Your model server answered 404"), "{e}");
+        let e = refused(Api::Own, 404, r#"{"error":{"message":"model not found"}}"#, None).to_string();
+        assert!(e.contains("Your model server answered 404: model not found"), "{e}");
         assert!(!e.contains("Spotify"));
+    }
+
+    #[test]
+    fn no_refusal_repeats_the_key_it_was_sent_with() {
+        // Listing a provider's models is the first thing a newly saved key is used for, and Settings shows what
+        // went wrong word for word.
+        let key = "proj0123456789abcdefghijklmn";
+        let body = format!(r#"{{"error":{{"message":"Key {key} is not valid"}}}}"#);
+        for api in [Api::OpenAi, Api::Gemini, Api::Anthropic] {
+            let e = refused(api, 401, &body, Some(key)).to_string();
+            assert!(!e.contains(key), "{e}");
+            assert!(e.contains("Key …klmn is not valid"), "{e}");
+        }
     }
 
     #[test]
@@ -788,5 +856,17 @@ mod tests {
         let s = schema();
         let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
         assert!(err.contains("OpenAI didn't accept your API key: Incorrect API key provided"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn never_repeats_the_key_a_provider_echoes_back() {
+        // No telltale prefix: only knowing the key sent hides it.
+        let key = "proj0123456789abcdefghijklmn";
+        let (url, _server) = fake_server(401, format!(r#"{{"error":{{"message":"Key {key} is not valid"}}}}"#)).await;
+        let t = Target { url, key: Some(key.into()), ..target(Api::OpenAi) };
+        let s = schema();
+        let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert!(!err.contains(key), "{err}");
+        assert!(err.contains("Key …klmn is not valid"), "{err}");
     }
 }
