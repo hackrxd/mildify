@@ -377,7 +377,8 @@ export function requestScore(request: string): (c: Candidate) => number {
 
 /** The decade a word names ("90s", "1980s", "2010s", "eighties"), as its first year. */
 function decadeOf(word: string): number | null {
-  if (word in DECADE_WORDS) return DECADE_WORDS[word];
+  // Its own words only: `in` would also find "constructor" on every object.
+  if (Object.hasOwn(DECADE_WORDS, word)) return DECADE_WORDS[word];
   const m = word.match(/^(19|20)?(\d)0s$/);
   if (!m) return null;
   const century = m[1] ? Number(m[1]) * 100 : Number(m[2]) >= 3 ? 1900 : 2000;

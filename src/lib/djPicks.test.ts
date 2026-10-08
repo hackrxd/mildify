@@ -213,6 +213,12 @@ describe("requests", () => {
     }
   });
 
+  it("knows only its own words for decades", () => {
+    const named = { ...pool[0], uri: "spotify:track:c", name: "Plans", artists: ["Constructor"], album: "x", year: "2001" };
+    expect(requestScore("Constructor")(named)).toBeGreaterThan(0);
+    expect(requestScore("no constructor")(named)).toBeLessThan(0);
+  });
+
   it("reads contractions and typographic apostrophes, and \"nothing but\" as only", () => {
     const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
     expect(score("don't play Radiohead", "spotify:track:rh1")).toBeLessThan(0);
