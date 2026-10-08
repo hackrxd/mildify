@@ -195,7 +195,8 @@ async fn sign_out(app: AppHandle, state: State<'_, AppState>) -> Result<AppStatu
     Ok(state.status().await)
 }
 
-/// Proxies a Spotify Web API request; the access token never reaches the UI.
+/// Proxies a Spotify Web API request; the access token never reaches the UI. `once`: not sent again after a server
+/// error, for a request Spotify may have carried out before failing.
 #[tauri::command]
 async fn api(
     state: State<'_, AppState>,
@@ -203,8 +204,13 @@ async fn api(
     path: String,
     query: Option<Vec<(String, String)>>,
     body: Option<Value>,
+    once: Option<bool>,
 ) -> Result<Value> {
-    state.webapi.request(&method, &path, query, body).await
+    if once == Some(true) {
+        state.webapi.request_once(&method, &path, query, body).await
+    } else {
+        state.webapi.request(&method, &path, query, body).await
+    }
 }
 
 /// Fetches lyrics (Spicy Lyrics v1 response) for a Spotify track id from the Nativify
