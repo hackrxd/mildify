@@ -36,7 +36,8 @@ use songinfo::{SongInfo, SongLookup, SongRef};
 use speaker::{Cmd, Speaker, VoiceCommand};
 use voice::Speech;
 
-/// The DJ's settings, part of `config.json`.
+/// The DJ's settings, part of `config.json`. A new field that changes which model runs belongs in
+/// `keeps_model`; one that changes what's downloaded, in `Dj::needed` (which `same_downloads` compares).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DjConfig {
@@ -187,11 +188,10 @@ impl DjConfig {
         api(&self.provider)
     }
 
-    /// Whether a change from `other` to these settings leaves the model and the downloads as they are: picking a
-    /// cloud model, look-up options and the like don't unload the model or restart a download.
-    pub fn same_engine(&self, other: &DjConfig) -> bool {
-        (self.enabled, &self.provider, &self.model, &self.voice, &self.server_url, &self.server_model)
-            == (other.enabled, &other.provider, &other.model, &other.voice, &other.server_url, &other.server_model)
+    /// Whether a change from `old` to these settings leaves a loaded model running: only while the DJ stays on with
+    /// the same local model. A new voice, the own server's address or a cloud model pick don't unload it.
+    pub fn keeps_model(&self, old: &DjConfig) -> bool {
+        self.enabled && old.enabled && self.api() == Api::Local && old.api() == Api::Local && self.model == old.model
     }
 
     /// The model picked for the cloud provider in use.
@@ -440,6 +440,12 @@ impl Dj {
             let _ = app.emit("dj-installed", ());
         });
         Ok(())
+    }
+
+    /// Whether `old` and `new` need the same downloads, so one under way can carry on: two voices from one
+    /// package do.
+    pub fn same_downloads(&self, old: &DjConfig, new: &DjConfig) -> bool {
+        old.enabled == new.enabled && self.needed(old) == self.needed(new)
     }
 
     /// Stops a download; what's downloaded so far is kept and resumes next time.
@@ -936,21 +942,40 @@ mod tests {
     }
 
     #[test]
-    fn only_model_and_download_changes_unload_the_model() {
+    fn only_another_model_unloads_it() {
         let old = DjConfig { enabled: true, ..DjConfig::default() };
-        let picks = DjConfig {
-            musicbrainz: false,
-            own_tools: true,
-            api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
-            api_keys: BTreeSet::from(["openai".to_owned()]),
-            ..old.clone()
-        };
-        assert!(picks.same_engine(&old));
-        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { voice: "emma".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { enabled: false, ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { server_url: "http://x".into(), ..old.clone() }.same_engine(&old));
+        for keeps in [
+            DjConfig { voice: "emma".into(), ..old.clone() },
+            DjConfig { voice: "light-male".into(), ..old.clone() },
+            DjConfig { server_url: "http://x".into(), server_model: "m".into(), ..old.clone() },
+            DjConfig {
+                musicbrainz: false,
+                own_tools: true,
+                api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
+                api_keys: BTreeSet::from(["openai".to_owned()]),
+                ..old.clone()
+            },
+        ] {
+            assert!(keeps.keeps_model(&old), "{keeps:?}");
+        }
+        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: OWN_SERVER.into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { enabled: false, ..old.clone() }.keeps_model(&old));
+    }
+
+    #[test]
+    fn downloads_restart_only_when_what_is_needed_changes() {
+        let d = dj();
+        let old = DjConfig { enabled: true, voice: "michael".into(), ..DjConfig::default() };
+        // Both voices come in one package.
+        assert!(d.same_downloads(&old, &DjConfig { voice: "emma".into(), ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { musicbrainz: false, ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { voice: "light-male".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { model: "qwen3-4b".into(), ..old.clone() }));
+        // A cloud model needs neither the model nor its runtime.
+        assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
     }
 
     #[test]

@@ -314,9 +314,11 @@ async fn dj_configure(
         cfg.save(&state.paths.config_file)?;
         (old, cfg.dj.clone())
     };
-    if !old.same_engine(&new) {
-        // What's downloading may not be what's needed any more; partial downloads are kept.
+    if !state.dj.same_downloads(&old, &new) {
+        // What's downloading isn't what's needed any more; partial downloads are kept.
         state.dj.cancel_install();
+    }
+    if !new.keeps_model(&old) {
         state.dj.release().await;
     }
     if new.enabled {
