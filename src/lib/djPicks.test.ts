@@ -192,6 +192,17 @@ describe("requests", () => {
     expect(score("the 2000s", me)).toBeGreaterThan(0);
   });
 
+  it("takes a year for a name too", () => {
+    const band = { ...pool[0], uri: "spotify:track:b", name: "Somebody Else", artists: ["The 1975"], album: "I Like It When You Sleep", year: "2016" };
+    const album = { ...pool[0], uri: "spotify:track:s", name: "Style", artists: ["Taylor Swift"], album: "1989", year: "2014" };
+    const queen = { ...pool[0], uri: "spotify:track:q", name: "Bohemian Rhapsody", artists: ["Queen"], album: "A Night at the Opera", year: "1975" };
+    const score = (request: string, c: Candidate) => requestScore(request)(c);
+    expect(score("The 1975", band)).toBeGreaterThan(0);
+    expect(score("The 1975", queen)).toBeGreaterThan(0);
+    expect(score("play 1989", album)).toBeGreaterThan(0);
+    expect(score("anything but The 1975", band)).toBeLessThan(0);
+  });
+
   it("reads contractions and typographic apostrophes, and \"nothing but\" as only", () => {
     const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
     expect(score("don't play Radiohead", "spotify:track:rh1")).toBeLessThan(0);

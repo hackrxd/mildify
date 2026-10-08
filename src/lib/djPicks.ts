@@ -344,7 +344,8 @@ export function requestScore(request: string): (c: Candidate) => number {
     const span = spanOf(w);
     if (span) {
       (against ? notSpans : spans).push(span);
-      continue;
+      // A year can be a name too: "The 1975", "1989", "1999". A decade only ever means its years.
+      if (span[1] !== 1) continue;
     }
     if (w.length < 3) {
       if (!SHORT_FILLER.has(w)) (against ? notShort : short).push(w);
