@@ -8,6 +8,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 ### Fixed
 
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
+- An extension you turn off can no longer add styles, pages or menu items back from a timer it left running.
 
 ## 1.3.0 - 2026-10-06
 
