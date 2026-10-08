@@ -22,7 +22,6 @@ import {
   requestScore,
   requestSegment,
   type Candidate,
-  type Reactions,
   type Segment,
   type SegmentId,
 } from "./djPicks";
@@ -42,6 +41,7 @@ import {
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
+import { SessionTaste } from "./djTaste";
 import { Voice, type Spoken } from "./djVoice";
 import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
@@ -211,7 +211,8 @@ class Dj {
   #pool: Candidate[] = [];
   #segments: SegmentId[] = [];
   #played = new Set<string>();
-  #skippedArtists = new Set<string>();
+  /** What the listener liked and skipped this session. */
+  #taste = new SessionTaste();
   #preparing: Promise<void> | null = null;
   #rush: (() => void) | null = null;
   #queued: "no" | "pending" | "done" | "failed" = "no";
@@ -261,11 +262,6 @@ class Dj {
   #leftSet: DjSet | null = null;
   /** The listener has been told the model isn't answering, this session. */
   #modelWarned = false;
-  /** What the listener did with the DJ's songs this session, most recent first. */
-  #liked: Candidate[] = [];
-  #skippedSongs: Candidate[] = [];
-  /** Whether each of the set's songs was in the listener's library when last looked, to notice a new like. */
-  #likeSeen = new Map<string, boolean>();
   /** For the set playing, picked as it goes: songs skipped, whether it ends with the song playing, whether the
    * song lined up next should be picked again, and a queue change on its way to the player. */
   #setSkips = 0;
@@ -274,8 +270,6 @@ class Dj {
   #lining = false;
   /** Songs liked while the set plays: they steer its next picks. Older likes are the model's to weigh. */
   #setLiked: Candidate[] = [];
-  /** Likes and skips the model has been told about already, so each prompt says only what's new. */
-  #told = new Set<string>();
   /** The last queue change sent to the player, settled once the player has it. */
   #linedUpDone: Promise<boolean> = Promise.resolve(true);
   /** Where a Next or Previous sent in a set picked as it goes is headed, while the player gets there. */
@@ -764,12 +758,8 @@ class Dj {
     this.#setsThisSession = 0;
     this.said = [];
     this.#segments = [];
-    this.#skippedArtists = new Set();
     this.#outOfSongs = false;
-    this.#liked = [];
-    this.#skippedSongs = [];
-    this.#told = new Set();
-    this.#likeSeen.clear();
+    this.#taste = new SessionTaste();
   }
 
   /** Where the playing is: the sets, the talk, the queue, the hand-over and its cues, what the music is held
@@ -861,7 +851,7 @@ class Dj {
     const listener = session.user?.display_name?.split(" ")[0] ?? null;
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     const live = this.live;
-    const reactions = live ? this.#news() : undefined;
+    const reactions = live ? this.#taste.news() : undefined;
     const ask: SegmentAsk = {
       segment,
       choices,
@@ -899,7 +889,7 @@ class Dj {
     }
     if (skippedSet !== undefined && this.#setSkipped === skippedSet) this.#setSkipped = null;
     // A template doesn't mention them: the next prompt still does.
-    if (byModel && reactions) this.#toldOf(reactions);
+    if (byModel && reactions) this.#taste.toldOf(reactions);
     this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));
     this.#setsThisSession++;
@@ -924,7 +914,7 @@ class Dj {
    * choose from for it, or the next of the usual segments. None when the listening has nothing left. */
   #chooseSegment(request: string | null): { segment: Segment; choices: Candidate[] } | null {
     if (request) {
-      const choices = requestChoices(request, this.#pool, { played: this.#played, skippedArtists: this.#skippedArtists });
+      const choices = requestChoices(request, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists });
       if (choices.length >= MIN_CHOICES) return { segment: requestSegment(request), choices };
     }
     return this.#ordinarySegment();
@@ -970,7 +960,7 @@ class Dj {
 
   /** The next of the usual segments, and its choices; none when the listening has nothing left for one. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
-    const avoid = { played: this.#played, skippedArtists: this.#skippedArtists };
+    const avoid = { played: this.#played, skippedArtists: this.#taste.skippedArtists };
     let segment = nextSegment(this.#segments, this.#pool, avoid);
     if (!segment && this.#played.size) {
       // Everything's been played: start over, leaving out only what's playing now.
@@ -978,7 +968,7 @@ class Dj {
       segment = nextSegment(this.#segments, this.#pool, { ...avoid, played: this.#played });
     }
     if (!segment) return null;
-    return { segment, choices: choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#skippedArtists }) };
+    return { segment, choices: choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists }) };
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
@@ -1405,18 +1395,6 @@ class Dj {
     }
   }
 
-  /** Likes and skips no answer from the model has gone by yet. */
-  #news(): Reactions {
-    const fresh = (kind: string, songs: Candidate[]) => songs.filter((s) => !this.#told.has(kind + s.uri));
-    return { liked: fresh("liked:", this.#liked), skipped: fresh("skipped:", this.#skippedSongs) };
-  }
-
-  /** The model answered with these in mind: later prompts leave them out. */
-  #toldOf(news: Reactions) {
-    for (const s of news.liked) this.#told.add("liked:" + s.uri);
-    for (const s of news.skipped) this.#told.add("skipped:" + s.uri);
-  }
-
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
     return nextInSet({
       plan: cur.plan,
@@ -1424,8 +1402,8 @@ class Dj {
       pool: this.#pool,
       sofar,
       played,
-      skippedArtists: this.#skippedArtists,
-      reactions: { liked: this.#setLiked, skipped: this.#skippedSongs },
+      skippedArtists: this.#taste.skippedArtists,
+      reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
       skips: this.#setSkips,
     });
   }
@@ -1464,19 +1442,10 @@ class Dj {
 
   /** A song of the set the listener just liked, here or anywhere in the app: what's next leans toward it. */
   #noticeLikes(cur: DjSet) {
-    for (const s of cur.songs) {
-      const now = liked.has(s.uri);
-      if (now === undefined) {
-        liked.ensure([s.uri]);
-        continue;
-      }
-      const was = this.#likeSeen.get(s.uri);
-      this.#likeSeen.set(s.uri, now);
-      if (was === false && now) {
-        this.#liked = [s, ...this.#liked.filter((l) => l.uri !== s.uri)].slice(0, 10);
-        this.#setLiked = [s, ...this.#setLiked.filter((l) => l.uri !== s.uri)];
-        this.#repick = true;
-      }
+    for (const s of cur.songs) if (liked.has(s.uri) === undefined) liked.ensure([s.uri]);
+    for (const s of this.#taste.noticeLikes(cur.songs, (uri) => liked.has(uri))) {
+      this.#setLiked = [s, ...this.#setLiked.filter((l) => l.uri !== s.uri)];
+      this.#repick = true;
     }
   }
 
@@ -1495,10 +1464,7 @@ class Dj {
     const song = this.current?.songs.find((s) => s.uri === player.track?.uri);
     const dur = player.track?.durationMs ?? 0;
     // As in #trackChanged: not a song the DJ is holding at its end, nor one nearly over.
-    if (song && !this.#heldMusic && dur > 0 && player.positionNow() < dur * SKIP_SHARE) {
-      for (const a of song.artists) this.#skippedArtists.add(a);
-      this.#skippedSongs = [song, ...this.#skippedSongs.filter((s) => s.uri !== song.uri)].slice(0, 10);
-    }
+    if (song && !this.#heldMusic && dur > 0 && player.positionNow() < dur * SKIP_SHARE) this.#countSkip(song);
     this.#heldMusic = true;
     backend.device({ action: "pause" }).catch(() => {});
     if (this.upNext) {
@@ -1534,9 +1500,7 @@ class Dj {
     // Leaving a set the listener skipped isn't a skip of the song: the set was.
     const leaving = !!prev && !!this.#leftSet?.songs.some((s) => s.uri === prev.uri);
     if (prev && !wentBack && !leaving && this.#lastDuration > 0 && this.#lastPos < this.#lastDuration * SKIP_SHARE && !this.#heldMusic) {
-      for (const a of prev.artists) this.#skippedArtists.add(a);
-      this.#skippedSongs = [prev, ...this.#skippedSongs.filter((s) => s.uri !== prev.uri)].slice(0, 10);
-      if (this.current?.songs.some((s) => s.uri === prev.uri)) this.#setSkips++;
+      this.#countSkip(prev);
     }
     if (!uri) return;
     const song = this.#isDjSong(uri);
@@ -1562,12 +1526,17 @@ class Dj {
     if (next && next.songs.some((s) => s.uri === uri)) this.#advance(run, next);
   }
 
+  /** The listener skipped `song`: once per song left, however many ways its leaving is seen (a Next past a set's
+   * end, then the track change it makes). A skip in the set playing counts toward changing direction. */
+  #countSkip(song: Candidate) {
+    if (this.#taste.skipped(song) && this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips++;
+  }
+
   /** Takes back a skip of `song`. */
   #forgive(song: Candidate) {
-    if (!this.#skippedSongs.some((s) => s.uri === song.uri)) return;
-    this.#skippedSongs = this.#skippedSongs.filter((s) => s.uri !== song.uri);
-    for (const a of song.artists) if (!this.#skippedSongs.some((s) => s.artists.includes(a))) this.#skippedArtists.delete(a);
-    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips = Math.max(0, this.#setSkips - 1);
+    if (this.#taste.forgive(song) && this.current?.songs.some((s) => s.uri === song.uri)) {
+      this.#setSkips = Math.max(0, this.#setSkips - 1);
+    }
   }
 
   /** A new set's song came up: it's the current set now, and the next one gets picked. */
