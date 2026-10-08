@@ -27,6 +27,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   the new one wait behind it.
 - The DJ talks to a model on your computer directly, even when your system sends web traffic through a proxy, and
   says plainly when a model server can't be reached or its model stopped.
+- A busy or rate-limited model is asked once more after a short wait, before the DJ talks from a template; when the
+  provider asks for a longer wait, the DJ says how long.
 
 ## 1.3.0 - 2026-10-06
 
