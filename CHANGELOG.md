@@ -5,6 +5,11 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Changed
+
+- Asking the DJ for a set understands short artist names like U2, decades in words ("the eighties") and single
+  years, and "but" both ways: "no Drake, but Future", "Drake but also Future".
+
 ### Fixed
 
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
