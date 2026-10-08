@@ -165,9 +165,9 @@ on macOS, `%APPDATA%\dev.hackrxd.nativespotify\dj` on Windows).
 | Voices: Light | [KittenTTS](https://github.com/KittenML/KittenTTS) nano, via sherpa-onnx's release | 27 MB | Apache-2.0 |
 
 Only the parts your settings need are downloaded: the two runtimes, one model and one voice package. That's
-about 1.3 GB with the defaults. Downloads resume where they stopped. Each one is checked before it's used: the
-runtimes and voices against SHA-256 hashes pinned in the app (`src-tauri/src/dj/manifest.rs`), and the models
-against the hash Hugging Face publishes for the file.
+about 1.3 GB with the defaults. Downloads resume where they stopped. Each one is checked before it's used, against
+a SHA-256 hash pinned in the app (`src-tauri/src/dj/manifest.rs`); the models come from a fixed commit of their
+Hugging Face repository, so a file changed there later is never picked up.
 
 The Qwen2.5 model needs about 2 GB of memory while the DJ is on, and Qwen3 4B about 4 GB. The model is unloaded
 when you stop the DJ, or after 10 minutes without use.
