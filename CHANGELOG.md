@@ -25,6 +25,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   off or removing its files no longer waits for the model to finish loading.
 - After you skip a set or ask for another, the DJ's model drops the set it was still working on, instead of making
   the new one wait behind it.
+- The DJ talks to a model on your computer directly, even when your system sends web traffic through a proxy, and
+  says plainly when a model server can't be reached or its model stopped.
 
 ## 1.3.0 - 2026-10-06
 

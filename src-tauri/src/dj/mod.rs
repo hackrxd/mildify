@@ -282,6 +282,9 @@ pub struct Dj {
     root: PathBuf,
     scratch: PathBuf,
     http: reqwest::Client,
+    /// For model servers on this computer: straight there, never through a proxy, which would see the key and the
+    /// prompt.
+    loopback: reqwest::Client,
     runtime: Option<Runtime>,
     install: Arc<Mutex<InstallState>>,
     /// Bumped to cancel a running install.
@@ -310,6 +313,11 @@ impl Dj {
         Self {
             scratch,
             http: http.clone(),
+            loopback: reqwest::Client::builder()
+                .no_proxy()
+                .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_default(),
             runtime: manifest::this_runtime(),
             install: Arc::default(),
             generation: Arc::default(),
@@ -622,7 +630,8 @@ impl Dj {
             let target = self.target(cfg).await?;
             ready = started.elapsed().as_secs_f64();
             self.engine.touch();
-            let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
+            let http = if is_loopback(&target.url) { &self.loopback } else { &self.http };
+            let answer = chat::chat(http, &target, messages, ask, max_tokens).await;
             self.engine.touch();
             // Said as what happened to it; the next ask starts it again.
             if let (Err(_), Api::Local, Some(why)) = (&answer, target.api, self.engine.died()) {
@@ -785,6 +794,16 @@ fn waited(secs: f64) -> String {
     if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
 }
 
+/// Whether `url` is on this computer: localhost, 127.0.0.0/8 or ::1.
+fn is_loopback(url: &str) -> bool {
+    match url::Url::parse(url).ok().as_ref().and_then(url::Url::host) {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 /// Runs `work` as the newest in its `lane`, failing it as soon as a newer one starts there: the DJ only ever waits for
 /// its latest. Dropping a request hangs up on its server, which frees the local model's one slot for the newer ask.
 async fn newest<T>(lane: &watch::Sender<u64>, work: impl Future<Output = Result<T>>) -> Result<T> {
@@ -874,15 +893,53 @@ mod tests {
             });
             let (mut second, _) = listener.accept().await.unwrap();
             read_request(&mut second).await;
-            let set = r#"{"name":"Set","songs":[1],"talk":"Hello there."}"#;
-            let body = serde_json::json!({ "choices": [{ "message": { "role": "assistant", "content": set }, "finish_reason": "stop" }] })
-                .to_string();
-            let head =
-                format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
-            second.write_all(head.as_bytes()).await.unwrap();
-            second.write_all(body.as_bytes()).await.unwrap();
+            second.write_all(set_reply().as_bytes()).await.unwrap();
         });
         url
+    }
+
+    /// A model server's answer with a set.
+    fn set_reply() -> String {
+        let set = r#"{"name":"Set","songs":[1],"talk":"Hello there."}"#;
+        let body = serde_json::json!({ "choices": [{ "message": { "role": "assistant", "content": set }, "finish_reason": "stop" }] })
+            .to_string();
+        format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+    }
+
+    /// A model server that answers one ask with a set.
+    async fn answers_with_a_set() -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            read_request(&mut sock).await;
+            sock.write_all(set_reply().as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    #[test]
+    fn knows_a_model_server_on_this_computer() {
+        for url in ["http://localhost:11434/v1", "http://LOCALHOST:1234", "http://127.0.0.1:8080/v1/chat/completions", "http://127.1.2.3/", "http://[::1]:11434"] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in ["http://192.168.1.20:11434", "https://api.openai.com/v1/chat/completions", "http://localhost.example.com", "nonsense"] {
+            assert!(!is_loopback(url), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reaches_a_model_server_on_this_computer_without_the_proxy() {
+        // Everything this client sends goes to a proxy that isn't there.
+        let proxied = reqwest::Client::builder().proxy(reqwest::Proxy::all("http://127.0.0.1:1").unwrap()).build().unwrap();
+        let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
+        let d = Dj::new(root.join("dj"), root.join("cache"), proxied);
+        let cfg = DjConfig { enabled: true, server_url: answers_with_a_set().await, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let answer = tokio::time::timeout(Duration::from_secs(5), d.generate(&cfg, &ask, Some(&schema), None, 10)).await.unwrap();
+        assert!(answer.unwrap().json.is_some());
     }
 
     #[tokio::test]
