@@ -4,7 +4,8 @@
 // quietly becomes that platform's only, and the other builds lose it. CI tests on Linux alone; this asks Cargo
 // for each release target's dependency tree, which needs no cross-compiler.
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /** The release builds' targets (.github/workflows/build.yml). */
 export const TARGETS = ["x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"];
@@ -30,8 +31,17 @@ export function missing(byTarget, perPlatform = PER_PLATFORM) {
   return out;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const manifest = new URL("../src-tauri/Cargo.toml", import.meta.url).pathname;
+/** Whether node was asked to run this file, by whatever path (a symlinked one included). */
+function isMain() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
+  const manifest = fileURLToPath(new URL("../src-tauri/Cargo.toml", import.meta.url));
   const byTarget = {};
   for (const target of TARGETS) {
     const tree = execFileSync(
