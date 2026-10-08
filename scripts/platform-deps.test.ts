@@ -3,20 +3,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TARGETS, directDependencies, missing } from "./platform-deps.mjs";
 
-const node = (name: string, kinds: (string | null)[]) => ({ name, dep_kinds: kinds.map((kind) => ({ kind })) });
-
 describe("platform dependencies", () => {
-  it("reads the root package's direct, normal dependencies", () => {
-    const metadata = {
-      resolve: {
-        root: "app",
-        nodes: [
-          { id: "app", deps: [node("serde", [null]), node("tauri-build", ["build"]), node("tempfile", ["dev", null])] },
-          { id: "serde", deps: [node("serde_derive", [null])] },
-        ],
-      },
-    };
-    expect([...directDependencies(metadata)].sort()).toEqual(["serde", "tempfile"]);
+  it("reads the package's direct dependencies from Cargo's tree, after the package's own line", () => {
+    const tree = [
+      "mildify v1.3.0 (/home/me/My Projects/mildify/src-tauri)",
+      "keyring v3.6.3",
+      "librespot-core v0.8.0 (/home/me/My Projects/mildify/src-tauri/vendor/librespot-core)",
+      "serde v1.0.228",
+      "",
+    ].join("\n");
+    expect([...directDependencies(tree)].sort()).toEqual(["keyring", "librespot-core", "serde"]);
   });
 
   it("names what a target lacks that the others have", () => {
