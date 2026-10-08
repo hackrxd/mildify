@@ -33,13 +33,15 @@ import {
   type SegmentAsk,
   segmentSchema,
   type Candidate,
-  type Listening,
   type Pick,
   type Reactions,
   type SegmentId,
 } from "./djPicks";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
-import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type DjVoiceEvent, type RepeatMode } from "./ipc";
+import { loadListening } from "./djListening";
+import { load, persist, playedLately, rememberPlayed } from "./djMemory";
+import { Voice, type Spoken } from "./djVoice";
+import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { liked } from "./liked.svelte";
 import { lyrics } from "./lyrics.svelte";
@@ -47,18 +49,16 @@ import { player } from "./player.svelte";
 import { session } from "./session.svelte";
 import * as sp from "./spotify";
 import { toasts } from "./toasts.svelte";
-import type { Paging, PlayHistory, SavedTrack, Track } from "./types";
 import { idFromUri } from "./util";
+
+export { loadListening } from "./djListening";
+export { Voice, type Spoken } from "./djVoice";
 
 const INSTRUCTIONS_KEY = "nativify:djInstructions";
 const OVER_START_KEY = "nativify:djOverStart";
 const OVER_END_KEY = "nativify:djOverEnd";
 const LIVE_KEY = "nativify:djLive";
 const NAME_ALL_KEY = "nativify:djNameAll";
-const PLAYED_KEY = "nativify:djPlayed";
-/** Songs the DJ played this recently aren't picked again in a new session. */
-const PLAYED_MEMORY_MS = 3 * 24 * 60 * 60 * 1000;
-const PLAYED_KEPT = 400;
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -102,13 +102,6 @@ const SKIP_LANDS_MS = 3000;
 /** How long a request to turn shuffle or repeat off gets before it's sent again. */
 const MODES_RETRY_MS = 3000;
 
-export interface Spoken {
-  /** The line's id in the backend, which plays it. */
-  id: number;
-  durationMs: number;
-  lines: LyricLine[];
-}
-
 /** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
 class GaveUp extends Error {}
 
@@ -139,76 +132,6 @@ export interface DjSet {
   firstVocals: Vocals | null;
 }
 
-function load<T>(key: string, fallback: T, read: (raw: string) => T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw === null ? fallback : read(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function persist(key: string, value: string | null) {
-  try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
-  } catch {
-    // Not persisted; still applies for this session.
-  }
-}
-
-/** Songs the DJ played lately, by URI, so a new session doesn't start with the same ones. */
-function playedLately(now = Date.now()): Map<string, number> {
-  const raw = load<unknown>(PLAYED_KEY, {}, JSON.parse);
-  const out = new Map<string, number>();
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    for (const [uri, at] of Object.entries(raw)) {
-      if (typeof at === "number" && now - at < PLAYED_MEMORY_MS) out.set(uri, at);
-    }
-  }
-  return out;
-}
-
-function rememberPlayed(uri: string, now = Date.now()) {
-  const played = playedLately(now);
-  played.delete(uri);
-  played.set(uri, now);
-  const kept = [...played].slice(-PLAYED_KEPT);
-  persist(PLAYED_KEY, JSON.stringify(Object.fromEntries(kept)));
-}
-
-/** Everything the DJ reads about the user's listening. Each part is optional; all failing is an error. */
-export async function loadListening(): Promise<Listening> {
-  const range = async (r: sp.TimeRange) => {
-    const pages = await Promise.allSettled([sp.topTracksIn(r, 0), sp.topTracksIn(r, 20)]);
-    const ok = pages.filter((p) => p.status === "fulfilled").map((p) => (p as PromiseFulfilledResult<Paging<Track>>).value);
-    if (!ok.length) throw (pages[0] as PromiseRejectedResult).reason;
-    return ok.flatMap((p) => p.items);
-  };
-  const liked = async () => {
-    const first = await sp.savedTracks(0);
-    const items = [...first.items];
-    // The newest likes, and two pages from further back for throwbacks.
-    if (first.total > 100) {
-      const older = [0.4, 0.8].map((f) => Math.floor((f * (first.total - 50)) / 50) * 50).filter((o) => o >= 50);
-      const pages = await Promise.allSettled([...new Set(older)].map((o) => sp.savedTracks(o)));
-      for (const p of pages) if (p.status === "fulfilled") items.push(...(p.value as Paging<SavedTrack>).items);
-    }
-    return items;
-  };
-  const recent = async () => (await sp.recentlyPlayed()).items;
-  const parts = await Promise.allSettled([range("short_term"), range("medium_term"), range("long_term"), recent(), liked()]);
-  if (parts.every((p) => p.status === "rejected")) throw (parts[0] as PromiseRejectedResult).reason;
-  const [short, medium, long, played, saved] = parts.map((p) => (p.status === "fulfilled" ? p.value : []));
-  return {
-    topShort: short as Track[],
-    topMedium: medium as Track[],
-    topLong: long as Track[],
-    recent: played as PlayHistory[],
-    saved: saved as SavedTrack[],
-  };
-}
-
 /** Where a song's singing starts and ends, as heard: with the listener's own timing nudge for it. */
 async function songVocals(uri: string): Promise<Vocals | null> {
   try {
@@ -218,103 +141,6 @@ async function songVocals(uri: string): Promise<Vocals | null> {
     return v && { first: v.first + shift, last: v.last + shift };
   } catch {
     return null;
-  }
-}
-
-/** The line's clock and the backend's drift apart by this much before the backend's wins. */
-const VOICE_RESYNC_MS = 80;
-
-/** Plays the DJ's lines on this computer's audio output, as the music plays (src-tauri/src/dj/speaker.rs), at
- * the music's volume. Not through the window's own audio: on Linux that needs GStreamer plugins that may not be
- * there. The line's clock runs here, set right by the backend's reports a few times a second. */
-export class Voice {
-  #id: number | null = null;
-  #onEnd: ((error?: string) => void) | null = null;
-  /** ms into the line at `#since`, running from there unless paused. */
-  #at = 0;
-  #since = 0;
-  #running = false;
-  #gain = -1;
-  #listening = false;
-
-  #listen() {
-    if (this.#listening) return;
-    this.#listening = true;
-    listen<DjVoiceEvent>("dj-voice", (e) => this.#heard(e.payload)).catch(() => (this.#listening = false));
-  }
-
-  #heard(ev: DjVoiceEvent) {
-    if (ev.id !== this.#id) return;
-    if (ev.state === "playing") {
-      if (this.#running && Math.abs(this.now() - ev.position_ms) > VOICE_RESYNC_MS) this.#anchor(ev.position_ms);
-    } else {
-      this.#finish(ev.state === "failed" ? ev.error : undefined);
-    }
-  }
-
-  #anchor(at: number) {
-    this.#at = at;
-    this.#since = performance.now();
-  }
-
-  #finish(error?: string) {
-    const onEnd = this.#onEnd;
-    this.#clear();
-    onEnd?.(error);
-  }
-
-  #clear() {
-    this.#id = null;
-    this.#onEnd = null;
-    this.#running = false;
-    this.#at = 0;
-  }
-
-  /** Plays the line `dj_speak` made as `id`, in place of any line playing; `onEnd` gets why when it couldn't. */
-  play(id: number, gain: number, onEnd: (error?: string) => void) {
-    this.#listen();
-    this.#id = id;
-    this.#onEnd = onEnd;
-    this.#gain = gain;
-    this.#running = true;
-    this.#anchor(0);
-    backend.djVoice({ action: "play", id, gain }).catch((e) => {
-      if (this.#id === id) this.#finish(errorMessage(e));
-    });
-  }
-
-  /** Holds the line where it is: `now()` stands still until `resume()`. */
-  pause() {
-    if (this.#id === null || !this.#running) return;
-    this.#anchor(this.now());
-    this.#running = false;
-    backend.djVoice({ action: "pause" }).catch(() => {});
-  }
-
-  resume() {
-    if (this.#id === null || this.#running) return;
-    this.#anchor(this.#at);
-    this.#running = true;
-    backend.djVoice({ action: "resume" }).catch(() => {});
-  }
-
-  setGain(gain: number) {
-    if (this.#id === null || Math.abs(gain - this.#gain) < 0.001) return;
-    this.#gain = gain;
-    backend.djVoice({ action: "gain", gain }).catch(() => {});
-  }
-
-  /** ms into the line playing now. */
-  now(): number {
-    if (this.#id === null) return 0;
-    return this.#running ? this.#at + performance.now() - this.#since : this.#at;
-  }
-
-  /** Stops the line; its `onEnd` isn't called. */
-  stop() {
-    if (this.#id === null) return;
-    this.#clear();
-    backend.djVoice({ action: "stop" }).catch(() => {});
   }
 }
 
