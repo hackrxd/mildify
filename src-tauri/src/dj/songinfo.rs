@@ -27,6 +27,9 @@ const MUSICBRAINZ_TIMEOUT: Duration = Duration::from_secs(8);
 const KEEP_AT_MOST: usize = 2000;
 /// MusicBrainz asks for no more than one request a second.
 const MUSICBRAINZ_EVERY: Duration = Duration::from_millis(1100);
+/// How long MusicBrainz is left alone after it turns a request away, unless it says; and at most.
+const MUSICBRAINZ_BACKOFF: Duration = Duration::from_secs(5);
+const MUSICBRAINZ_BACKOFF_AT_MOST: Duration = Duration::from_secs(60);
 /// A whole look-up gives up on slow sources after this long: the DJ has a set to pick.
 const DEADLINE: Duration = Duration::from_secs(12);
 const MUSICBRAINZ: &str = "https://musicbrainz.org/ws/2";
@@ -96,8 +99,8 @@ pub struct SongLookup {
     saving: Mutex<()>,
     /// Bumped as everything's forgotten, so a look-up under way then keeps nothing.
     generation: std::sync::atomic::AtomicU64,
-    /// When the last MusicBrainz request went out.
-    musicbrainz_at: tokio::sync::Mutex<Option<Instant>>,
+    /// When the next MusicBrainz request may go: a second after the last, or later when it asked to be left alone.
+    musicbrainz_next: tokio::sync::Mutex<Option<Instant>>,
     musicbrainz_url: String,
     musicbrainz_every: Duration,
 }
@@ -122,7 +125,7 @@ impl SongLookup {
             kept: Mutex::new(None),
             saving: Mutex::new(()),
             generation: std::sync::atomic::AtomicU64::new(0),
-            musicbrainz_at: tokio::sync::Mutex::new(None),
+            musicbrainz_next: tokio::sync::Mutex::new(None),
             musicbrainz_url: MUSICBRAINZ.into(),
             musicbrainz_every: MUSICBRAINZ_EVERY,
         }
@@ -293,22 +296,21 @@ impl SongLookup {
         }
     }
 
-    /// One MusicBrainz request, no sooner than a second after the last, and done by the deadline; `None` when
-    /// MusicBrainz doesn't know what was asked for.
+    /// One MusicBrainz request, no sooner than a second after the last (or than MusicBrainz asked, after turning one
+    /// away), and done by the deadline; `None` when MusicBrainz doesn't know what was asked for.
     async fn musicbrainz_get(&self, path: &str, deadline: Instant) -> Result<Option<Value>, String> {
-        let mut last = self.musicbrainz_at.lock().await;
-        if let Some(at) = *last {
-            let ready = at + self.musicbrainz_every;
-            if ready > deadline {
+        let mut next = self.musicbrainz_next.lock().await;
+        if let Some(at) = *next {
+            if at > deadline {
                 return Err("out of time".into());
             }
-            tokio::time::sleep_until(ready.into()).await;
+            tokio::time::sleep_until(at.into()).await;
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Err("out of time".into());
         }
-        *last = Some(Instant::now());
+        *next = Some(Instant::now() + self.musicbrainz_every);
         let resp = self
             .http
             .get(format!("{}{path}", self.musicbrainz_url))
@@ -320,6 +322,12 @@ impl SongLookup {
             .map_err(|e| e.to_string())?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
+        }
+        // Too many requests: left alone a while, as it asks, rather than asked again a second later.
+        if matches!(resp.status().as_u16(), 429 | 503) {
+            let wait = musicbrainz_backoff(resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()));
+            *next = Some(Instant::now() + wait.max(self.musicbrainz_every));
+            return Err(format!("MusicBrainz answered {}, and is left alone for {} s", resp.status(), wait.as_secs()));
         }
         if !resp.status().is_success() {
             return Err(format!("MusicBrainz answered {}", resp.status()));
@@ -393,6 +401,14 @@ impl SongLookup {
         let artist = self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await?;
         Ok(artist.map(|a| top_names(&a["genres"], 4)).unwrap_or_default())
     }
+}
+
+/// How long to leave MusicBrainz alone after it turned a request away: as its `Retry-After` says, within reason.
+fn musicbrainz_backoff(retry_after: Option<&str>) -> Duration {
+    retry_after
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(MUSICBRAINZ_BACKOFF, Duration::from_secs)
+        .min(MUSICBRAINZ_BACKOFF_AT_MOST)
 }
 
 /// Escapes quotes and backslashes for a Lucene phrase.
@@ -796,7 +812,7 @@ mod tests {
     #[tokio::test]
     async fn gives_up_on_musicbrainz_past_the_deadline() {
         let l = lookup();
-        *l.musicbrainz_at.lock().await = Some(Instant::now());
+        *l.musicbrainz_next.lock().await = Some(Instant::now() + MUSICBRAINZ_EVERY);
         let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
         let soon = Instant::now() + Duration::from_millis(100);
         assert_eq!(l.musicbrainz_recording(None, &song, soon).await.unwrap_err(), "out of time");
@@ -839,5 +855,27 @@ mod tests {
         assert_eq!(found[0].genres, ["shoegaze"]);
         assert!(found[1].genres.is_empty());
         assert!(!l.with_kept(|m| m["u2"].complete));
+    }
+
+    #[test]
+    fn leaves_musicbrainz_alone_as_long_as_it_asks_within_reason() {
+        assert_eq!(musicbrainz_backoff(None), MUSICBRAINZ_BACKOFF);
+        assert_eq!(musicbrainz_backoff(Some("2")), Duration::from_secs(2));
+        assert_eq!(musicbrainz_backoff(Some("600")), MUSICBRAINZ_BACKOFF_AT_MOST);
+        assert_eq!(musicbrainz_backoff(Some("soon")), MUSICBRAINZ_BACKOFF);
+    }
+
+    #[tokio::test]
+    async fn asks_musicbrainz_nothing_more_for_a_while_once_it_turns_a_request_away() {
+        let (url, server) = serve(vec![(503, r#"{"error":"slow down"}"#)], false).await;
+        let mut l = lookup();
+        l.musicbrainz_url = url;
+        l.musicbrainz_every = Duration::from_millis(10);
+        let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let turned_away = l.musicbrainz_recording(None, &song, deadline).await.unwrap_err();
+        assert!(turned_away.contains("503"), "{turned_away}");
+        assert_eq!(l.musicbrainz_recording(None, &song, deadline).await.unwrap_err(), "out of time");
+        assert_eq!(server.await.unwrap().len(), 1);
     }
 }
