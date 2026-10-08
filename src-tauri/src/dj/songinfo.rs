@@ -101,6 +101,9 @@ pub struct SongLookup {
     generation: std::sync::atomic::AtomicU64,
     /// When the next MusicBrainz request may go: a second after the last, or later when it asked to be left alone.
     musicbrainz_next: tokio::sync::Mutex<Option<Instant>>,
+    /// MusicBrainz artists' genres, by its id for them, and when they were asked: the same artists come back set
+    /// after set.
+    artist_genres: Mutex<HashMap<String, (Vec<String>, Instant)>>,
     musicbrainz_url: String,
     musicbrainz_every: Duration,
 }
@@ -126,6 +129,7 @@ impl SongLookup {
             saving: Mutex::new(()),
             generation: std::sync::atomic::AtomicU64::new(0),
             musicbrainz_next: tokio::sync::Mutex::new(None),
+            artist_genres: Mutex::default(),
             musicbrainz_url: MUSICBRAINZ.into(),
             musicbrainz_every: MUSICBRAINZ_EVERY,
         }
@@ -242,6 +246,7 @@ impl SongLookup {
         let mut kept = self.kept.lock().unwrap();
         self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *kept = Some(BTreeMap::new());
+        self.artist_genres.lock().unwrap().clear();
     }
 
     fn with_kept<R>(&self, f: impl FnOnce(&mut BTreeMap<String, Kept>) -> R) -> R {
@@ -396,10 +401,23 @@ impl SongLookup {
         Ok(read_recording(&found))
     }
 
-    /// An artist's genres on MusicBrainz; none when it doesn't know the artist.
+    /// An artist's genres on MusicBrainz, asked once a month; none when it doesn't know the artist.
     async fn musicbrainz_artist_genres(&self, mbid: &str, deadline: Instant) -> Result<Vec<String>, String> {
+        if let Some((genres, at)) = self.artist_genres.lock().unwrap().get(mbid) {
+            if at.elapsed() < KEEP_FOR {
+                return Ok(genres.clone());
+            }
+        }
+        let generation = self.generation();
         let artist = self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await?;
-        Ok(artist.map(|a| top_names(&a["genres"], 4)).unwrap_or_default())
+        let genres = artist.map(|a| top_names(&a["genres"], 4)).unwrap_or_default();
+        // Not after everything's been forgotten.
+        if self.generation() == generation {
+            let mut known = self.artist_genres.lock().unwrap();
+            known.retain(|_, (_, at)| at.elapsed() < KEEP_FOR);
+            known.insert(mbid.to_owned(), (genres.clone(), Instant::now()));
+        }
+        Ok(genres)
     }
 }
 
@@ -877,5 +895,26 @@ mod tests {
         assert!(turned_away.contains("503"), "{turned_away}");
         assert_eq!(l.musicbrainz_recording(None, &song, deadline).await.unwrap_err(), "out of time");
         assert_eq!(server.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remembers_musicbrainz_artists_genres_until_everything_is_forgotten() {
+        let bare = r#"{"recordings":[{"title":"x","genres":[],"tags":[],"artist-credit":[{"artist":{"id":"a-1"}}]}]}"#;
+        let artist = r#"{"genres":[{"name":"shoegaze","count":3}]}"#;
+        let (url, server) = serve(vec![(200, bare), (200, artist), (200, bare)], false).await;
+        let mut l = lookup();
+        l.musicbrainz_url = url;
+        l.musicbrainz_every = Duration::from_millis(10);
+        let one = SongRef { uri: "u1".into(), name: "Only Shallow".into(), artist: "My Bloody Valentine".into(), artist_id: None };
+        let two = SongRef { uri: "u2".into(), name: "Sometimes".into(), artist: "My Bloody Valentine".into(), artist_id: None };
+        let deadline = Instant::now() + DEADLINE;
+        let shoegaze = Ok((vec!["shoegaze".to_owned()], vec![], true));
+        assert_eq!(l.musicbrainz(&[(&one, None)], deadline).await, [shoegaze.clone()]);
+        // Another look-up, another song by the artist: its genres are known.
+        assert_eq!(l.musicbrainz(&[(&two, None)], deadline).await, [shoegaze]);
+        let seen = server.await.unwrap();
+        assert_eq!(seen.iter().filter(|r| r.contains("/artist/")).count(), 1, "{seen:?}");
+        l.clear();
+        assert!(l.artist_genres.lock().unwrap().is_empty());
     }
 }
