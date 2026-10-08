@@ -107,9 +107,11 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, `onUnload` callbacks) and calls the function it returned. From then on, the `ns` it was given
-does nothing: a timer or event handler the extension left running can't add styles, pages, menu items, watchers
-or toasts back, and an `onUnload` registered then runs at once. Editing it (for a folder extension,
+items, watchers, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
+the extension left running can't add styles, pages, menu items, watchers or toasts back through the `ns` it was
+given, its `ns.api` calls reject without reaching Spotify, and an `onUnload` registered then runs at once.
+`ns.player`, `ns.router` and `ns.storage` still work, so stop your own timers and listeners in the function you
+return. Editing it (for a folder extension,
 any file in the folder) restarts it the next time the app window gets focus. A module without a default export just runs once; it
 can't be undone, so turning it off or editing it takes effect when the window reloads (Settings
 offers a **Reload window** button then).
@@ -123,7 +125,7 @@ offers a **Reload window** button then).
 | `player` | Playback state and controls: `track`, `isPlaying`, `position`, `positionNow()`, `volume`, `shuffle`, `repeat`, `devices`, and `togglePlay()`, `next()`, `prev()`, `seek(ms)`, `setVolume(percent)`, `toggleShuffle()`, `cycleRepeat()`, `playContext(uri, startUri?)`, `playUris(uris, index?)`, `addToQueue(uri)`, `transferTo(deviceId)`. |
 | `router` | Navigation: `current`, `go(route)`, `back()`, `forward()`, `openUri(spotifyUri)`. Routes are `{ name: "home" }`, `{ name: "album", id }`, `{ name: "artist", id }`, `{ name: "playlist", id }`, `{ name: "search", q }`, `{ name: "liked" }`, `{ name: "lyrics" }`, `{ name: "settings" }`… |
 | `session` | `user` (the Spotify profile) and `playlists`. |
-| `api(method, path, { query, body })` | Calls the Spotify Web API through the app's backend, which holds the token: `ns.api("GET", "/me/top/tracks", { query: { limit: 10 } })`. Rejects with `{ kind, message, status }`. The app's development-mode limits apply (see the README). |
+| `api(method, path, { query, body })` | Calls the Spotify Web API through the app's backend, which holds the token: `ns.api("GET", "/me/top/tracks", { query: { limit: 10 } })`. Rejects with `{ kind, message, status }`, and with `kind: "cancelled"` once the extension is turned off. The app's development-mode limits apply (see the README). |
 | `toasts.show(message, tone?)` | Shows a notification; `tone` is `"info"` or `"error"`. |
 | `watch(fn)` | Runs `fn` now and again whenever app state it read (`player.track`, `player.isPlaying`, `router.current`, …) changes. `fn` may return a cleanup that runs before each re-run. Returns a stop function. |
 | `addStyle(css)` | Adds a stylesheet. Returns a remove function. |
