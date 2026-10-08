@@ -672,9 +672,21 @@
       <label class="row">
         <span>
           <span class="label">Let the DJ name every song in a set</span>
-          <span class="muted small">Off, it introduces only the first song and lets the rest of the set speak for itself.</span>
+          <span class="muted small">
+            {#if dj.live}
+              While it picks songs as it goes, it introduces only the first song: it hasn't picked the rest yet.
+            {:else}
+              Off, it introduces only the first song and lets the rest of the set speak for itself.
+            {/if}
+          </span>
         </span>
-        <input type="checkbox" class="switch" checked={dj.nameAll} onchange={(e) => dj.setNameAll(e.currentTarget.checked)} />
+        <input
+          type="checkbox"
+          class="switch"
+          checked={dj.nameAll}
+          disabled={dj.live}
+          onchange={(e) => dj.setNameAll(e.currentTarget.checked)}
+        />
       </label>
 
       <label class="row stacked">
