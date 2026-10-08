@@ -315,7 +315,8 @@ class Dj {
   }
 
   async configure(patch: Partial<DjConfig>) {
-    // Another model ends the session. A new voice carries on, the next line in it, unless it has to download first.
+    // Another model ends the session. A new voice carries on (a line already made keeps the old one), unless it has
+    // to download first.
     const switching = patch.provider !== undefined || patch.model !== undefined;
     if (patch.enabled === false || switching) this.stop();
     try {
