@@ -313,8 +313,9 @@ export function requestScore(request: string): (c: Candidate) => number {
   const spans: [number, number][] = [];
   const notSpans: [number, number][] = [];
   let against = false;
-  /** Whether the clause a comma just ended was against, for a "but" after it: "no Drake, but Future". */
+  /** Whether the clause a mark just ended was against, for a "but" after it: "no Drake, but Future". */
   let ended = false;
+  const mark = (w: string) => /^[.,;!?]$/.test(w);
   let prev = "";
   for (const t of tokens) {
     const w = t.replace(/'/g, "");
@@ -323,7 +324,7 @@ export function requestScore(request: string): (c: Candidate) => number {
     if (w === "but") {
       // "Nothing but Radiohead" is only Radiohead; "anything but Drake" leaves Drake out; "no Drake but Future"
       // turns back to Future.
-      const was: boolean = /^[.,;!?]$/.test(after) ? ended : against;
+      const was: boolean = mark(after) ? ended : against;
       against = NEGATIONS.has(after) ? false : !was;
       continue;
     }
@@ -336,8 +337,9 @@ export function requestScore(request: string): (c: Candidate) => number {
       against = true;
       continue;
     }
-    if (/^[.,;!?]$/.test(w) || (TURNS.has(w) && !NEGATIONS.has(after))) {
-      if (/^[.,;!?]$/.test(w)) ended = against;
+    if (mark(w) || (TURNS.has(w) && !NEGATIONS.has(after))) {
+      // A run of marks ("...", "?!") ends one clause, which its first mark says.
+      if (mark(w) && !mark(after)) ended = against;
       against = false;
       continue;
     }

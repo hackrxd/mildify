@@ -203,6 +203,16 @@ describe("requests", () => {
     expect(score("anything but The 1975", band)).toBeLessThan(0);
   });
 
+  it("reads a run of marks as the end of one clause", () => {
+    const drake = { ...pool[0], uri: "spotify:track:d", name: "God's Plan", artists: ["Drake"], album: "Scorpion", year: "2018" };
+    const future = { ...pool[0], uri: "spotify:track:f", name: "Mask Off", artists: ["Future"], album: "Hndrxx", year: "2017" };
+    const score = (request: string, c: Candidate) => requestScore(request)(c);
+    for (const request of ["no Drake... but Future", "No Drake?! But Future", "no Drake,, but Future"]) {
+      expect(score(request, future)).toBeGreaterThan(0);
+      expect(score(request, drake)).toBeLessThan(0);
+    }
+  });
+
   it("reads contractions and typographic apostrophes, and \"nothing but\" as only", () => {
     const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
     expect(score("don't play Radiohead", "spotify:track:rh1")).toBeLessThan(0);
