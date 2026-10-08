@@ -59,6 +59,7 @@ pub async fn speak(setup: &Setup, text: &str, scratch: &Path) -> Result<(Vec<u8>
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(super::engine::NO_WINDOW);
+    let started = std::time::Instant::now();
     let child = cmd.spawn().map_err(|e| AppError::Other(format!("Couldn't start the DJ's voice: {e}")))?;
     let output = tokio::time::timeout(TIMEOUT, child.wait_with_output())
         .await
@@ -74,7 +75,29 @@ pub async fn speak(setup: &Setup, text: &str, scratch: &Path) -> Result<(Vec<u8>
     let info = wav_info(&wav).ok_or_else(|| AppError::Other("The DJ's voice wrote no audio".into()))?;
     let chunks = chunk_samples(&String::from_utf8_lossy(&output.stdout));
     let sentences = timings(&split_sentences(&text), &chunks, info.sample_rate, info.frames);
+    log_timing(started.elapsed(), &output, info.duration_ms(), text.chars().count());
     Ok((wav, sentences, info.duration_ms()))
+}
+
+/// How long a line took, and how much of that was loading the voice rather than speaking, for tuning.
+fn log_timing(took: Duration, output: &std::process::Output, audio_ms: u32, chars: usize) {
+    let said = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    let total = took.as_secs_f64();
+    match speaking_secs(&said) {
+        Some(speaking) => log::info!(
+            "DJ voice: {:.1} s of speech ({chars} characters) in {total:.1} s: {:.1} s loading, {speaking:.1} s speaking",
+            f64::from(audio_ms) / 1000.0,
+            (total - speaking).max(0.0),
+        ),
+        None => log::info!("DJ voice: {:.1} s of speech ({chars} characters) in {total:.1} s", f64::from(audio_ms) / 1000.0),
+    }
+}
+
+/// The synthesis time the TTS program reports ("Elapsed seconds: 0.296 s"), which leaves out loading the voice.
+fn speaking_secs(said: &str) -> Option<f64> {
+    let rest = &said[said.find("Elapsed seconds:")? + "Elapsed seconds:".len()..];
+    let number: String = rest.trim_start().chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    number.parse().ok()
 }
 
 fn threads() -> usize {
@@ -271,6 +294,15 @@ pub fn pcm(wav: &[u8]) -> Option<Pcm> {
 mod tests {
     use super::super::manifest;
     use super::*;
+
+    #[test]
+    fn reads_how_long_the_program_spent_speaking() {
+        let said = "sample=1200\nElapsed seconds: 0.296 s\nAudio duration: 4.536 s\nReal-time factor (RTF): 0.296/4.536 = 0.065\n";
+        assert_eq!(speaking_secs(said), Some(0.296));
+        assert_eq!(speaking_secs("Elapsed seconds:12 s"), Some(12.0));
+        assert_eq!(speaking_secs("sample=1200\n"), None);
+        assert_eq!(speaking_secs("Elapsed seconds: n/a"), None);
+    }
 
     /// A mono 16-bit WAV of `frames` silent samples.
     fn wav(rate: u32, frames: u32) -> Vec<u8> {
