@@ -909,7 +909,7 @@ mod tests {
         let two = SongRef { uri: "u2".into(), name: "Sometimes".into(), artist: "My Bloody Valentine".into(), artist_id: None };
         let deadline = Instant::now() + DEADLINE;
         let shoegaze = Ok((vec!["shoegaze".to_owned()], vec![], true));
-        assert_eq!(l.musicbrainz(&[(&one, None)], deadline).await, [shoegaze.clone()]);
+        assert_eq!(l.musicbrainz(&[(&one, None)], deadline).await, std::slice::from_ref(&shoegaze));
         // Another look-up, another song by the artist: its genres are known.
         assert_eq!(l.musicbrainz(&[(&two, None)], deadline).await, [shoegaze]);
         let seen = server.await.unwrap();
