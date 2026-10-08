@@ -99,6 +99,15 @@ pub struct SongLookup {
     /// When the last MusicBrainz request went out.
     musicbrainz_at: tokio::sync::Mutex<Option<Instant>>,
     musicbrainz_url: String,
+    musicbrainz_every: Duration,
+}
+
+/// A song being looked up: what's found so far, whether every source asked answered, and what the next ones go by.
+struct Found {
+    info: SongInfo,
+    complete: bool,
+    isrc: Option<String>,
+    artist_id: Option<String>,
 }
 
 fn now_secs() -> u64 {
@@ -115,6 +124,7 @@ impl SongLookup {
             generation: std::sync::atomic::AtomicU64::new(0),
             musicbrainz_at: tokio::sync::Mutex::new(None),
             musicbrainz_url: MUSICBRAINZ.into(),
+            musicbrainz_every: MUSICBRAINZ_EVERY,
         }
     }
 
@@ -133,76 +143,90 @@ impl SongLookup {
     ) -> Vec<SongInfo> {
         let left = || deadline.saturating_duration_since(Instant::now());
         let generation = self.generation();
-        // Songs by the same artist in one look-up ask for its genres once.
-        let mut genres_of: HashMap<String, Option<Vec<String>>> = HashMap::new();
-        let mut out = Vec::with_capacity(songs.len());
-        for song in songs {
-            if let Some(info) = self.kept(&song.uri, musicbrainz) {
-                out.push(info);
-                continue;
-            }
-            let mut info = SongInfo { uri: song.uri.clone(), ..Default::default() };
-            // Whether every source asked answered; a look-up missing one is asked again soon.
-            let mut complete = session.is_some();
-            let mut isrc = None;
-            let mut artist_id = song.artist_id.clone();
-            if let Some(session) = &session {
-                match tokio::time::timeout(left(), spotify_metadata(session, &song.uri)).await {
-                    Ok(Ok((found, found_isrc, found_artist, whole))) => {
-                        // An album or artist entry missing is asked for again soon.
-                        complete &= whole;
-                        info = found;
-                        isrc = found_isrc;
-                        artist_id = artist_id.or(found_artist);
-                    }
-                    Ok(Err(e)) => {
-                        complete = false;
-                        log::info!("DJ: no Spotify metadata for {}: {e}", song.uri);
-                    }
-                    Err(_) => {
-                        complete = false;
-                        log::info!("DJ: Spotify's metadata for {} took too long", song.uri);
-                    }
-                }
-            }
-            if let Some(id) = artist_id {
-                let known = match genres_of.get(&id) {
-                    Some(known) => known.clone(),
-                    None => {
-                        let found = match tokio::time::timeout(left(), artist_genres(web, &id)).await {
-                            Ok(Ok(genres)) => Some(genres),
-                            Ok(Err(e)) => {
-                                log::info!("DJ: no genres for artist {id}: {e}");
-                                None
-                            }
-                            Err(_) => None,
-                        };
-                        genres_of.insert(id, found.clone());
-                        found
-                    }
+        let mut out: Vec<Option<SongInfo>> = songs.iter().map(|s| self.kept(&s.uri, musicbrainz)).collect();
+        let todo: Vec<&SongRef> = songs.iter().zip(&out).filter(|(_, kept)| kept.is_none()).map(|(s, _)| s).collect();
+        // Spotify's facts first, for every song at once: they're quick, and the slow sources come after.
+        let mut found: Vec<Found> = futures_util::future::join_all(todo.iter().map(|song| {
+            let session = session.clone();
+            async move {
+                let mut f = Found {
+                    info: SongInfo { uri: song.uri.clone(), ..Default::default() },
+                    // Whether every source asked answered; a look-up missing one is asked again soon.
+                    complete: session.is_some(),
+                    isrc: None,
+                    artist_id: song.artist_id.clone(),
                 };
-                match known {
-                    Some(genres) => info.genres = genres,
-                    None => complete = false,
+                if let Some(session) = &session {
+                    match tokio::time::timeout(left(), spotify_metadata(session, &song.uri)).await {
+                        Ok(Ok((info, isrc, artist, whole))) => {
+                            // An album or artist entry missing is asked for again soon.
+                            f.complete &= whole;
+                            f.info = info;
+                            f.isrc = isrc;
+                            f.artist_id = f.artist_id.or(artist);
+                        }
+                        Ok(Err(e)) => {
+                            f.complete = false;
+                            log::info!("DJ: no Spotify metadata for {}: {e}", song.uri);
+                        }
+                        Err(_) => {
+                            f.complete = false;
+                            log::info!("DJ: Spotify's metadata for {} took too long", song.uri);
+                        }
+                    }
+                }
+                f
+            }
+        }))
+        .await;
+        // Each artist's genres once, however many of its songs are asked about.
+        let ids: std::collections::BTreeSet<String> = found.iter().filter_map(|f| f.artist_id.clone()).collect();
+        let genres: HashMap<String, Option<Vec<String>>> = futures_util::future::join_all(ids.into_iter().map(|id| async move {
+            let genres = match tokio::time::timeout(left(), artist_genres(web, &id)).await {
+                Ok(Ok(genres)) => Some(genres),
+                Ok(Err(e)) => {
+                    log::info!("DJ: no genres for artist {id}: {e}");
+                    None
+                }
+                Err(_) => None,
+            };
+            (id, genres)
+        }))
+        .await
+        .into_iter()
+        .collect();
+        for f in &mut found {
+            if let Some(id) = &f.artist_id {
+                match genres.get(id).cloned().flatten() {
+                    Some(genres) => f.info.genres = genres,
+                    None => f.complete = false,
                 }
             }
-            if musicbrainz {
-                match self.musicbrainz(isrc.as_deref(), song, deadline).await {
+        }
+        if musicbrainz {
+            let asked: Vec<(&SongRef, Option<&str>)> = todo.iter().zip(&found).map(|(s, f)| (*s, f.isrc.as_deref())).collect();
+            let answers = self.musicbrainz(&asked, deadline).await;
+            for (f, answer) in found.iter_mut().zip(answers) {
+                match answer {
                     Ok((genres, tags, whole)) => {
-                        complete &= whole;
-                        merge(&mut info, genres, tags);
+                        f.complete &= whole;
+                        merge(&mut f.info, genres, tags);
                     }
                     Err(e) => {
-                        complete = false;
-                        log::info!("DJ: nothing from MusicBrainz for {}: {e}", song.uri);
+                        f.complete = false;
+                        log::info!("DJ: nothing from MusicBrainz for {}: {e}", f.info.uri);
                     }
                 }
             }
-            self.keep(&info, complete, musicbrainz, generation);
-            out.push(info);
+        }
+        let mut found = found.into_iter();
+        for slot in out.iter_mut().filter(|o| o.is_none()) {
+            let Some(f) = found.next() else { break };
+            self.keep(&f.info, f.complete, musicbrainz, generation);
+            *slot = Some(f.info);
         }
         self.save(generation);
-        out
+        out.into_iter().flatten().collect()
     }
 
     fn generation(&self) -> u64 {
@@ -274,7 +298,7 @@ impl SongLookup {
     async fn musicbrainz_get(&self, path: &str, deadline: Instant) -> Result<Option<Value>, String> {
         let mut last = self.musicbrainz_at.lock().await;
         if let Some(at) = *last {
-            let ready = at + MUSICBRAINZ_EVERY;
+            let ready = at + self.musicbrainz_every;
             if ready > deadline {
                 return Err("out of time".into());
             }
@@ -303,10 +327,46 @@ impl SongLookup {
         resp.json().await.map(Some).map_err(|e| e.to_string())
     }
 
-    /// The song's genres and tags on MusicBrainz: by ISRC, or by searching for its title and artist when there's
-    /// none or MusicBrainz doesn't know it; then the artist's, when the recording has no genres of its own.
-    /// Whether it got all it asked for comes third: the artist's genres can be missing.
-    async fn musicbrainz(&self, isrc: Option<&str>, song: &SongRef, deadline: Instant) -> Result<(Vec<String>, Vec<String>, bool), String> {
+    /// MusicBrainz's genres and tags for each song, asked in turn: every song's recording first (by ISRC, or by its
+    /// title and artist), then, for recordings without genres of their own, the artist's, once per artist. Whether a
+    /// song got all it asked for comes third; a song MusicBrainz didn't answer for in time is an `Err`.
+    async fn musicbrainz(
+        &self,
+        songs: &[(&SongRef, Option<&str>)],
+        deadline: Instant,
+    ) -> Vec<Result<(Vec<String>, Vec<String>, bool), String>> {
+        let mut found = Vec::with_capacity(songs.len());
+        for (song, isrc) in songs {
+            found.push(self.musicbrainz_recording(*isrc, song, deadline).await.map(|(genres, tags, artist)| (genres, tags, artist, true)));
+        }
+        let mut artists: HashMap<String, Option<Vec<String>>> = HashMap::new();
+        for (genres, _, artist, whole) in found.iter_mut().flatten() {
+            let Some(mbid) = artist.as_deref().filter(|_| genres.is_empty()) else { continue };
+            let known = match artists.get(mbid) {
+                Some(known) => known.clone(),
+                None => {
+                    let asked = self.musicbrainz_artist_genres(mbid, deadline).await;
+                    let known = asked.map_err(|e| log::info!("DJ: no MusicBrainz genres for artist {mbid}: {e}")).ok();
+                    artists.insert(mbid.to_owned(), known.clone());
+                    known
+                }
+            };
+            match known {
+                Some(known) => *genres = known,
+                None => *whole = false,
+            }
+        }
+        found.into_iter().map(|f| f.map(|(genres, tags, _, whole)| (genres, tags, whole))).collect()
+    }
+
+    /// The song's recording on MusicBrainz, by ISRC, or by searching for its title and artist when there's none or
+    /// MusicBrainz doesn't know it: its genres and tags, and its first artist's MusicBrainz id.
+    async fn musicbrainz_recording(
+        &self,
+        isrc: Option<&str>,
+        song: &SongRef,
+        deadline: Instant,
+    ) -> Result<(Vec<String>, Vec<String>, Option<String>), String> {
         let mut found = None;
         if let Some(isrc) = isrc {
             found = self
@@ -321,25 +381,17 @@ impl SongLookup {
                 let q = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
                 match self.musicbrainz_get(&format!("/recording?query={q}&limit=1&fmt=json"), deadline).await? {
                     Some(v) => v,
-                    None => return Ok((Vec::new(), Vec::new(), true)),
+                    None => return Ok((Vec::new(), Vec::new(), None)),
                 }
             }
         };
-        let (mut genres, tags, artist) = read_recording(&found);
-        let mut whole = true;
-        if genres.is_empty() {
-            if let Some(mbid) = artist {
-                match self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await {
-                    Ok(Some(a)) => genres = top_names(&a["genres"], 4),
-                    Ok(None) => {}
-                    Err(e) => {
-                        log::info!("DJ: no MusicBrainz genres for {}'s artist: {e}", song.uri);
-                        whole = false;
-                    }
-                }
-            }
-        }
-        Ok((genres, tags, whole))
+        Ok(read_recording(&found))
+    }
+
+    /// An artist's genres on MusicBrainz; none when it doesn't know the artist.
+    async fn musicbrainz_artist_genres(&self, mbid: &str, deadline: Instant) -> Result<Vec<String>, String> {
+        let artist = self.musicbrainz_get(&format!("/artist/{mbid}?inc=genres&fmt=json"), deadline).await?;
+        Ok(artist.map(|a| top_names(&a["genres"], 4)).unwrap_or_default())
     }
 }
 
@@ -405,8 +457,15 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
     };
     let isrc = track.external_ids.iter().find(|e| e.external_type.eq_ignore_ascii_case("isrc")).map(|e| e.id.clone());
     let mut whole = true;
-    // The track carries a partial album; the album's own entry has its label and date.
-    match Album::get(session, &track.album.id).await {
+    let artist_id = track.artists.first().map(|a| a.id.clone());
+    // The track carries a partial album; the album's own entry has its label and date. Both asked at once.
+    let (album, artist) = tokio::join!(Album::get(session, &track.album.id), async {
+        match &artist_id {
+            Some(aid) => Some(Artist::get(session, aid).await),
+            None => None,
+        }
+    });
+    match album {
         Ok(album) => {
             info.album = non_empty(&album.name);
             info.label = non_empty(&album.label);
@@ -419,19 +478,17 @@ async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Opt
             whole = false;
         }
     }
-    let artist_id = track.artists.first().map(|a| a.id.clone());
-    if let Some(aid) = &artist_id {
-        match Artist::get(session, aid).await {
-            Ok(artist) => {
-                info.artist_bio = artist.biographies.first().and_then(|b| bio(&b.text));
-                info.artist_active = active(&artist.activity_periods);
-                info.related_artists = artist.related.iter().map(|a| a.name.clone()).filter(|n| !n.is_empty()).take(3).collect();
-            }
-            Err(e) => {
-                log::info!("DJ: no artist metadata for {uri}: {e}");
-                whole = false;
-            }
+    match artist {
+        Some(Ok(artist)) => {
+            info.artist_bio = artist.biographies.first().and_then(|b| bio(&b.text));
+            info.artist_active = active(&artist.activity_periods);
+            info.related_artists = artist.related.iter().map(|a| a.name.clone()).filter(|n| !n.is_empty()).take(3).collect();
         }
+        Some(Err(e)) => {
+            log::info!("DJ: no artist metadata for {uri}: {e}");
+            whole = false;
+        }
+        None => {}
     }
     Ok((info, isrc, artist_id.map(|a| a.to_id()), whole))
 }
@@ -670,9 +727,8 @@ mod tests {
         let mut l = lookup();
         l.musicbrainz_url = url;
         let song = SongRef { uri: "u".into(), name: "When You Sleep".into(), artist: "My Bloody Valentine".into(), artist_id: None };
-        let (genres, _, whole) = l.musicbrainz(Some("GBAAA9100001"), &song, Instant::now() + DEADLINE).await.unwrap();
+        let (genres, _, _) = l.musicbrainz_recording(Some("GBAAA9100001"), &song, Instant::now() + DEADLINE).await.unwrap();
         assert_eq!(genres, ["shoegaze"]);
-        assert!(whole);
         let seen = server.await.unwrap();
         assert!(seen[0].contains("/isrc/GBAAA9100001"));
         assert!(seen[1].contains("/recording?query="));
@@ -685,9 +741,8 @@ mod tests {
         let mut l = lookup();
         l.musicbrainz_url = url;
         let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
-        let (genres, _, whole) = l.musicbrainz(None, &song, Instant::now() + DEADLINE).await.unwrap();
-        assert!(genres.is_empty());
-        assert!(!whole);
+        let found = l.musicbrainz(&[(&song, None)], Instant::now() + DEADLINE).await;
+        assert_eq!(found, [Ok((vec![], vec![], false))]);
         assert!(server.await.unwrap()[1].contains("/artist/a-1"));
     }
 
@@ -698,7 +753,7 @@ mod tests {
         l.musicbrainz_url = url;
         let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
         let started = Instant::now();
-        assert!(l.musicbrainz(None, &song, started + Duration::from_millis(400)).await.is_err());
+        assert!(l.musicbrainz(&[(&song, None)], started + Duration::from_millis(400)).await[0].is_err());
         assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
     }
 
@@ -725,8 +780,8 @@ mod tests {
         l.musicbrainz_url = format!("http://{addr}");
         let deadline = Instant::now() + DEADLINE;
         let song = SongRef { uri: "spotify:track:a".into(), name: "Say \"Hi\"".into(), artist: "M83".into(), artist_id: None };
-        l.musicbrainz(None, &song, deadline).await.unwrap();
-        l.musicbrainz(Some("FRZ111100211"), &song, deadline).await.unwrap();
+        l.musicbrainz_recording(None, &song, deadline).await.unwrap();
+        l.musicbrainz_recording(Some("FRZ111100211"), &song, deadline).await.unwrap();
         let requests = server.await.unwrap();
         assert!(requests[1].0 - requests[0].0 >= Duration::from_millis(1000));
         let first = requests[0].1.to_ascii_lowercase();
@@ -744,6 +799,45 @@ mod tests {
         *l.musicbrainz_at.lock().await = Some(Instant::now());
         let song = SongRef { uri: "u".into(), name: "x".into(), artist: "y".into(), artist_id: None };
         let soon = Instant::now() + Duration::from_millis(100);
-        assert_eq!(l.musicbrainz(None, &song, soon).await.unwrap_err(), "out of time");
+        assert_eq!(l.musicbrainz_recording(None, &song, soon).await.unwrap_err(), "out of time");
+    }
+
+    #[tokio::test]
+    async fn asks_musicbrainz_about_every_song_before_any_artist() {
+        let bare = r#"{"recordings":[{"title":"x","genres":[],"tags":[{"name":"dreamy","count":1}],"artist-credit":[{"artist":{"id":"a-1"}}]}]}"#;
+        let artist = r#"{"genres":[{"name":"shoegaze","count":3}]}"#;
+        let (url, server) = serve(vec![(200, bare), (200, bare), (200, artist)], false).await;
+        let mut l = lookup();
+        l.musicbrainz_url = url;
+        l.musicbrainz_every = Duration::from_millis(10);
+        let one = SongRef { uri: "u1".into(), name: "Only Shallow".into(), artist: "My Bloody Valentine".into(), artist_id: None };
+        let two = SongRef { uri: "u2".into(), name: "Sometimes".into(), artist: "My Bloody Valentine".into(), artist_id: None };
+        let found = l.musicbrainz(&[(&one, None), (&two, None)], Instant::now() + DEADLINE).await;
+        let shoegaze = Ok((vec!["shoegaze".to_owned()], vec!["dreamy".to_owned()], true));
+        assert_eq!(found, [shoegaze.clone(), shoegaze]);
+        let seen = server.await.unwrap();
+        assert!(seen[0].contains("/recording?query=") && seen[1].contains("/recording?query="), "{seen:?}");
+        assert!(seen[2].contains("/artist/a-1"), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_song_musicbrainz_didnt_get_to_still_comes_back() {
+        let search = r#"{"recordings":[{"title":"x","genres":[{"name":"shoegaze","count":2}],"tags":[]}]}"#;
+        let (url, _server) = serve(vec![(200, search)], true).await;
+        let mut l = lookup();
+        l.musicbrainz_url = url;
+        l.musicbrainz_every = Duration::from_millis(200);
+        let web = WebApi::new(reqwest::Client::new(), l.file.with_file_name("token.json"));
+        let songs: Vec<SongRef> = ["u1", "u2"]
+            .into_iter()
+            .map(|uri| SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None })
+            .collect();
+        let started = Instant::now();
+        let found = l.look_up_by(&songs, None, &web, true, started + Duration::from_millis(600)).await;
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert_eq!(found.iter().map(|f| f.uri.as_str()).collect::<Vec<_>>(), ["u1", "u2"]);
+        assert_eq!(found[0].genres, ["shoegaze"]);
+        assert!(found[1].genres.is_empty());
+        assert!(!l.with_kept(|m| m["u2"].complete));
     }
 }

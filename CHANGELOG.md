@@ -29,6 +29,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   says plainly when a model server can't be reached or its model stopped.
 - A busy or rate-limited model is asked once more after a short wait, before the DJ talks from a template; when the
   provider asks for a longer wait, the DJ says how long.
+- When the DJ looks songs up before picking, every song gets Spotify's facts first, so a slow MusicBrainz no longer
+  leaves the last songs with nothing.
 
 ## 1.3.0 - 2026-10-06
 
