@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DjEvent } from "./dj.svelte";
 import type { DjStatus } from "./ipc";
 import type { Track } from "./types";
 
@@ -266,6 +267,19 @@ async function started() {
   expect(dj.current).toBe(first);
   expect(dj.upNext).not.toBeNull();
   return first;
+}
+
+/** An event as its type and what it's about: "set-picked Set 2". */
+function describeEvent(e: DjEvent): string {
+  const what = "set" in e && e.set ? e.set.name : "song" in e ? e.song.name : "line" in e ? e.line.name : "";
+  return what ? `${e.type} ${what}` : e.type;
+}
+
+/** What the DJ tells its listeners from here on, described. */
+function heard(): string[] {
+  const events: string[] = [];
+  dj.on((e) => void events.push(describeEvent(e)));
+  return events;
 }
 
 describe("what the DJ is asked", () => {
@@ -954,7 +968,9 @@ describe("starting", () => {
     expect(schema).toHaveProperty("properties.songs");
     expect(voice.played).toHaveLength(1);
     expect(backend.djDuck).toHaveBeenCalledWith(timing.DUCK_LEVEL, 0, timing.DUCK_DOWN_MS);
-    expect(dj.said).toEqual([{ name: "Set 1", talk: "Here's set number 1, nice and easy.", byModel: true, why: null }]);
+    expect(dj.said).toEqual([
+      { name: "Set 1", setId: dj.upNext!.id, talk: "Here's set number 1, nice and easy.", byModel: true, why: null, spoken: true },
+    ]);
     expect(dj.caption?.[0].text).toBe("Here's set number 1, nice and easy.");
     const set = dj.upNext!;
     expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0] });
@@ -1067,6 +1083,8 @@ describe("starting", () => {
     player.isPlaying = false;
     await dj.start();
     expect(voice.played).toHaveLength(0);
+    // Shown, not read out.
+    expect(dj.said.map((l) => l.spoken)).toEqual([false]);
     expect(player.playUris).toHaveBeenCalledTimes(1);
     // The next set's line fails too: still one message.
     await playing(dj.upNext!.songs[0].uri, 0);
@@ -1379,6 +1397,7 @@ describe("between sets", () => {
   it("starts over when the listener goes back in the song it was talking over", async () => {
     const first = await started();
     const next = dj.upNext!;
+    const events = heard();
     await lastSong(first);
     const talkAt = DURATION - (speechMs - (3000 - timing.VOCAL_GAP_MS));
     player.pos = talkAt;
@@ -1398,6 +1417,11 @@ describe("between sets", () => {
     await tick();
     expect(voice.played).toHaveLength(1);
     expect(dj.onAir?.name).toBe(next.name);
+    expect(events.filter((e) => e.startsWith("line-"))).toEqual([
+      `line-spoken ${next.name}`,
+      `line-withdrawn ${next.name}`,
+      `line-spoken ${next.name}`,
+    ]);
   });
 
   it("gives up when the song after its talk never comes in", async () => {
@@ -1560,6 +1584,7 @@ describe("picking as it goes", () => {
 
   it("lines up more like a song the listener likes", async () => {
     twins();
+    const events = heard();
     const set = await liveStarted();
     const first = set.songs[0].uri;
     expect(artistOf(queued()[0]!)).not.toBe(artistOf(first));
@@ -1569,6 +1594,7 @@ describe("picking as it goes", () => {
     expect(queued()).toHaveLength(2);
     expect(artistOf(queued()[1]!)).toBe(artistOf(first));
     expect(dj.current?.songs[1].uri).toBe(queued()[1]);
+    expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
   });
 
   it("keeps what's lined up once the player may have started loading it", async () => {
@@ -1583,12 +1609,14 @@ describe("picking as it goes", () => {
 
   it("goes by new likes only, not songs that were liked already", async () => {
     twins();
+    const events = heard();
     // The first song was in the listener's library before the DJ played it.
     const set = await liveStarted((set) => likedState.saved.set(set.songs[0].uri, true));
     await tick();
     await tick();
     expect(queued()).toHaveLength(1);
     expect(artistOf(queued()[0]!)).not.toBe(artistOf(set.songs[0].uri));
+    expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([]);
   });
 
   it("moves on after a couple of skips, and tells the model what was skipped", async () => {
@@ -1911,6 +1939,7 @@ describe("picking as it goes", () => {
   });
 
   it("goes back to the song Next left when Previous follows it quickly, and forgets that skip", async () => {
+    const events = heard();
     await liveStarted();
     const [a, b] = dj.current!.songs;
     await finish();
@@ -1928,6 +1957,7 @@ describe("picking as it goes", () => {
     await playing(b.uri, 0);
     await vi.advanceTimersByTimeAsync(0);
     expect(queued().at(-1)).toBe(c.uri);
+    expect(events.filter((e) => /^song-(un)?skipped/.test(e))).toEqual([`song-skipped ${b.name}`, `song-unskipped ${b.name}`]);
     await untilNextSet();
     expect(prompt()).not.toContain(`They skipped "${b.name}"`);
     expect(prompt()).not.toContain(`They skipped "${c.name}"`);
@@ -2251,5 +2281,41 @@ describe("a second session", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(dj.current).toBe(opening);
     expect(dj.upNext?.request).toBe("something calm");
+  });
+});
+
+describe("events", () => {
+  it("tells listeners what happens, in order, until they stop listening", async () => {
+    const events: string[] = [];
+    const off = dj.on((e) => void events.push(describeEvent(e)));
+    const first = await started();
+    const [one, two] = first.songs;
+    // The first song left before half way: skipped.
+    await playing(two.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await dj.skipSet();
+    dj.stop();
+    expect(events).toEqual([
+      "set-picked Set 1",
+      "line-spoken Set 1",
+      "set-started Set 1",
+      "song-started Set 1",
+      "set-picked Set 2",
+      "song-skipped " + one.name,
+      "song-started Set 1",
+      "set-skipped Set 1",
+      "stopped",
+    ]);
+    off();
+    await started();
+    expect(events.at(-1)).toBe("stopped");
+  });
+
+  it("carries on when a listener fails", async () => {
+    dj.on(() => {
+      throw new Error("broken listener");
+    });
+    const first = await started();
+    expect(dj.current).toBe(first);
   });
 });
