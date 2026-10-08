@@ -14,6 +14,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ### Fixed
 
+- With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
+  rest aren't picked yet. Settings says so, and keeps your choice for when it picks whole sets.
 - The DJ's set starts with the song its line introduces, and a line the model left unfinished ends at its last
   whole sentence instead of mid-word.
 - The DJ's Qwen3 4B model now downloads from a fixed version with a checked hash, like everything else it

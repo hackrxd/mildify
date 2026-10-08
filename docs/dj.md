@@ -39,7 +39,8 @@ you do changes what comes next:
   seconds before the one playing ends, when the player starts loading it.
 - **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
-  last one, so it can mention it.
+  last one, so it can mention it. It introduces only the set's first song, even with **Let the DJ name every song in
+  a set** on: the rest aren't picked yet.
 - **Previous** goes back to the set's song before, as it would in an album, and that doesn't count as a skip. On a
   set's first song, it starts the song again.
 
@@ -77,7 +78,7 @@ the DJ fades out whatever was playing, so its greeting is an item of its own too
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
 what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
 introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
-in a set** (Settings → AI DJ) lets it mention them all. The set starts with the song its line brings in, whatever
+in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with the song its line brings in, whatever
 order the model gave, and a line the model left unfinished ends at its last whole sentence.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
