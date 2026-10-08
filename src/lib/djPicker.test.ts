@@ -103,6 +103,17 @@ describe("askModel", () => {
     expect(backend.djGenerate).not.toHaveBeenCalled();
     expect(round).toMatchObject({ pick: null, trouble: null });
   });
+
+  it("has no trouble to tell of when an ask no longer wanted is dropped for a newer one", async () => {
+    let stale = false;
+    backend.djGenerate.mockImplementation(async () => {
+      // A newer set is being picked now.
+      stale = true;
+      throw { kind: "other", message: "A newer request took this one's place", status: null };
+    });
+    const round = await askModel(ask, { tools: false, wait: now, stale: () => stale });
+    expect(round).toMatchObject({ pick: null, trouble: null });
+  });
 });
 
 describe("lookUp", () => {
