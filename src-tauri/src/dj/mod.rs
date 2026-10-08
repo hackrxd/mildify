@@ -633,11 +633,7 @@ impl Dj {
             let http = if is_loopback(&target.url) { &self.loopback } else { &self.http };
             let answer = chat::chat(http, &target, messages, ask, max_tokens).await;
             self.engine.touch();
-            // Said as what happened to it; the next ask starts it again.
-            if let (Err(_), Api::Local, Some(why)) = (&answer, target.api, self.engine.died()) {
-                return Err(AppError::Other(format!("The DJ's model stopped while answering ({why})")));
-            }
-            answer
+            or_died(answer, target.api, self.engine.died())
         })
         .await;
         // For tuning how early sets are picked: the model's own time, and any wait for it to be ready.
@@ -792,6 +788,15 @@ impl install::Progress for Reporter {
 /// ", after 3.2 s getting it ready", when the model had to be loaded or reached first.
 fn waited(secs: f64) -> String {
     if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
+}
+
+/// A failed answer from the local model, said as what happened to it when it `died` while answering; the next ask
+/// starts it again.
+fn or_died(answer: Result<Answer>, api: Api, died: Option<String>) -> Result<Answer> {
+    match (answer, api, died) {
+        (Err(_), Api::Local, Some(why)) => Err(AppError::Other(format!("The DJ's model stopped while answering ({why})"))),
+        (answer, _, _) => answer,
+    }
 }
 
 /// Whether `url` is on this computer: localhost, 127.0.0.0/8 or ::1.
@@ -1256,5 +1261,54 @@ mod tests {
         }
         assert!(d.speech_audio(0).is_none());
         assert_eq!(d.speech_audio(SPEECH_KEPT as u64 + 2).as_deref(), Some(&vec![(SPEECH_KEPT + 2) as u8]));
+    }
+
+    #[test]
+    fn says_when_the_local_model_stopped_while_answering() {
+        let failed = || Err(AppError::Other("The DJ's model isn't running".into()));
+        let said = or_died(failed(), Api::Local, Some("exit status: 9. out of memory".into())).unwrap_err().to_string();
+        assert_eq!(said, "The DJ's model stopped while answering (exit status: 9. out of memory)");
+        assert_eq!(or_died(failed(), Api::Local, None).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert_eq!(or_died(failed(), Api::Own, Some("x".into())).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert!(or_died(Ok(Answer::default()), Api::Local, Some("x".into())).is_ok());
+    }
+
+    /// MusicBrainz keeping the first request it gets waiting, and answering the next with a recording's genres.
+    async fn musicbrainz_keeps_the_first_waiting() -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (_waiting, _) = listener.accept().await.unwrap();
+            let (mut next, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = next.read(&mut buf).await;
+            let body = r#"{"recordings":[{"title":"x","genres":[{"name":"shoegaze","count":2}],"tags":[]}]}"#;
+            let head = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+            next.write_all(head.as_bytes()).await.unwrap();
+            next.write_all(body.as_bytes()).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_newer_look_up_drops_the_one_still_waiting_for_musicbrainz() {
+        let mut d = dj();
+        d.songs.musicbrainz_url = musicbrainz_keeps_the_first_waiting().await;
+        d.songs.musicbrainz_every = Duration::from_millis(10);
+        let token = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8))).join("token.json");
+        let web = crate::webapi::WebApi::new(reqwest::Client::new(), token);
+        let cfg = DjConfig { enabled: true, musicbrainz: true, ..DjConfig::default() };
+        let song = |uri: &str| [SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None }];
+        let (a, b) = (song("spotify:track:a"), song("spotify:track:b"));
+        let first = d.song_info(&cfg, &a, None, &web);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.song_info(&cfg, &b, None, &web).await
+        };
+        let (first, second) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(second.unwrap()[0].genres, ["shoegaze"]);
     }
 }
