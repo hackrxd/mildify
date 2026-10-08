@@ -899,7 +899,7 @@ describe("the voice", () => {
 
 describe("settings", () => {
   it("keeps the listener's instructions, within the limit", async () => {
-    const { INSTRUCTIONS_MAX } = await import("./djPicks");
+    const { INSTRUCTIONS_MAX } = await import("./djTalk");
     dj.setInstructions("Talk like a pirate.");
     expect(localStorage.getItem("nativify:djInstructions")).toBe("Talk like a pirate.");
     dj.setInstructions("x".repeat(INSTRUCTIONS_MAX + 50));
