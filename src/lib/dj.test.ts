@@ -434,6 +434,24 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.requested).toBe("something calm");
   });
 
+  it("puts the songs of the set it lets go of back up for picking", async () => {
+    // Six songs: the first set has three, and the set it lets go of has the rest.
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items: range === "short_term" && offset === 0 ? Array.from({ length: 6 }, (_, i) => song(i + 1)) : [],
+      next: null,
+      total: 6,
+      offset,
+      limit: 20,
+    }));
+    const first = await started();
+    const old = dj.upNext!;
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("something calm");
+    expect(dj.upNext!.songs.map((s) => s.uri).sort()).toEqual(old.songs.map((s) => s.uri).sort());
+    expect(dj.upNext!.songs.some((s) => first.songs.some((f) => f.uri === s.uri))).toBe(false);
+  });
+
   it("does nothing with a request while it's off, or an empty one", async () => {
     dj.request("something calm");
     expect(dj.requested).toBeNull();
