@@ -145,16 +145,11 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
     if target.api == Api::Anthropic && ANTHROPIC_FALLBACK_MODELS.contains(&target.model.as_str()) {
         request = request.header("anthropic-beta", "server-side-fallback-2026-07-01");
     }
-    let key = target.key.as_deref();
-    let resp = request.send().await.map_err(|e| match target.api {
-        Api::Local => AppError::Http(e),
-        Api::Own => AppError::Other(masked(&format!("Couldn't reach your model server at {}: {e}", target.url), key)),
-        api => AppError::Other(masked(&format!("Couldn't reach {}: {e}", api.name()), key)),
-    })?;
+    let resp = request.send().await.map_err(|e| unreachable(target, &e))?;
     let status = resp.status().as_u16();
-    let text = resp.text().await?;
+    let text = resp.text().await.map_err(|e| unreachable(target, &e))?;
     if !(200..300).contains(&status) {
-        return Err(refused(target.api, status, &text, key));
+        return Err(refused(target.api, status, &text, target.key.as_deref()));
     }
     let answer = match target.api {
         Api::Anthropic => anthropic_answer(&text)?,
@@ -168,6 +163,36 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
         }
         Ask::LookUp(_) => Ok(answer),
     }
+}
+
+/// A request that got no answer, said the way the user can act on it: too slow, nothing there, or what went wrong
+/// underneath.
+fn unreachable(target: &Target, e: &reqwest::Error) -> AppError {
+    let who = target.api.name();
+    let said = if e.is_timeout() {
+        format!("{who} took too long to answer")
+    } else if e.is_connect() && target.api == Api::Local {
+        format!("{who} isn't running")
+    } else if e.is_connect() && target.api == Api::Own {
+        format!("Nothing is answering at {}", target.url)
+    } else {
+        let whom = match target.api {
+            Api::Local => "the DJ's model".to_owned(),
+            Api::Own => format!("your model server at {}", target.url),
+            api => api.name().to_owned(),
+        };
+        format!("Couldn't reach {whom}: {}", innermost(e))
+    };
+    AppError::Other(masked(&said, target.key.as_deref()))
+}
+
+/// What went wrong at the bottom of `e`: "Connection reset by peer", not "error sending request for url (…)".
+fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut cause = e;
+    while let Some(next) = cause.source() {
+        cause = next;
+    }
+    cause.to_string()
 }
 
 /// An error answer (`body`), said the way the user can act on it, with the `key` it was sent with hidden.
@@ -856,6 +881,26 @@ mod tests {
         let s = schema();
         let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
         assert!(err.contains("OpenAI didn't accept your API key: Incorrect API key provided"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn says_in_words_why_a_model_couldnt_be_reached() {
+        let (http, s) = (reqwest::Client::new(), schema());
+        // Nothing listens on port 1.
+        let own = chat(&http, &target(Api::Own), &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert_eq!(own, "Nothing is answering at http://127.0.0.1:1/v1/chat/completions");
+        let local = chat(&http, &target(Api::Local), &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert_eq!(local, "The DJ's model isn't running");
+        // A server that takes the request and never answers.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+        let _held = tokio::spawn(async move {
+            let _taken = listener.accept().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let slow = http.post(&url).timeout(Duration::from_millis(100)).send().await.unwrap_err();
+        let said = unreachable(&Target { url, ..target(Api::Own) }, &slow).to_string();
+        assert_eq!(said, "Your model server took too long to answer");
     }
 
     #[tokio::test]

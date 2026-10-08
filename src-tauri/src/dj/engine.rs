@@ -30,6 +30,7 @@ struct Server {
     target: Target,
     loaded: bool,
     started: Instant,
+    log: PathBuf,
 }
 
 pub struct Engine {
@@ -91,7 +92,7 @@ impl Engine {
         for _ in 0..PORT_TRIES {
             let (id, target) = match found.take() {
                 Some(found) => found,
-                None => self.start(model, &mut spawn)?,
+                None => self.start(model, log, &mut spawn)?,
             };
             if self.wait_until_loaded(id, &target, log).await? {
                 return Ok(target);
@@ -101,7 +102,7 @@ impl Engine {
     }
 
     /// Starts a server with `spawn` on a free port, as the one in the slot.
-    fn start(&self, model: &Path, spawn: &mut impl FnMut(u16, &str) -> Result<Child>) -> Result<(u64, Target)> {
+    fn start(&self, model: &Path, log: &Path, spawn: &mut impl FnMut(u16, &str) -> Result<Child>) -> Result<(u64, Target)> {
         let port = free_port()?;
         let key = crate::config::random_hex(16);
         let child = spawn(port, &key)?;
@@ -114,7 +115,15 @@ impl Engine {
             tools: false,
             effort: false,
         };
-        let server = Server { id, child, model: model.to_owned(), target: target.clone(), loaded: false, started: Instant::now() };
+        let server = Server {
+            id,
+            child,
+            model: model.to_owned(),
+            target: target.clone(),
+            loaded: false,
+            started: Instant::now(),
+            log: log.to_owned(),
+        };
         *self.slot() = Some(server);
         Ok((id, target))
     }
@@ -202,6 +211,15 @@ impl Engine {
 
     pub fn is_running(&self) -> bool {
         self.slot().is_some()
+    }
+
+    /// Why the server stopped, when it stopped on its own: how it exited, and the last thing it said.
+    pub fn died(&self) -> Option<String> {
+        let mut slot = self.slot();
+        let s = slot.as_mut()?;
+        let status = s.child.try_wait().ok().flatten()?;
+        let said = last_line(&s.log).map(|l| format!(". {l}")).unwrap_or_default();
+        Some(format!("{status}{said}"))
     }
 
     /// Whether nothing has asked for the model in `IDLE`.
@@ -454,6 +472,24 @@ mod tests {
         ours.store(true, Ordering::SeqCst);
         tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap();
         e.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_why_a_loaded_server_stopped() {
+        let e = Engine::default();
+        let log = log_path();
+        let load = e.load(Path::new("/m.gguf"), &log, |port, _| {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+            listener.set_nonblocking(true)?;
+            tokio::spawn(answer(tokio::net::TcpListener::from_std(listener)?, std::sync::Arc::new(true.into())));
+            std::fs::write(&log, "ggml_abort: out of memory\n")?;
+            Ok(tokio::process::Command::new("sh").args(["-c", "sleep 0.5; exit 3"]).kill_on_drop(true).spawn()?)
+        });
+        tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap();
+        assert_eq!(e.died(), None);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(e.died().as_deref(), Some("exit status: 3. ggml_abort: out of memory"));
     }
 
     #[cfg(unix)]

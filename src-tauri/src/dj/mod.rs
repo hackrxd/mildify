@@ -624,6 +624,10 @@ impl Dj {
             self.engine.touch();
             let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
             self.engine.touch();
+            // Said as what happened to it; the next ask starts it again.
+            if let (Err(_), Api::Local, Some(why)) = (&answer, target.api, self.engine.died()) {
+                return Err(AppError::Other(format!("The DJ's model stopped while answering ({why})")));
+            }
             answer
         })
         .await;
