@@ -104,9 +104,13 @@ pub struct SongLookup {
     /// MusicBrainz artists' genres, by its id for them, and when they were asked: the same artists come back set
     /// after set.
     artist_genres: Mutex<HashMap<String, (Vec<String>, Instant)>>,
-    musicbrainz_url: String,
-    musicbrainz_every: Duration,
+    pub(super) musicbrainz_url: String,
+    pub(super) musicbrainz_every: Duration,
 }
+
+/// What Spotify's metadata says about a song (`spotify_metadata`): its facts, its ISRC and first artist's id, and
+/// whether the album's and artist's entries were both there.
+type Facts = (SongInfo, Option<String>, Option<String>, bool);
 
 /// A song being looked up: what's found so far, whether every source asked answered, and what the next ones go by.
 struct Found {
@@ -137,49 +141,56 @@ impl SongLookup {
 
     /// What's known about each song, in the order asked.
     pub async fn look_up(&self, songs: &[SongRef], session: Option<Session>, web: &WebApi, musicbrainz: bool) -> Vec<SongInfo> {
-        self.look_up_by(songs, session, web, musicbrainz, Instant::now() + DEADLINE).await
+        // Spotify's metadata comes through the player's session; without the player, there's none.
+        let spotify = |uri: String| {
+            let session = session.clone();
+            async move {
+                match session {
+                    Some(session) => Some(spotify_metadata(&session, &uri).await),
+                    None => None,
+                }
+            }
+        };
+        self.look_up_by(songs, spotify, web, musicbrainz, Instant::now() + DEADLINE).await
     }
 
-    async fn look_up_by(
-        &self,
-        songs: &[SongRef],
-        session: Option<Session>,
-        web: &WebApi,
-        musicbrainz: bool,
-        deadline: Instant,
-    ) -> Vec<SongInfo> {
+    /// As `look_up`, with Spotify's metadata for a song from `spotify` (`None` without the player), by `deadline`.
+    async fn look_up_by<F, Fut>(&self, songs: &[SongRef], spotify: F, web: &WebApi, musicbrainz: bool, deadline: Instant) -> Vec<SongInfo>
+    where
+        F: Fn(String) -> Fut,
+        Fut: std::future::Future<Output = Option<Result<Facts, String>>>,
+    {
         let left = || deadline.saturating_duration_since(Instant::now());
         let generation = self.generation();
         let mut out: Vec<Option<SongInfo>> = songs.iter().map(|s| self.kept(&s.uri, musicbrainz)).collect();
         let todo: Vec<&SongRef> = songs.iter().zip(&out).filter(|(_, kept)| kept.is_none()).map(|(s, _)| s).collect();
         // Spotify's facts first, for every song at once: they're quick, and the slow sources come after.
         let mut found: Vec<Found> = futures_util::future::join_all(todo.iter().map(|song| {
-            let session = session.clone();
+            let asked = spotify(song.uri.clone());
             async move {
                 let mut f = Found {
                     info: SongInfo { uri: song.uri.clone(), ..Default::default() },
                     // Whether every source asked answered; a look-up missing one is asked again soon.
-                    complete: session.is_some(),
+                    complete: true,
                     isrc: None,
                     artist_id: song.artist_id.clone(),
                 };
-                if let Some(session) = &session {
-                    match tokio::time::timeout(left(), spotify_metadata(session, &song.uri)).await {
-                        Ok(Ok((info, isrc, artist, whole))) => {
-                            // An album or artist entry missing is asked for again soon.
-                            f.complete &= whole;
-                            f.info = info;
-                            f.isrc = isrc;
-                            f.artist_id = f.artist_id.or(artist);
-                        }
-                        Ok(Err(e)) => {
-                            f.complete = false;
-                            log::info!("DJ: no Spotify metadata for {}: {e}", song.uri);
-                        }
-                        Err(_) => {
-                            f.complete = false;
-                            log::info!("DJ: Spotify's metadata for {} took too long", song.uri);
-                        }
+                match tokio::time::timeout(left(), asked).await {
+                    Ok(None) => f.complete = false,
+                    Ok(Some(Ok((info, isrc, artist, whole)))) => {
+                        // An album or artist entry missing is asked for again soon.
+                        f.complete &= whole;
+                        f.info = info;
+                        f.isrc = isrc;
+                        f.artist_id = f.artist_id.or(artist);
+                    }
+                    Ok(Some(Err(e))) => {
+                        f.complete = false;
+                        log::info!("DJ: no Spotify metadata for {}: {e}", song.uri);
+                    }
+                    Err(_) => {
+                        f.complete = false;
+                        log::info!("DJ: Spotify's metadata for {} took too long", song.uri);
                     }
                 }
                 f
@@ -480,7 +491,7 @@ async fn artist_genres(web: &WebApi, id: &str) -> crate::error::Result<Vec<Strin
 
 /// What Spotify's metadata says about the track, its album and its first artist; with the ISRC and the
 /// artist's id, for the other sources, and whether the album's and artist's entries were both there.
-async fn spotify_metadata(session: &Session, uri: &str) -> Result<(SongInfo, Option<String>, Option<String>, bool), String> {
+async fn spotify_metadata(session: &Session, uri: &str) -> Result<Facts, String> {
     let id = SpotifyUri::from_uri(uri).map_err(|e| e.to_string())?;
     let track = Track::get(session, &id).await.map_err(|e| e.to_string())?;
     let mut info = SongInfo {
@@ -867,7 +878,7 @@ mod tests {
             .map(|uri| SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None })
             .collect();
         let started = Instant::now();
-        let found = l.look_up_by(&songs, None, &web, true, started + Duration::from_millis(600)).await;
+        let found = l.look_up_by(&songs, |_| async { None }, &web, true, started + Duration::from_millis(600)).await;
         assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
         assert_eq!(found.iter().map(|f| f.uri.as_str()).collect::<Vec<_>>(), ["u1", "u2"]);
         assert_eq!(found[0].genres, ["shoegaze"]);
@@ -916,5 +927,57 @@ mod tests {
         assert_eq!(seen.iter().filter(|r| r.contains("/artist/")).count(), 1, "{seen:?}");
         l.clear();
         assert!(l.artist_genres.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn asks_spotify_about_every_song_at_once_before_musicbrainz() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // MusicBrainz, counting what it's asked.
+        let asked = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut l = lookup();
+        l.musicbrainz_url = format!("http://{}", listener.local_addr().unwrap());
+        l.musicbrainz_every = Duration::from_millis(10);
+        tokio::spawn({
+            let asked = asked.clone();
+            async move {
+                while let Ok((mut sock, _)) = listener.accept().await {
+                    asked.fetch_add(1, Ordering::SeqCst);
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    let body = r#"{"recordings":[{"title":"x","genres":[{"name":"shoegaze","count":2}],"tags":[]}]}"#;
+                    let head = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    let _ = sock.write_all(body.as_bytes()).await;
+                }
+            }
+        });
+        // Spotify takes its time over each song, and notes how much MusicBrainz was asked before and after.
+        let musicbrainz_by_then = Arc::new(Mutex::new(Vec::new()));
+        let spotify = |uri: String| {
+            let (seen, asked) = (musicbrainz_by_then.clone(), asked.clone());
+            async move {
+                seen.lock().unwrap().push(asked.load(Ordering::SeqCst));
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                seen.lock().unwrap().push(asked.load(Ordering::SeqCst));
+                Some(Ok((SongInfo { uri, label: Some("Creation".into()), ..Default::default() }, None, None, true)))
+            }
+        };
+        let web = WebApi::new(reqwest::Client::new(), l.file.with_file_name("token.json"));
+        let songs: Vec<SongRef> = ["u1", "u2", "u3"]
+            .into_iter()
+            .map(|uri| SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None })
+            .collect();
+        let started = Instant::now();
+        let found = l.look_up_by(&songs, spotify, &web, true, started + DEADLINE).await;
+        // Side by side: about one song's wait for all three.
+        assert!(started.elapsed() < Duration::from_millis(800), "{:?}", started.elapsed());
+        assert_eq!(*musicbrainz_by_then.lock().unwrap(), [0; 6]);
+        for f in &found {
+            assert_eq!((f.label.as_deref(), f.genres.as_slice()), (Some("Creation"), ["shoegaze".to_owned()].as_slice()));
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), 3);
     }
 }
