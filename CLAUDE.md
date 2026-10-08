@@ -81,8 +81,8 @@ window focus re-reads the folders, so edits apply live. `--safe-mode` loads none
 
 **AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
-while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, or the Hub's published hash for
-models, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
+while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, models from a fixed Hugging
+Face commit, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
 port with an API key, `--jinja` and `--offline`. `chat.rs` asks it, the user's own OpenAI-style server, or a cloud
 provider (`DjConfig.provider`: OpenAI, Gemini through its OpenAI-compatible endpoint, Anthropic's Messages API)
 with the user's key, which `secrets.rs` keeps in the system keychain (`keyring`; a 0600 file without one) and never
