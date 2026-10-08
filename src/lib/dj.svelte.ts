@@ -866,6 +866,7 @@ class Dj {
       return;
     }
     const run = ++this.#run;
+    this.#invariantsBroken.clear();
     this.#voiceWarned = false;
     this.#modelWarned = false;
     this.modelTrouble = null;
@@ -976,6 +977,7 @@ class Dj {
     this.#foreignSince = null;
     this.#remoteSince = null;
     backend.djRelease().catch(() => {});
+    if (import.meta.env.DEV) this.#checkInvariants();
   }
 
   #after(ms: number, fn: () => void) {
@@ -1358,6 +1360,40 @@ class Dj {
   }
 
   #tick(run: number) {
+    this.#tickOnce(run);
+    if (import.meta.env.DEV && run === this.#run) this.#checkInvariants();
+  }
+
+  /** Rules the session's state keeps between ticks, checked in development builds: a broken one is a bug. */
+  #checkInvariants() {
+    const broken: string[] = [];
+    const rule = (ok: boolean, name: string) => void (ok || broken.push(name));
+    rule(!this.#preparing || !this.upNext, "a set being picked while one is ready");
+    rule(!this.#awaiting || this.#awaiting === this.upNext, "awaiting a set that isn't next");
+    rule(!this.#waitingForSet || !this.upNext, "waiting for a set that's ready");
+    rule(!this.#plannedOn || !!this.upNext, "a hand-over planned with no next set");
+    rule(!this.#cues.length || !!this.#plannedOn, "hand-over cues with no plan");
+    rule(!this.#holdFor || !!this.#plannedOn, "a hold left over from a dropped plan");
+    rule(!this.#queueFor || this.#queueFor === this.upNext || this.#queueFor === this.current, "queueing a set let go of");
+    if (this.phase === "off") {
+      rule(
+        !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.#preparing &&
+          !this.#rush && this.#queued === "no" && !this.#cues.length && !this.#speechCues.length && !this.#bringIn &&
+          !this.#plannedOn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet && !this.#holdFor &&
+          !this.#muteAtEnd,
+        "stopped with playback state left",
+      );
+    }
+    for (const name of broken) {
+      if (this.#invariantsBroken.has(name)) continue;
+      this.#invariantsBroken.add(name);
+      console.error(`DJ invariant: ${name}`);
+    }
+  }
+  /** Rules already reported this session, each said once. */
+  #invariantsBroken = new Set<string>();
+
+  #tickOnce(run: number) {
     if (run !== this.#run) return;
     const now = performance.now();
     const t = player.track;
