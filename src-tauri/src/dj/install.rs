@@ -74,25 +74,6 @@ pub fn remove_stale(root: &Path, known: &[&str]) {
     }
 }
 
-/// The SHA-256 Hugging Face publishes for a file, from the `X-Linked-Etag` of its redirect.
-pub async fn hub_sha256(url: &str) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .ok()?;
-    let resp = client.head(url).timeout(Duration::from_secs(20)).send().await.ok()?;
-    let headers = resp.headers();
-    let etag = headers.get("x-linked-etag").or_else(|| headers.get("etag"))?.to_str().ok()?;
-    sha256_etag(etag)
-}
-
-/// An ETag that is a SHA-256 (`"abc…"`, `W/"abc…"`), lowercased.
-fn sha256_etag(etag: &str) -> Option<String> {
-    let hash = etag.trim().trim_start_matches("W/").trim_matches('"').to_ascii_lowercase();
-    (hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hash)
-}
-
 /// What a download has done so far.
 pub trait Progress: Send + Sync {
     fn report(&self, received: u64, total: Option<u64>);
@@ -108,17 +89,7 @@ pub async fn install(http: &reqwest::Client, root: &Path, c: &Component, progres
     tokio::fs::create_dir_all(&downloads).await?;
     let part = downloads.join(format!("{}.part", c.id));
 
-    let expected = match c.sha256 {
-        Some(h) => Some(h.to_owned()),
-        None => {
-            let hub = hub_sha256(c.url).await;
-            if hub.is_none() {
-                log::warn!("no published hash for {}; checking its format only", c.url);
-            }
-            hub
-        }
-    };
-    download(http, c.url, &part, expected.as_deref(), progress).await?;
+    download(http, c.url, &part, Some(c.sha256), progress).await?;
 
     let dest = component_dir(root, c);
     let staging = root.join(format!(".{}.unpacking", c.id));
@@ -420,16 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn reads_hashes_out_of_etags() {
-        let h = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
-        assert_eq!(sha256_etag(&format!("\"{h}\"")).as_deref(), Some(h));
-        assert_eq!(sha256_etag(&format!("W/\"{}\"", h.to_uppercase())).as_deref(), Some(h));
-        // A git blob id or a short etag isn't a file hash.
-        assert_eq!(sha256_etag("\"62a8d092b0a1047016f3edbd0fde387598727aa5\""), None);
-        assert_eq!(sha256_etag("\"not-a-hash\""), None);
-    }
-
-    #[test]
     fn reads_where_a_resumed_download_starts() {
         assert_eq!(resumes_at(Some("bytes 100-199/200")), Some(100));
         assert_eq!(resumes_at(Some("bytes 0-9/*")), Some(0));
@@ -559,7 +520,7 @@ mod tests {
         let body = enc.finish().unwrap();
         let url: &'static str = Box::leak(serve_once(body.clone()).await.into_boxed_str());
         let sha: &'static str = Box::leak(sha(&body).into_boxed_str());
-        let c = Component { id: "pkg-1", label: "Pkg", url, sha256: Some(sha), bytes: 1, pack: Pack::TarGz };
+        let c = Component { id: "pkg-1", label: "Pkg", url, sha256: sha, bytes: 1, pack: Pack::TarGz };
         let progress = Counter { last: AtomicU64::new(0), stop: AtomicBool::new(false) };
         assert!(!is_installed(&root, &c));
         install(&reqwest::Client::new(), &root, &c, &progress).await.unwrap();
