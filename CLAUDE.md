@@ -180,7 +180,9 @@ Spotify rejects requests that exceed these limits with a 400 "Invalid limit". Ch
    `ui.json` (reload only, when `src-tauri` is unchanged) or `latest.json`. Update bundles are signed with
    `TAURI_SIGNING_PRIVATE_KEY`; the matching pubkey is in `tauri.conf.json`.
 
-Pushes to `main` and pull requests only run the test job. Installers are built only for version tags, or by
+Pushes to `main` and pull requests only run the test job, which also runs `scripts/platform-deps.mjs`: every release
+target must get the same direct dependencies, since a shared one written below a `[target.'cfg(…)'.dependencies]`
+table silently becomes that platform's only. Installers are built only for version tags, or by
 starting the workflow by hand (`gh workflow run build.yml --ref <branch>`).
 
 A tag run can't reuse another tag's caches, so `.github/workflows/rust-cache.yml` keeps the release builds'
