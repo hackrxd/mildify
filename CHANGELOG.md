@@ -14,6 +14,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
 - An extension you turn off can no longer add styles, pages or menu items back from a timer it left running.
+- When the DJ's model runs out of room or declines to answer, the DJ says so, instead of that it "didn't answer in
+  JSON"; and an API key a provider repeats in an error is never shown in full.
 
 ## 1.3.0 - 2026-10-06
 
