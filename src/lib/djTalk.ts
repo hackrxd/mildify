@@ -58,6 +58,8 @@ export interface SegmentAsk {
   /** The DJ picks the set's songs after the first as it goes. */
   live?: boolean;
   reactions?: Reactions;
+  /** What too short a set may be topped up from: for a request, only the songs it names. */
+  topUp?: Candidate[];
   now?: Date;
 }
 
@@ -276,8 +278,75 @@ export function cleanTalk(text: string): string {
   return t;
 }
 
-/** The model's answer, checked against the choices it had. Null when it isn't usable. */
-export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment): Pick | null {
+/** A line's sentences, split where the voice splits them (voice.rs `split_sentences`): after . ! ? or … at a space
+ * or the end, closing quotes and brackets kept with theirs. */
+export function sentences(text: string): string[] {
+  const out: string[] = [];
+  const chars = [...text];
+  let current = "";
+  for (let i = 0; i < chars.length; i++) {
+    current += chars[i];
+    const ends = ".!?…".includes(chars[i]);
+    while (ends && i + 1 < chars.length && `"”’')`.includes(chars[i + 1])) current += chars[++i];
+    if (ends && (i + 1 === chars.length || /\s/.test(chars[i + 1]))) {
+      if (current.trim()) out.push(current.trim());
+      current = "";
+    }
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+}
+
+const ENDS = /[.!?…]["”’')]*$/;
+const WELCOMES = /^(hey|hi|hello|welcome|good (morning|afternoon|evening|night))\b|\bwelcome\b/i;
+
+/** A line ending on a whole sentence: an unfinished last one (an answer cut off) goes when a whole one comes before
+ * it, or gets a full stop. Past the opening, a first sentence welcoming the listener again goes too. */
+export function finishTalk(talk: string, opening = false): string {
+  let parts = sentences(talk);
+  if (parts.length > 1 && !ENDS.test(parts.at(-1)!)) parts = parts.slice(0, -1);
+  if (!opening && parts.length > 1 && WELCOMES.test(parts[0])) parts = parts.slice(1);
+  const out = parts.join(" ").replace(/[\s,;:–—-]+$/, "");
+  return out && !ENDS.test(out) ? `${out}.` : out;
+}
+
+/** Words as a talk is searched for them: lower case, punctuation as spaces. */
+function wordsOf(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** Titles too everyday to tell a song by, unless its artist is named too. */
+const EVERYDAY = new Set([
+  "again", "alive", "angel", "baby", "down", "dreams", "forever", "go", "hello", "home", "intro", "interlude", "love",
+  "me", "music", "now", "one", "outro", "run", "song", "stay", "time", "together", "tonight", "up", "us", "you",
+]);
+
+/** The song the talk brings in: of `choices`, the one whose title comes first in it, on whole words and without
+ * its version ("(Remastered 2011)", " - Live at…"). A short or everyday title counts only with its artist named. */
+export function introduced(talk: string, choices: Candidate[]): Candidate | null {
+  const said = ` ${wordsOf(talk)} `;
+  let found: { c: Candidate; at: number } | null = null;
+  for (const c of choices) {
+    const title = wordsOf(c.name.replace(/\s*[([][^)\]]*[)\]]/g, "").split(" - ")[0]);
+    const at = title ? said.indexOf(` ${title} `) : -1;
+    if (at < 0 || (found && at >= found.at)) continue;
+    const weak = title.length <= 3 || (!title.includes(" ") && EVERYDAY.has(title));
+    if (weak && !c.artists.some((a) => wordsOf(a) && said.includes(` ${wordsOf(a)} `))) continue;
+    found = { c, at };
+  }
+  return found?.c ?? null;
+}
+
+export interface AnswerOptions {
+  /** The show's first set, whose line greets the listener. */
+  opening?: boolean;
+  /** What too short a set is topped up from: for a request, only the songs it names. All the choices by default. */
+  topUp?: Candidate[];
+}
+
+/** The model's answer, checked against the choices it had: the set starts with the song its talk brings in, is
+ * topped up to a set's length when it can be, and its line ends on a whole sentence. Null when it isn't usable. */
+export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment, opts: AnswerOptions = {}): Pick | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as { name?: unknown; songs?: unknown; talk?: unknown };
   if (!Array.isArray(a.songs)) return null;
@@ -287,8 +356,21 @@ export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment)
     if (c && !songs.includes(c) && songs.length < SET_MAX) songs.push(c);
   }
   if (songs.length < Math.min(2, choices.length)) return null;
-  const talk = typeof a.talk === "string" ? cleanTalk(a.talk) : "";
+  const talk = typeof a.talk === "string" ? finishTalk(cleanTalk(a.talk), opts.opening) : "";
   if (talk.length < 8) return null;
+  // A talk naming every song names the first too; one that brings in another song starts the set with it.
+  const named = introduced(talk, [songs[0]]) ? null : introduced(talk, choices);
+  if (named) {
+    if (songs.includes(named)) songs.splice(songs.indexOf(named), 1);
+    songs.unshift(named);
+    songs.length = Math.min(songs.length, SET_MAX);
+  }
+  const spare = (opts.topUp ?? choices).filter((c) => !songs.includes(c));
+  const lead = songs[0].artists[0];
+  for (const c of [...spare.filter((c) => c.artists[0] !== lead), ...spare.filter((c) => c.artists[0] === lead)]) {
+    if (songs.length >= SET_MIN) break;
+    songs.push(c);
+  }
   const name = typeof a.name === "string" ? cleanTalk(a.name).slice(0, 40) : "";
   return { name: name || segment.label, songs, talk };
 }

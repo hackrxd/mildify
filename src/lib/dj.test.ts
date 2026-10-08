@@ -466,6 +466,29 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.upNext!.songs.some((s) => first.songs.some((f) => f.uri === s.uri))).toBe(false);
   });
 
+  it("tops a requested set up only with songs the request names", async () => {
+    const radiohead = { id: "rh", name: "Radiohead", uri: "spotify:artist:rh" };
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items:
+        offset > 0 ? [] : range === "short_term" ? Array.from({ length: 12 }, (_, i) => song(i + 1)) : range === "long_term" ? [1, 2, 3, 4].map((i) => ({ ...song(100 + i), artists: [radiohead] })) : [],
+      next: null,
+      total: 12,
+      offset,
+      limit: 20,
+    }));
+    backend.djGenerate.mockImplementation(async (messages: { content: string }[]) => {
+      answers++;
+      // Two songs for the request, and a line that names none of them.
+      const asked = messages[1].content.includes('"""\nRadiohead\n"""');
+      return { name: `Set ${answers}`, songs: asked ? [1, 2] : [1, 2, 3], talk: asked ? "Your request, right here." : `Here's set number ${answers}, nice and easy.` };
+    });
+    await started();
+    dj.request("Radiohead");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("Radiohead");
+    expect(dj.upNext!.songs.map((s) => s.artists[0])).toEqual(["Radiohead", "Radiohead", "Radiohead"]);
+  });
+
   it("does nothing with a request while it's off, or an empty one", async () => {
     dj.request("something calm");
     expect(dj.requested).toBeNull();
@@ -1091,6 +1114,18 @@ describe("starting", () => {
     expect(player.playUris).not.toHaveBeenCalled();
     voice.end();
     expect(player.playUris).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a set with the song its talk brings in", async () => {
+    let names: string[] = [];
+    backend.djGenerate.mockImplementation(async (messages: { content: string }[]) => {
+      answers++;
+      names = [1, 2, 3].map((n) => messages[1].content.match(new RegExp(`^${n}\\. (.+?) by `, "m"))![1]);
+      return { name: `Set ${answers}`, songs: [1, 2], talk: `Here's ${names[2]}, one you've had on repeat.` };
+    });
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.upNext!.songs.map((s) => s.name)).toEqual([names[2], names[0], names[1]]);
   });
 
   it("talks from a template when the model doesn't answer", async () => {

@@ -97,6 +97,16 @@ describe("askModel", () => {
     });
   });
 
+  it("reads the answer as the set's ask says: the opening may welcome, and a request grows only by what it names", async () => {
+    backend.djGenerate.mockResolvedValue({ name: "Set", songs: [2, 3], talk: "Welcome! Here's Song 1 by Artist 1." });
+    const later = { ...ask, previous: { name: "Midnight City", artists: ["M83"] }, topUp: [choices[3]] };
+    const round = await askModel(later, { tools: false, wait: now, stale: () => false });
+    expect(round.pick?.songs.map((c) => c.name)).toEqual(["Song 1", "Song 2", "Song 3"]);
+    expect(round.pick?.talk).toBe("Here's Song 1 by Artist 1.");
+    const opening = await askModel(ask, { tools: false, wait: now, stale: () => false });
+    expect(opening.pick?.talk).toBe("Welcome! Here's Song 1 by Artist 1.");
+  });
+
   it("asks for no pick once the set isn't wanted any more", async () => {
     backend.djLookUp.mockResolvedValue({ calls: [] });
     const round = await askModel(ask, { tools: true, wait: now, stale: () => true });

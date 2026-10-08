@@ -893,6 +893,8 @@ class Dj {
       live,
       reactions,
       request: segment.id === "request" ? (request ?? undefined) : undefined,
+      // A request's set grows only by songs it names: a mood isn't for the DJ's list to guess.
+      topUp: segment.id === "request" ? choices.filter((c) => requestScore(request ?? "")(c) > 0) : undefined,
       skippedSet,
     };
     const asked = await this.#askModel(ask, timeoutMs, stale);

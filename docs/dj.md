@@ -77,7 +77,8 @@ the DJ fades out whatever was playing, so its greeting is an item of its own too
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
 what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
 introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
-in a set** (Settings → AI DJ) lets it mention them all.
+in a set** (Settings → AI DJ) lets it mention them all. The set starts with the song its line brings in, whatever
+order the model gave, and a line the model left unfinished ends at its last whole sentence.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.

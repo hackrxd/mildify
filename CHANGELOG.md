@@ -14,6 +14,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ### Fixed
 
+- The DJ's set starts with the song its line introduces, and a line the model left unfinished ends at its last
+  whole sentence instead of mid-word.
 - The DJ's Qwen3 4B model now downloads from a fixed version with a checked hash, like everything else it
   downloads, so a later change to the file can't slip in.
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.

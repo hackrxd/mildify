@@ -79,7 +79,7 @@ export async function askModel(
         return backend.djGenerate(segmentMessages({ ...ask, lookedUp: looked?.lines }), segmentSchema(ask.choices.length), 300);
       })(),
     );
-    const pick = readAnswer(answer, ask.choices, ask.segment);
+    const pick = readAnswer(answer, ask.choices, ask.segment, { opening: ask.opening ?? !ask.previous, topUp: ask.topUp });
     if (pick) return { pick, why: null, trouble: null, found };
     console.warn("DJ: the model's answer wasn't usable", answer);
     return { pick: null, why: "the model's answer wasn't usable", trouble: null, found };

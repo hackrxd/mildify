@@ -3,8 +3,10 @@ import {
   cleanTalk,
   facts,
   fallbackPick,
+  finishTalk,
   INSTRUCTIONS_MAX,
   fence,
+  introduced,
   LOOK_UP_MAX,
   lookUpMessages,
   lookUpsAsked,
@@ -12,6 +14,7 @@ import {
   readAnswer,
   segmentMessages,
   segmentSchema,
+  sentences,
   songFacts,
 } from "./djTalk";
 import { type Candidate, type Listening, requestSegment, SEGMENTS, SET_MAX } from "./djPicks";
@@ -265,6 +268,62 @@ describe("readAnswer", () => {
 
   it("names the segment itself when the model doesn't", () => {
     expect(readAnswer({ songs: [1, 2], talk: "Two songs coming up." }, choices, seg("onRepeat"))?.name).toBe("On repeat");
+  });
+
+  it("starts the set with the song its talk brings in, and tops a short set up", () => {
+    const names = (raw: unknown, opts = {}) => readAnswer(raw, choices, seg("onRepeat"), opts)?.songs.map((c) => c.name);
+    expect(names({ songs: [2, 3, 4], talk: "Here's Song 0 by Artist 0." })).toEqual(["Song 0", "Song 1", "Song 2", "Song 3"]);
+    expect(names({ songs: [2, 3], talk: "Starting with Song 1." })).toEqual(["Song 1", "Song 2", "Song 0"]);
+    // A talk that names the first song as well as others keeps the order it was given.
+    expect(names({ songs: [3, 5, 2], talk: "Later there's Song 4, but first Song 2." })).toEqual(["Song 2", "Song 4", "Song 1"]);
+    // A request's set is topped up only with songs it names.
+    expect(names({ songs: [1, 2], talk: "Your request, Song 0." }, { topUp: [choices[4]] })).toEqual(["Song 0", "Song 1", "Song 4"]);
+    expect(readAnswer({ songs: [1, 2, 3], talk: "Here's Song 0. And after that we" }, choices, seg("onRepeat"))?.talk).toBe("Here's Song 0.");
+  });
+});
+
+describe("sentences", () => {
+  it("splits a line where the voice does", () => {
+    expect(sentences("That was Midnight City by M83. Up next: a few throwbacks! Ready?")).toEqual([
+      "That was Midnight City by M83.",
+      "Up next: a few throwbacks!",
+      "Ready?",
+    ]);
+    // Decimal points and closing quotes don't end a sentence early.
+    expect(sentences("Version 2.0 of \u201cHello.\u201d Then more")).toEqual(["Version 2.0 of \u201cHello.\u201d", "Then more"]);
+    expect(sentences("  ")).toEqual([]);
+  });
+});
+
+describe("finishTalk", () => {
+  it("ends on a whole sentence, and welcomes the listener only at the opening", () => {
+    expect(finishTalk("Here's Song 1 by Artist 1. And then we'll")).toBe("Here's Song 1 by Artist 1.");
+    expect(finishTalk("Here's Song 1 by Artist 1,")).toBe("Here's Song 1 by Artist 1.");
+    expect(finishTalk("Welcome back! Here's Song 1.")).toBe("Here's Song 1.");
+    expect(finishTalk("Welcome back! Here's Song 1.", true)).toBe("Welcome back! Here's Song 1.");
+    expect(finishTalk("Hey, it's your DJ.")).toBe("Hey, it's your DJ.");
+  });
+});
+
+describe("introduced", () => {
+  const choices = candidates(6, ["onRepeat"]);
+
+  it("finds the song a talk brings in by its title, the first named", () => {
+    expect(introduced("Starting with Song 3 by Artist 3.", choices)?.name).toBe("Song 3");
+    expect(introduced("First Song 4, then Song 2.", choices)?.name).toBe("Song 4");
+    expect(introduced("Nothing here by name.", choices)).toBeNull();
+    const versions = [
+      { ...choices[0], name: "Midnight City (Remastered 2011)" },
+      { ...choices[1], name: "Lisztomania - Live at Coachella" },
+    ];
+    expect(introduced("Here's Lisztomania, live.", versions)?.name).toBe("Lisztomania - Live at Coachella");
+    expect(introduced("Midnight City, of course.", versions)?.name).toBe("Midnight City (Remastered 2011)");
+  });
+
+  it("takes a short or everyday title only with its artist", () => {
+    const home = [{ ...choices[0], name: "Home", artists: ["Edward Sharpe"] }];
+    expect(introduced("Welcome home, everyone.", home)).toBeNull();
+    expect(introduced("Here's Home by Edward Sharpe.", home)?.name).toBe("Home");
   });
 });
 
