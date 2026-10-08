@@ -18,6 +18,7 @@ pub mod speaker;
 pub mod voice;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::watch;
 
 use crate::error::{AppError, Result};
 use chat::{Answer, Api, Ask, Message, ModelChoice, Target, Tool};
@@ -294,6 +296,10 @@ pub struct Dj {
     /// Whether each Anthropic model takes `effort`, once asked.
     effort: Mutex<HashMap<String, bool>>,
     songs: SongLookup,
+    /// The model's asks, and song look-ups, each in a lane of its own: a newer one drops one still waiting there
+    /// (`newest`).
+    asks: watch::Sender<u64>,
+    look_ups: watch::Sender<u64>,
 }
 
 /// The most songs one look-up covers: the model asks about a handful before it picks.
@@ -316,6 +322,8 @@ impl Dj {
             keys: Arc::new(Keys::new(root.with_file_name("dj_keys.json"))),
             effort: Mutex::default(),
             songs: SongLookup::new(http.clone(), root.join("song_info.json")),
+            asks: watch::Sender::new(0),
+            look_ups: watch::Sender::new(0),
             root,
         }
     }
@@ -608,11 +616,17 @@ impl Dj {
         };
         let kind = if tools.is_some() { "look-ups" } else { "picks" };
         let started = Instant::now();
-        let target = self.target(cfg).await?;
-        let ready = started.elapsed().as_secs_f64();
-        self.engine.touch();
-        let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
-        self.engine.touch();
+        let mut ready = 0.0;
+        // Dropped for a newer ask, even while the model is still loading: the DJ has stopped waiting for this one.
+        let answer = newest(&self.asks, async {
+            let target = self.target(cfg).await?;
+            ready = started.elapsed().as_secs_f64();
+            self.engine.touch();
+            let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
+            self.engine.touch();
+            answer
+        })
+        .await;
         // For tuning how early sets are picked: the model's own time, and any wait for it to be ready.
         let asked = started.elapsed().as_secs_f64() - ready;
         let outcome = if answer.is_ok() { "answered" } else { "failed" };
@@ -633,7 +647,8 @@ impl Dj {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
         let songs = &songs[..songs.len().min(LOOK_UP_AT_MOST)];
-        Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await)
+        // As asks are: a newer look-up drops one still going, and the MusicBrainz requests it was waiting its turn for.
+        newest(&self.look_ups, async { Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await) }).await
     }
 
     /// Unloads the model; the next request loads it again.
@@ -766,6 +781,21 @@ fn waited(secs: f64) -> String {
     if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
 }
 
+/// Runs `work` as the newest in its `lane`, failing it as soon as a newer one starts there: the DJ only ever waits for
+/// its latest. Dropping a request hangs up on its server, which frees the local model's one slot for the newer ask.
+async fn newest<T>(lane: &watch::Sender<u64>, work: impl Future<Output = Result<T>>) -> Result<T> {
+    let mut newer = lane.subscribe();
+    let mut mine = 0;
+    lane.send_modify(|n| {
+        *n += 1;
+        mine = *n;
+    });
+    tokio::select! {
+        done = work => done,
+        _ = newer.wait_for(|n| *n != mine) => Err(AppError::Other("A newer request took this one's place".into())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +804,101 @@ mod tests {
     fn says_how_long_getting_the_model_ready_took_only_when_it_did() {
         assert_eq!(waited(0.1), "");
         assert_eq!(waited(3.24), ", after 3.2 s getting it ready");
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_in_a_lane_drops_the_one_still_waiting_there() {
+        let (lane, other) = (watch::Sender::new(0), watch::Sender::new(0));
+        let waiting = newest(&lane, std::future::pending::<Result<u8>>());
+        let elsewhere = newest(&other, async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(3)
+        });
+        let newer = async {
+            tokio::task::yield_now().await;
+            newest(&lane, async { Ok(2) }).await
+        };
+        let (dropped, newer, elsewhere) = tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(waiting, newer, elsewhere) })
+            .await
+            .unwrap();
+        assert!(dropped.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(newer.unwrap(), 2);
+        assert_eq!(elsewhere.unwrap(), 3);
+        // One after another, nothing is dropped.
+        assert_eq!(newest(&lane, async { Ok(4) }).await.unwrap(), 4);
+        assert_eq!(newest(&lane, async { Ok(5) }).await.unwrap(), 5);
+    }
+
+    /// Reads one HTTP request off `sock`, all of it.
+    async fn read_request(sock: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if let Some(i) = text.find("\r\n\r\n") {
+                let len: usize = text
+                    .lines()
+                    .map(str::to_ascii_lowercase)
+                    .find_map(|l| l.strip_prefix("content-length: ").and_then(|v| v.trim().parse().ok()))
+                    .unwrap_or(0);
+                if buf.len() >= i + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A model server that keeps the first ask waiting, saying on `hung_up` once its asker hangs up, and answers the
+    /// next with a set.
+    async fn keeps_the_first_waiting(hung_up: tokio::sync::oneshot::Sender<()>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            read_request(&mut first).await;
+            tokio::spawn(async move {
+                let mut rest = [0u8; 64];
+                while first.read(&mut rest).await.is_ok_and(|n| n > 0) {}
+                let _ = hung_up.send(());
+            });
+            let (mut second, _) = listener.accept().await.unwrap();
+            read_request(&mut second).await;
+            let set = r#"{"name":"Set","songs":[1],"talk":"Hello there."}"#;
+            let body = serde_json::json!({ "choices": [{ "message": { "role": "assistant", "content": set }, "finish_reason": "stop" }] })
+                .to_string();
+            let head =
+                format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+            second.write_all(head.as_bytes()).await.unwrap();
+            second.write_all(body.as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_hangs_up_on_the_one_its_server_is_still_answering() {
+        let (hung_up, heard) = tokio::sync::oneshot::channel();
+        let url = keeps_the_first_waiting(hung_up).await;
+        let d = dj();
+        let cfg = DjConfig { enabled: true, server_url: url, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let first = d.generate(&cfg, &ask, Some(&schema), None, 10);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.generate(&cfg, &ask, Some(&schema), None, 10).await
+        };
+        let (first, second) =
+            tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert!(second.unwrap().json.is_some());
+        tokio::time::timeout(Duration::from_secs(2), heard).await.unwrap().unwrap();
     }
 
     fn dj() -> Dj {

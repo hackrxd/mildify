@@ -237,6 +237,8 @@ fn server_args(model: &Path, port: u16, key: &str) -> Vec<std::ffi::OsString> {
         "--api-key", key,
         "--alias", "dj",
         "--ctx-size", CONTEXT,
+        // One answer at a time: two would split the context (or need more memory) and share the processor. An ask
+        // the DJ stops waiting for hangs up, which frees the slot for the next (`newest` in mod.rs).
         "--parallel", "1",
         "--no-webui",
         // The model's own chat template, which is what understands tool calls and `chat_template_kwargs`.

@@ -23,6 +23,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   JSON"; and an API key a provider repeats in an error is never shown in full.
 - Quitting while the DJ's model is still loading no longer leaves it running in the background, and turning the DJ
   off or removing its files no longer waits for the model to finish loading.
+- After you skip a set or ask for another, the DJ's model drops the set it was still working on, instead of making
+  the new one wait behind it.
 
 ## 1.3.0 - 2026-10-06
 
