@@ -25,33 +25,20 @@ import {
   type Segment,
   type SegmentId,
 } from "./djPicks";
-import {
-  fallbackPick,
-  INSTRUCTIONS_MAX,
-  lookUpMessages,
-  lookUpsAsked,
-  lookUpTool,
-  readAnswer,
-  segmentMessages,
-  segmentSchema,
-  songFacts,
-  type Pick,
-  type SegmentAsk,
-} from "./djTalk";
-import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
+import { fallbackPick, INSTRUCTIONS_MAX, type Pick, type SegmentAsk } from "./djTalk";
+import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
+import { askModel, GaveUp, songVocals } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { Voice, type Spoken } from "./djVoice";
 import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { liked } from "./liked.svelte";
-import { lyrics } from "./lyrics.svelte";
 import { player } from "./player.svelte";
 import { session } from "./session.svelte";
 import * as sp from "./spotify";
 import { toasts } from "./toasts.svelte";
-import { idFromUri } from "./util";
 
 export { loadListening } from "./djListening";
 export { Voice, type Spoken } from "./djVoice";
@@ -104,8 +91,6 @@ const SKIP_LANDS_MS = 3000;
 /** How long a request to turn shuffle or repeat off gets before it's sent again. */
 const MODES_RETRY_MS = 3000;
 
-/** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
-class GaveUp extends Error {}
 
 export interface DjSet {
   /** The same while a set picked as it goes grows song by song (each step is a new object). */
@@ -132,18 +117,6 @@ export interface DjSet {
   speech: Spoken | null;
   /** The first song's vocals, for timing the talk. */
   firstVocals: Vocals | null;
-}
-
-/** Where a song's singing starts and ends, as heard: with the listener's own timing nudge for it. */
-async function songVocals(uri: string): Promise<Vocals | null> {
-  try {
-    const id = idFromUri(uri);
-    const v = vocals(await backend.lyrics(id));
-    const shift = lyrics.songOffsets[id] ?? 0;
-    return v && { first: v.first + shift, last: v.last + shift };
-  } catch {
-    return null;
-  }
 }
 
 /** Something to do when a clock (the finishing song's, or the line's) reaches a point. */
@@ -927,31 +900,16 @@ class Dj {
 
   /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
    * time or was given up on. */
+  /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
+   * time or was given up on. A failure the listener can fix is said once a session. */
   async #askModel(ask: SegmentAsk, timeoutMs: number, stale: () => boolean): Promise<{ pick: Pick | null; why: string | null }> {
-    // Given up on (too slow, or the music can't wait): what's still on its way isn't asked for.
-    let gaveUp = false;
-    try {
-      const answer = await this.#rushable(
-        (async () => {
-          // A model that can call tools may look some of the songs up first.
-          const lookedUp = this.status?.tools ? await this.#lookUp(ask) : undefined;
-          if (gaveUp || stale()) throw new GaveUp("given up");
-          return backend.djGenerate(segmentMessages({ ...ask, lookedUp }), segmentSchema(ask.choices.length), 300);
-        })(),
-        timeoutMs,
-      );
-      const pick = readAnswer(answer, ask.choices, ask.segment);
-      if (pick) return { pick, why: null };
-      console.warn("DJ: the model's answer wasn't usable", answer);
-      return { pick: null, why: "the model's answer wasn't usable" };
-    } catch (e) {
-      gaveUp = true;
-      console.warn("DJ: no answer from the model, talking from a template:", e);
-      if (e instanceof GaveUp) return { pick: null, why: "the model didn't answer in time" };
-      const why = errorMessage(e);
-      this.#modelTroubled(why);
-      return { pick: null, why };
-    }
+    const round = await askModel(ask, {
+      tools: !!this.status?.tools,
+      wait: (p) => this.#rushable(p, timeoutMs),
+      stale,
+    });
+    if (round.trouble) this.#modelTroubled(round.trouble);
+    return round;
   }
 
   /** A request's set without the model: a template can't tell which songs fit a mood, so it plays only what the
@@ -995,28 +953,6 @@ class Dj {
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
-  /** Lets the model ask about some of the songs before it picks; what was found, as lines for the prompt. Nothing
-   * found, or no look-up, goes on without. */
-  async #lookUp(ask: SegmentAsk): Promise<string[] | undefined> {
-    try {
-      const answer = await backend.djLookUp(lookUpMessages(ask), [lookUpTool(ask.choices.length)], 300);
-      const asked = lookUpsAsked(answer.calls, ask.choices);
-      if (!asked.length) return undefined;
-      const found = await backend.djSongInfo(
-        asked.map((c) => ({ uri: c.uri, name: c.name, artist: c.artists[0] ?? "", artist_id: c.artistIds?.[0] ?? null })),
-      );
-      const byUri = new Map(found.map((info) => [info.uri, info]));
-      const lines = asked.flatMap((c) => {
-        const info = byUri.get(c.uri);
-        return info ? [songFacts(ask.choices.indexOf(c) + 1, c, info)] : [];
-      });
-      return lines.length ? lines : undefined;
-    } catch (e) {
-      console.warn("DJ: couldn't look songs up, picking without:", e);
-      return undefined;
-    }
-  }
-
   #rushable<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const t = setTimeout(() => reject(new GaveUp("the model took too long")), timeoutMs);
