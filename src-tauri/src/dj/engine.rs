@@ -39,6 +39,9 @@ pub struct Engine {
     /// The server, loading or loaded. Never held across an await, so nothing waits on a load to stop it.
     server: StdMutex<Option<Server>>,
     next_id: AtomicU64,
+    /// Bumped by `stop` and `kill_now`, so a load still waiting its turn gives up rather than start a server nobody
+    /// wants any more.
+    stops: AtomicU64,
     /// For checking on it: straight to the loopback port, never through a proxy.
     http: reqwest::Client,
     last_used: StdMutex<Option<Instant>>,
@@ -50,6 +53,7 @@ impl Default for Engine {
             starting: Mutex::default(),
             server: StdMutex::default(),
             next_id: AtomicU64::new(1),
+            stops: AtomicU64::new(0),
             http: reqwest::Client::builder().no_proxy().build().unwrap_or_default(),
             last_used: StdMutex::default(),
         }
@@ -69,7 +73,11 @@ impl Engine {
     /// here rather than started again; anything else is replaced by one `spawn` starts.
     async fn load(&self, model: &Path, log: &Path, mut spawn: impl FnMut(u16, &str) -> Result<Child>) -> Result<Target> {
         self.touch();
+        let stops = self.stops.load(Ordering::SeqCst);
         let _one_at_a_time = self.starting.lock().await;
+        if self.stops.load(Ordering::SeqCst) != stops {
+            return Err(unloaded());
+        }
         let mut found = {
             let mut slot = self.slot();
             let same = slot.as_mut().is_some_and(|s| s.model == model && matches!(s.child.try_wait(), Ok(None)));
@@ -92,7 +100,7 @@ impl Engine {
         for _ in 0..PORT_TRIES {
             let (id, target) = match found.take() {
                 Some(found) => found,
-                None => self.start(model, log, &mut spawn)?,
+                None => self.start(model, log, stops, &mut spawn)?,
             };
             if self.wait_until_loaded(id, &target, log).await? {
                 return Ok(target);
@@ -101,8 +109,15 @@ impl Engine {
         Err(AppError::Other("The DJ's model couldn't get a port to listen on".into()))
     }
 
-    /// Starts a server with `spawn` on a free port, as the one in the slot.
-    fn start(&self, model: &Path, log: &Path, spawn: &mut impl FnMut(u16, &str) -> Result<Child>) -> Result<(u64, Target)> {
+    /// Starts a server with `spawn` on a free port, as the one in the slot, unless the model was stopped since
+    /// `stops` was read.
+    fn start(
+        &self,
+        model: &Path,
+        log: &Path,
+        stops: u64,
+        spawn: &mut impl FnMut(u16, &str) -> Result<Child>,
+    ) -> Result<(u64, Target)> {
         let port = free_port()?;
         let key = crate::config::random_hex(16);
         let child = spawn(port, &key)?;
@@ -124,14 +139,20 @@ impl Engine {
             started: Instant::now(),
             log: log.to_owned(),
         };
-        *self.slot() = Some(server);
+        let mut slot = self.slot();
+        if self.stops.load(Ordering::SeqCst) != stops {
+            drop(slot);
+            let mut stopped = server.child;
+            let _ = stopped.start_kill();
+            return Err(unloaded());
+        }
+        *slot = Some(server);
         Ok((id, target))
     }
 
     /// Waits for server `id` to answer, for as long as it's the one in the slot. False when it stopped because its
     /// port was taken before it could listen on it.
     async fn wait_until_loaded(&self, id: u64, target: &Target, log: &Path) -> Result<bool> {
-        let unloaded = || AppError::Other("The DJ's model was unloaded before it finished loading".into());
         let base = target.url.trim_end_matches("/v1/chat/completions");
         let key = target.key.as_deref().unwrap_or_default();
         loop {
@@ -195,6 +216,7 @@ impl Engine {
     /// Stops the local server, loaded or still loading, and waits for it to exit (Windows can't delete its files
     /// before). A caller waiting for it to load is told it was unloaded.
     pub async fn stop(&self) {
+        self.stops.fetch_add(1, Ordering::SeqCst);
         let taken = self.slot().take();
         if let Some(mut s) = taken {
             let _ = s.child.kill().await;
@@ -204,6 +226,7 @@ impl Engine {
     /// For app exit, where nothing can wait, and nothing still loading is dropped to kill it: tells the server to
     /// stop, loaded or not.
     pub fn kill_now(&self) {
+        self.stops.fetch_add(1, Ordering::SeqCst);
         if let Some(s) = self.slot().as_mut() {
             let _ = s.child.start_kill();
         }
@@ -226,6 +249,10 @@ impl Engine {
     pub fn idle(&self, now: Instant) -> bool {
         self.last_used.lock().unwrap().is_none_or(|t| now.duration_since(t) >= IDLE)
     }
+}
+
+fn unloaded() -> AppError {
+    AppError::Other("The DJ's model was unloaded before it finished loading".into())
 }
 
 /// Starts `llama-server` for `model` on a loopback `port`, writing what it says to `log`.
@@ -365,6 +392,51 @@ mod tests {
         e.kill_now();
         let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
         assert!(err.to_string().contains("stopped while loading"), "{err}");
+        assert!(!e.is_running());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_also_stops_a_load_waiting_its_turn() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        let e = Arc::new(Engine::default());
+        let spawned = Arc::new(AtomicUsize::new(0));
+        let load = || {
+            let (e, spawned) = (e.clone(), spawned.clone());
+            tokio::spawn(async move {
+                let spawn = |_: u16, _: &str| {
+                    spawned.fetch_add(1, Ordering::SeqCst);
+                    sleeper()
+                };
+                e.load(Path::new("/m.gguf"), &log_path(), spawn).await
+            })
+        };
+        let first = load();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Another ask, waiting for the first to load the model.
+        let waiting = load();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        e.stop().await;
+        for load in [first, waiting] {
+            let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
+            assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
+        }
+        assert_eq!(spawned.load(Ordering::SeqCst), 1);
+        assert!(!e.is_running());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn quitting_as_a_server_starts_doesnt_leave_it_running() {
+        let (e, log) = (Engine::default(), log_path());
+        let load = e.load(Path::new("/m.gguf"), &log, |_, _| {
+            // The app quits while the server is being started, before it's in the slot to be killed.
+            e.kill_now();
+            sleeper()
+        });
+        let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap_err();
+        assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
         assert!(!e.is_running());
     }
 
