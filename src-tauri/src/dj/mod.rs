@@ -18,6 +18,7 @@ pub mod speaker;
 pub mod voice;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::watch;
 
 use crate::error::{AppError, Result};
 use chat::{Answer, Api, Ask, Message, ModelChoice, Target, Tool};
@@ -36,7 +38,8 @@ use songinfo::{SongInfo, SongLookup, SongRef};
 use speaker::{Cmd, Speaker, VoiceCommand};
 use voice::Speech;
 
-/// The DJ's settings, part of `config.json`.
+/// The DJ's settings, part of `config.json`. A new field that changes which model runs belongs in
+/// `keeps_model`; one that changes what's downloaded, in `Dj::needed` (which `same_downloads` compares).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DjConfig {
@@ -187,11 +190,10 @@ impl DjConfig {
         api(&self.provider)
     }
 
-    /// Whether a change from `other` to these settings leaves the model and the downloads as they are: picking a
-    /// cloud model, look-up options and the like don't unload the model or restart a download.
-    pub fn same_engine(&self, other: &DjConfig) -> bool {
-        (self.enabled, &self.provider, &self.model, &self.voice, &self.server_url, &self.server_model)
-            == (other.enabled, &other.provider, &other.model, &other.voice, &other.server_url, &other.server_model)
+    /// Whether a change from `old` to these settings leaves a loaded model running: only while the DJ stays on with
+    /// the same local model. A new voice, the own server's address or a cloud model pick don't unload it.
+    pub fn keeps_model(&self, old: &DjConfig) -> bool {
+        self.enabled && old.enabled && self.api() == Api::Local && old.api() == Api::Local && self.model == old.model
     }
 
     /// The model picked for the cloud provider in use.
@@ -280,6 +282,9 @@ pub struct Dj {
     root: PathBuf,
     scratch: PathBuf,
     http: reqwest::Client,
+    /// For model servers on this computer: straight there, never through a proxy, which would see the key and the
+    /// prompt.
+    loopback: reqwest::Client,
     runtime: Option<Runtime>,
     install: Arc<Mutex<InstallState>>,
     /// Bumped to cancel a running install.
@@ -294,6 +299,10 @@ pub struct Dj {
     /// Whether each Anthropic model takes `effort`, once asked.
     effort: Mutex<HashMap<String, bool>>,
     songs: SongLookup,
+    /// The model's asks, and song look-ups, each in a lane of its own: a newer one drops one still waiting there
+    /// (`newest`).
+    asks: watch::Sender<u64>,
+    look_ups: watch::Sender<u64>,
 }
 
 /// The most songs one look-up covers: the model asks about a handful before it picks.
@@ -304,6 +313,11 @@ impl Dj {
         Self {
             scratch,
             http: http.clone(),
+            loopback: reqwest::Client::builder()
+                .no_proxy()
+                .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_default(),
             runtime: manifest::this_runtime(),
             install: Arc::default(),
             generation: Arc::default(),
@@ -316,6 +330,8 @@ impl Dj {
             keys: Arc::new(Keys::new(root.with_file_name("dj_keys.json"))),
             effort: Mutex::default(),
             songs: SongLookup::new(http.clone(), root.join("song_info.json")),
+            asks: watch::Sender::new(0),
+            look_ups: watch::Sender::new(0),
             root,
         }
     }
@@ -440,6 +456,12 @@ impl Dj {
             let _ = app.emit("dj-installed", ());
         });
         Ok(())
+    }
+
+    /// Whether `old` and `new` need the same downloads, so one under way can carry on: two voices from one
+    /// package do.
+    pub fn same_downloads(&self, old: &DjConfig, new: &DjConfig) -> bool {
+        old.enabled == new.enabled && self.needed(old) == self.needed(new)
     }
 
     /// Stops a download; what's downloaded so far is kept and resumes next time.
@@ -602,11 +624,18 @@ impl Dj {
         };
         let kind = if tools.is_some() { "look-ups" } else { "picks" };
         let started = Instant::now();
-        let target = self.target(cfg).await?;
-        let ready = started.elapsed().as_secs_f64();
-        self.engine.touch();
-        let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
-        self.engine.touch();
+        let mut ready = 0.0;
+        // Dropped for a newer ask, even while the model is still loading: the DJ has stopped waiting for this one.
+        let answer = newest(&self.asks, async {
+            let target = self.target(cfg).await?;
+            ready = started.elapsed().as_secs_f64();
+            self.engine.touch();
+            let http = if is_loopback(&target.url) { &self.loopback } else { &self.http };
+            let answer = chat::chat(http, &target, messages, ask, max_tokens).await;
+            self.engine.touch();
+            or_died(answer, target.api, self.engine.died())
+        })
+        .await;
         // For tuning how early sets are picked: the model's own time, and any wait for it to be ready.
         let asked = started.elapsed().as_secs_f64() - ready;
         let outcome = if answer.is_ok() { "answered" } else { "failed" };
@@ -627,7 +656,8 @@ impl Dj {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
         let songs = &songs[..songs.len().min(LOOK_UP_AT_MOST)];
-        Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await)
+        // As asks are: a newer look-up drops one still going, and the MusicBrainz requests it was waiting its turn for.
+        newest(&self.look_ups, async { Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await) }).await
     }
 
     /// Unloads the model; the next request loads it again.
@@ -646,7 +676,7 @@ impl Dj {
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                if engine.idle(Instant::now()) && engine.is_running().await {
+                if engine.idle(Instant::now()) && engine.is_running() {
                     log::info!("DJ: unloading the model after {} idle minutes", engine::IDLE.as_secs() / 60);
                     engine.stop().await;
                 }
@@ -760,6 +790,40 @@ fn waited(secs: f64) -> String {
     if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
 }
 
+/// A failed answer from the local model, said as what happened to it when it `died` while answering; the next ask
+/// starts it again.
+fn or_died(answer: Result<Answer>, api: Api, died: Option<String>) -> Result<Answer> {
+    match (answer, api, died) {
+        (Err(_), Api::Local, Some(why)) => Err(AppError::Other(format!("The DJ's model stopped while answering ({why})"))),
+        (answer, _, _) => answer,
+    }
+}
+
+/// Whether `url` is on this computer: localhost, 127.0.0.0/8 or ::1.
+fn is_loopback(url: &str) -> bool {
+    match url::Url::parse(url).ok().as_ref().and_then(url::Url::host) {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+/// Runs `work` as the newest in its `lane`, failing it as soon as a newer one starts there: the DJ only ever waits for
+/// its latest. Dropping a request hangs up on its server, which frees the local model's one slot for the newer ask.
+async fn newest<T>(lane: &watch::Sender<u64>, work: impl Future<Output = Result<T>>) -> Result<T> {
+    let mut newer = lane.subscribe();
+    let mut mine = 0;
+    lane.send_modify(|n| {
+        *n += 1;
+        mine = *n;
+    });
+    tokio::select! {
+        done = work => done,
+        _ = newer.wait_for(|n| *n != mine) => Err(AppError::Other("A newer request took this one's place".into())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -768,6 +832,139 @@ mod tests {
     fn says_how_long_getting_the_model_ready_took_only_when_it_did() {
         assert_eq!(waited(0.1), "");
         assert_eq!(waited(3.24), ", after 3.2 s getting it ready");
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_in_a_lane_drops_the_one_still_waiting_there() {
+        let (lane, other) = (watch::Sender::new(0), watch::Sender::new(0));
+        let waiting = newest(&lane, std::future::pending::<Result<u8>>());
+        let elsewhere = newest(&other, async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(3)
+        });
+        let newer = async {
+            tokio::task::yield_now().await;
+            newest(&lane, async { Ok(2) }).await
+        };
+        let (dropped, newer, elsewhere) = tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(waiting, newer, elsewhere) })
+            .await
+            .unwrap();
+        assert!(dropped.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(newer.unwrap(), 2);
+        assert_eq!(elsewhere.unwrap(), 3);
+        // One after another, nothing is dropped.
+        assert_eq!(newest(&lane, async { Ok(4) }).await.unwrap(), 4);
+        assert_eq!(newest(&lane, async { Ok(5) }).await.unwrap(), 5);
+    }
+
+    /// Reads one HTTP request off `sock`, all of it.
+    async fn read_request(sock: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if let Some(i) = text.find("\r\n\r\n") {
+                let len: usize = text
+                    .lines()
+                    .map(str::to_ascii_lowercase)
+                    .find_map(|l| l.strip_prefix("content-length: ").and_then(|v| v.trim().parse().ok()))
+                    .unwrap_or(0);
+                if buf.len() >= i + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A model server that keeps the first ask waiting, saying on `hung_up` once its asker hangs up, and answers the
+    /// next with a set.
+    async fn keeps_the_first_waiting(hung_up: tokio::sync::oneshot::Sender<()>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            read_request(&mut first).await;
+            tokio::spawn(async move {
+                let mut rest = [0u8; 64];
+                while first.read(&mut rest).await.is_ok_and(|n| n > 0) {}
+                let _ = hung_up.send(());
+            });
+            let (mut second, _) = listener.accept().await.unwrap();
+            read_request(&mut second).await;
+            second.write_all(set_reply().as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    /// A model server's answer with a set.
+    fn set_reply() -> String {
+        let set = r#"{"name":"Set","songs":[1],"talk":"Hello there."}"#;
+        let body = serde_json::json!({ "choices": [{ "message": { "role": "assistant", "content": set }, "finish_reason": "stop" }] })
+            .to_string();
+        format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+    }
+
+    /// A model server that answers one ask with a set.
+    async fn answers_with_a_set() -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            read_request(&mut sock).await;
+            sock.write_all(set_reply().as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    #[test]
+    fn knows_a_model_server_on_this_computer() {
+        for url in ["http://localhost:11434/v1", "http://LOCALHOST:1234", "http://127.0.0.1:8080/v1/chat/completions", "http://127.1.2.3/", "http://[::1]:11434"] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in ["http://192.168.1.20:11434", "https://api.openai.com/v1/chat/completions", "http://localhost.example.com", "nonsense"] {
+            assert!(!is_loopback(url), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reaches_a_model_server_on_this_computer_without_the_proxy() {
+        // Everything this client sends goes to a proxy that isn't there.
+        let proxied = reqwest::Client::builder().proxy(reqwest::Proxy::all("http://127.0.0.1:1").unwrap()).build().unwrap();
+        let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
+        let d = Dj::new(root.join("dj"), root.join("cache"), proxied);
+        let cfg = DjConfig { enabled: true, server_url: answers_with_a_set().await, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let answer = tokio::time::timeout(Duration::from_secs(5), d.generate(&cfg, &ask, Some(&schema), None, 10)).await.unwrap();
+        assert!(answer.unwrap().json.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_hangs_up_on_the_one_its_server_is_still_answering() {
+        let (hung_up, heard) = tokio::sync::oneshot::channel();
+        let url = keeps_the_first_waiting(hung_up).await;
+        let d = dj();
+        let cfg = DjConfig { enabled: true, server_url: url, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let first = d.generate(&cfg, &ask, Some(&schema), None, 10);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.generate(&cfg, &ask, Some(&schema), None, 10).await
+        };
+        let (first, second) =
+            tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert!(second.unwrap().json.is_some());
+        tokio::time::timeout(Duration::from_secs(2), heard).await.unwrap().unwrap();
     }
 
     fn dj() -> Dj {
@@ -936,21 +1133,40 @@ mod tests {
     }
 
     #[test]
-    fn only_model_and_download_changes_unload_the_model() {
+    fn only_another_model_unloads_it() {
         let old = DjConfig { enabled: true, ..DjConfig::default() };
-        let picks = DjConfig {
-            musicbrainz: false,
-            own_tools: true,
-            api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
-            api_keys: BTreeSet::from(["openai".to_owned()]),
-            ..old.clone()
-        };
-        assert!(picks.same_engine(&old));
-        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { voice: "emma".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { enabled: false, ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { server_url: "http://x".into(), ..old.clone() }.same_engine(&old));
+        for keeps in [
+            DjConfig { voice: "emma".into(), ..old.clone() },
+            DjConfig { voice: "light-male".into(), ..old.clone() },
+            DjConfig { server_url: "http://x".into(), server_model: "m".into(), ..old.clone() },
+            DjConfig {
+                musicbrainz: false,
+                own_tools: true,
+                api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
+                api_keys: BTreeSet::from(["openai".to_owned()]),
+                ..old.clone()
+            },
+        ] {
+            assert!(keeps.keeps_model(&old), "{keeps:?}");
+        }
+        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: OWN_SERVER.into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { enabled: false, ..old.clone() }.keeps_model(&old));
+    }
+
+    #[test]
+    fn downloads_restart_only_when_what_is_needed_changes() {
+        let d = dj();
+        let old = DjConfig { enabled: true, voice: "michael".into(), ..DjConfig::default() };
+        // Both voices come in one package.
+        assert!(d.same_downloads(&old, &DjConfig { voice: "emma".into(), ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { musicbrainz: false, ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { voice: "light-male".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { model: "qwen3-4b".into(), ..old.clone() }));
+        // A cloud model needs neither the model nor its runtime.
+        assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
     }
 
     #[test]
@@ -1045,5 +1261,54 @@ mod tests {
         }
         assert!(d.speech_audio(0).is_none());
         assert_eq!(d.speech_audio(SPEECH_KEPT as u64 + 2).as_deref(), Some(&vec![(SPEECH_KEPT + 2) as u8]));
+    }
+
+    #[test]
+    fn says_when_the_local_model_stopped_while_answering() {
+        let failed = || Err(AppError::Other("The DJ's model isn't running".into()));
+        let said = or_died(failed(), Api::Local, Some("exit status: 9. out of memory".into())).unwrap_err().to_string();
+        assert_eq!(said, "The DJ's model stopped while answering (exit status: 9. out of memory)");
+        assert_eq!(or_died(failed(), Api::Local, None).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert_eq!(or_died(failed(), Api::Own, Some("x".into())).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert!(or_died(Ok(Answer::default()), Api::Local, Some("x".into())).is_ok());
+    }
+
+    /// MusicBrainz keeping the first request it gets waiting, and answering the next with a recording's genres.
+    async fn musicbrainz_keeps_the_first_waiting() -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (_waiting, _) = listener.accept().await.unwrap();
+            let (mut next, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = next.read(&mut buf).await;
+            let body = r#"{"recordings":[{"title":"x","genres":[{"name":"shoegaze","count":2}],"tags":[]}]}"#;
+            let head = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+            next.write_all(head.as_bytes()).await.unwrap();
+            next.write_all(body.as_bytes()).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_newer_look_up_drops_the_one_still_waiting_for_musicbrainz() {
+        let mut d = dj();
+        d.songs.musicbrainz_url = musicbrainz_keeps_the_first_waiting().await;
+        d.songs.musicbrainz_every = Duration::from_millis(10);
+        let token = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8))).join("token.json");
+        let web = crate::webapi::WebApi::new(reqwest::Client::new(), token);
+        let cfg = DjConfig { enabled: true, musicbrainz: true, ..DjConfig::default() };
+        let song = |uri: &str| [SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None }];
+        let (a, b) = (song("spotify:track:a"), song("spotify:track:b"));
+        let first = d.song_info(&cfg, &a, None, &web);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.song_info(&cfg, &b, None, &web).await
+        };
+        let (first, second) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(second.unwrap()[0].genres, ["shoegaze"]);
     }
 }

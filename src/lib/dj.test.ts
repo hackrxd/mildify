@@ -947,6 +947,28 @@ describe("settings", () => {
     expect(dj.phase).toBe("off");
     expect(backend.djConfigure).toHaveBeenCalledWith({ enabled: false });
   });
+
+  it("carries on the set with a new voice", async () => {
+    const first = await started();
+    backend.djConfigure.mockImplementation(async () => ({ ...readyStatus, settings: { ...readyStatus.settings, voice: "emma" } }));
+    await dj.configure({ voice: "emma" });
+    expect(dj.phase).toBe("on");
+    expect(dj.current).toBe(first);
+    expect(backend.djRelease).not.toHaveBeenCalled();
+  });
+
+  it("ends the session when the new voice has to download first", async () => {
+    await started();
+    backend.djConfigure.mockImplementation(async () => ({ ...readyStatus, ready: false }));
+    await dj.configure({ voice: "light-male" });
+    expect(dj.phase).toBe("off");
+  });
+
+  it("ends the session for another model", async () => {
+    await started();
+    await dj.configure({ model: "qwen3-4b" });
+    expect(dj.phase).toBe("off");
+  });
 });
 
 describe("starting", () => {

@@ -109,6 +109,8 @@ pub struct WebApi {
     token_file: PathBuf,
     limiter: std::sync::Mutex<Limiter>,
     cooldown_file: PathBuf,
+    /// `API_BASE`, but for tests.
+    base: String,
 }
 
 impl WebApi {
@@ -127,7 +129,14 @@ impl WebApi {
                 limiter.block(Instant::now(), Duration::from_secs(c.until - now()));
             }
         }
-        Self { http, token: Mutex::new(token), token_file, limiter: std::sync::Mutex::new(limiter), cooldown_file }
+        Self {
+            http,
+            token: Mutex::new(token),
+            token_file,
+            limiter: std::sync::Mutex::new(limiter),
+            cooldown_file,
+            base: API_BASE.into(),
+        }
     }
 
     /// True if we hold a token issued for `client_id`.
@@ -243,7 +252,31 @@ impl WebApi {
         query: Option<Vec<(String, String)>>,
         body: Option<Value>,
     ) -> Result<Value> {
-        let url = api_url(path, query)?;
+        self.send(method, path, query, body, false).await
+    }
+
+    /// As `request`, but not sent again after a server error, which may have come after Spotify did what was
+    /// asked: adding songs to a playlist twice would leave them in it twice. Refused and rate-limited requests,
+    /// which Spotify didn't act on, are still sent again.
+    pub async fn request_once(
+        &self,
+        method: &str,
+        path: &str,
+        query: Option<Vec<(String, String)>>,
+        body: Option<Value>,
+    ) -> Result<Value> {
+        self.send(method, path, query, body, true).await
+    }
+
+    async fn send(
+        &self,
+        method: &str,
+        path: &str,
+        query: Option<Vec<(String, String)>>,
+        body: Option<Value>,
+        once: bool,
+    ) -> Result<Value> {
+        let url = api_url(&self.base, path, query)?;
         let method = Method::from_bytes(method.to_ascii_uppercase().as_bytes())
             .map_err(|_| AppError::Other(format!("Bad HTTP method {method}")))?;
 
@@ -284,7 +317,7 @@ impl WebApi {
                     }
                     return Err(AppError::RateLimited { retry_after });
                 }
-                500..=599 if attempt < 2 => {
+                500..=599 if attempt < 2 && !once => {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     continue;
                 }
@@ -303,15 +336,15 @@ impl WebApi {
     }
 }
 
-/// Resolves a path relative to `/v1`, or an absolute URL that must be under it.
-fn api_url(path: &str, query: Option<Vec<(String, String)>>) -> Result<Url> {
+/// Resolves a path relative to `base` (`/v1`), or an absolute URL that must be under it.
+fn api_url(base: &str, path: &str, query: Option<Vec<(String, String)>>) -> Result<Url> {
     let mut url = if path.starts_with("https://") {
-        if !path.starts_with(API_BASE) {
+        if !path.starts_with(base) {
             return Err(AppError::Other(format!("Refusing to send credentials to {path}")));
         }
         Url::parse(path)
     } else {
-        Url::parse(&format!("{API_BASE}{path}"))
+        Url::parse(&format!("{base}{path}"))
     }
     .map_err(|e| AppError::Other(format!("Bad API path {path}: {e}")))?;
     if let Some(q) = query {
@@ -339,7 +372,7 @@ mod tests {
     use super::*;
 
     fn url(path: &str) -> Url {
-        api_url(path, None).unwrap()
+        api_url(API_BASE, path, None).unwrap()
     }
 
     #[test]
@@ -356,12 +389,13 @@ mod tests {
     #[test]
     fn appends_and_encodes_the_query() {
         let u = api_url(
+            API_BASE,
             "/search",
             Some(vec![("q".into(), "AC/DC & co".into()), ("limit".into(), "10".into())]),
         )
         .unwrap();
         assert_eq!(u.as_str(), "https://api.spotify.com/v1/search?q=AC%2FDC+%26+co&limit=10");
-        let u = api_url("https://api.spotify.com/v1/me/tracks?offset=50", Some(vec![("limit".into(), "50".into())])).unwrap();
+        let u = api_url(API_BASE, "https://api.spotify.com/v1/me/tracks?offset=50", Some(vec![("limit".into(), "50".into())])).unwrap();
         assert_eq!(u.query(), Some("offset=50&limit=50"));
     }
 
@@ -372,11 +406,11 @@ mod tests {
             "https://api.spotify.com.evil.example/v1/me",
             "https://accounts.spotify.com/api/token",
         ] {
-            assert!(matches!(api_url(path, None), Err(AppError::Other(_))), "{path}");
+            assert!(matches!(api_url(API_BASE, path, None), Err(AppError::Other(_))), "{path}");
         }
         // Paths that try to smuggle in another host stay on api.spotify.com.
         for path in ["@evil.example/me", ".evil.example/me", "https://api.spotify.com/v1@evil.example/", "/../../x"] {
-            if let Ok(u) = api_url(path, None) {
+            if let Ok(u) = api_url(API_BASE, path, None) {
                 assert_eq!(u.host_str(), Some("api.spotify.com"), "{path} → {u}");
             }
         }
@@ -510,5 +544,56 @@ mod tests {
         assert!(matches!(api.request("GET", "https://evil.example/v1/me", None, None).await, Err(AppError::Other(_))));
         assert!(matches!(api.request("NOT A METHOD", "/me", None, None).await, Err(AppError::Other(_))));
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    /// A Web API stand-in on loopback answering each request in turn with `statuses`, the `WebApi` signed in to it,
+    /// and the request lines it got.
+    async fn stand_in(statuses: Vec<u16>) -> (WebApi, tokio::task::JoinHandle<Vec<String>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut seen = Vec::new();
+            for status in statuses {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).into_owned();
+                    if let Some(i) = text.find("\r\n\r\n") {
+                        let len: usize = text
+                            .lines()
+                            .map(str::to_ascii_lowercase)
+                            .find_map(|l| l.strip_prefix("content-length: ").and_then(|v| v.trim().parse().ok()))
+                            .unwrap_or(0);
+                        if buf.len() >= i + 4 + len || n == 0 {
+                            break;
+                        }
+                    }
+                }
+                seen.push(String::from_utf8_lossy(&buf).lines().next().unwrap_or_default().to_owned());
+                let reply = format!("HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}");
+                sock.write_all(reply.as_bytes()).await.unwrap();
+            }
+            seen
+        });
+        let (mut api, _) = with_token("mine");
+        api.base = base;
+        (api, server)
+    }
+
+    #[tokio::test]
+    async fn sends_a_request_again_after_a_server_error_unless_it_must_go_once() {
+        let (api, server) = stand_in(vec![500, 200]).await;
+        api.request("POST", "/me/player/next", None, None).await.unwrap();
+        assert_eq!(server.await.unwrap(), ["POST /v1/me/player/next HTTP/1.1"; 2]);
+        // Spotify may have added the songs before it failed: adding them again would add them twice.
+        let (api, server) = stand_in(vec![502]).await;
+        let songs = json!({ "uris": ["spotify:track:a"] });
+        let err = api.request_once("POST", "/playlists/p/items", None, Some(songs)).await.unwrap_err();
+        assert!(matches!(err, AppError::Api { status: 502, .. }), "{err:?}");
+        assert_eq!(server.await.unwrap().len(), 1);
     }
 }

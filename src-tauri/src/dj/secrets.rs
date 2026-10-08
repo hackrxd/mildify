@@ -1,6 +1,6 @@
 //! API keys for the DJ's cloud models. They're kept in the system's keychain (macOS Keychain, Windows
 //! Credential Manager, the Secret Service on Linux); where there isn't one that works, in a file in the app
-//! data dir that only the user can read, as the app's other secrets are. Keys never go to the UI.
+//! data dir that only the user can read (`write_private`). Keys never go to the UI.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -232,7 +232,8 @@ impl Keys {
     }
 }
 
-/// Writes a file only the user can read.
+/// Writes a file only the user can read: mode 0600 on Linux and macOS. Windows has no such mode; there the file is in
+/// the user's own AppData, which other users can't open.
 fn write_private(path: &std::path::Path, body: &[u8]) -> Result<()> {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();

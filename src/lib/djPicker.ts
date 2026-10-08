@@ -87,6 +87,8 @@ export async function askModel(
     gaveUp = true;
     console.warn("DJ: no answer from the model, talking from a template:", e);
     if (e instanceof GaveUp) return { pick: null, why: "the model didn't answer in time", trouble: null, found };
+    // Not wanted any more: its ask was dropped for a newer one, which is nothing for the listener to fix.
+    if (opts.stale()) return { pick: null, why: "the set isn't wanted any more", trouble: null, found };
     const why = errorMessage(e);
     return { pick: null, why, trouble: why, found };
   }

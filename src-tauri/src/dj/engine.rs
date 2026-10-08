@@ -3,9 +3,11 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex as StdMutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use tokio::process::Child;
 use tokio::sync::Mutex;
 
 use super::chat::{Api, Target};
@@ -17,59 +19,230 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(240);
 pub const IDLE: Duration = Duration::from_secs(10 * 60);
 /// Enough for the prompt (a few dozen songs) and the answer.
 const CONTEXT: &str = "4096";
+/// How many ports a server is started on, when the one picked is taken before it can listen on it.
+const PORT_TRIES: usize = 3;
 
-struct Running {
-    child: tokio::process::Child,
+/// The server, from the moment it's started.
+struct Server {
+    id: u64,
+    child: Child,
     model: PathBuf,
     target: Target,
+    loaded: bool,
+    started: Instant,
+    log: PathBuf,
 }
 
-#[derive(Default)]
 pub struct Engine {
-    running: Mutex<Option<Running>>,
+    /// Held by whoever is starting a server, so there's one at a time. Stopping one never needs it.
+    starting: Mutex<()>,
+    /// The server, loading or loaded. Never held across an await, so nothing waits on a load to stop it.
+    server: StdMutex<Option<Server>>,
+    next_id: AtomicU64,
+    /// Bumped by `stop` and `kill_now`, so a load still waiting its turn gives up rather than start a server nobody
+    /// wants any more.
+    stops: AtomicU64,
+    /// For checking on it: straight to the loopback port, never through a proxy.
+    http: reqwest::Client,
     last_used: StdMutex<Option<Instant>>,
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self {
+            starting: Mutex::default(),
+            server: StdMutex::default(),
+            next_id: AtomicU64::new(1),
+            stops: AtomicU64::new(0),
+            http: reqwest::Client::builder().no_proxy().build().unwrap_or_default(),
+            last_used: StdMutex::default(),
+        }
+    }
 }
 
 impl Engine {
     /// The local server for `model`, started (or restarted with a different model) if need be.
     pub async fn local(&self, server: &Path, model: &Path, log: &Path) -> Result<Target> {
-        self.touch();
-        let mut running = self.running.lock().await;
-        if let Some(r) = running.as_mut() {
-            if r.model == model && matches!(r.child.try_wait(), Ok(None)) {
-                return Ok(r.target.clone());
-            }
-            let _ = r.child.start_kill();
-            *running = None;
+        if !server.is_file() || !model.is_file() {
+            return Err(AppError::Other("The DJ's model isn't downloaded yet".into()));
         }
-        let r = start(server, model, log).await?;
-        let target = r.target.clone();
-        *running = Some(r);
-        Ok(target)
+        self.load(model, log, |port, key| spawn(server, model, port, key, log)).await
+    }
+
+    /// The server for `model`, loaded. One still loading for it, which its caller stopped waiting for, is waited for
+    /// here rather than started again; anything else is replaced by one `spawn` starts.
+    async fn load(&self, model: &Path, log: &Path, mut spawn: impl FnMut(u16, &str) -> Result<Child>) -> Result<Target> {
+        self.touch();
+        let stops = self.stops.load(Ordering::SeqCst);
+        let _one_at_a_time = self.starting.lock().await;
+        if self.stops.load(Ordering::SeqCst) != stops {
+            return Err(unloaded());
+        }
+        let mut found = {
+            let mut slot = self.slot();
+            let same = slot.as_mut().is_some_and(|s| s.model == model && matches!(s.child.try_wait(), Ok(None)));
+            match slot.as_mut() {
+                Some(s) if same => {
+                    if s.loaded {
+                        return Ok(s.target.clone());
+                    }
+                    Some((s.id, s.target.clone()))
+                }
+                Some(s) => {
+                    let _ = s.child.start_kill();
+                    *slot = None;
+                    None
+                }
+                None => None,
+            }
+        };
+        // The free port found can be taken before the server binds it.
+        for _ in 0..PORT_TRIES {
+            let (id, target) = match found.take() {
+                Some(found) => found,
+                None => self.start(model, log, stops, &mut spawn)?,
+            };
+            if self.wait_until_loaded(id, &target, log).await? {
+                return Ok(target);
+            }
+        }
+        Err(AppError::Other("The DJ's model couldn't get a port to listen on".into()))
+    }
+
+    /// Starts a server with `spawn` on a free port, as the one in the slot, unless the model was stopped since
+    /// `stops` was read.
+    fn start(
+        &self,
+        model: &Path,
+        log: &Path,
+        stops: u64,
+        spawn: &mut impl FnMut(u16, &str) -> Result<Child>,
+    ) -> Result<(u64, Target)> {
+        let port = free_port()?;
+        let key = crate::config::random_hex(16);
+        let child = spawn(port, &key)?;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let target = Target {
+            api: Api::Local,
+            url: format!("http://127.0.0.1:{port}/v1/chat/completions"),
+            key: Some(key),
+            model: "dj".into(),
+            tools: false,
+            effort: false,
+        };
+        let server = Server {
+            id,
+            child,
+            model: model.to_owned(),
+            target: target.clone(),
+            loaded: false,
+            started: Instant::now(),
+            log: log.to_owned(),
+        };
+        let mut slot = self.slot();
+        if self.stops.load(Ordering::SeqCst) != stops {
+            drop(slot);
+            let mut stopped = server.child;
+            let _ = stopped.start_kill();
+            return Err(unloaded());
+        }
+        *slot = Some(server);
+        Ok((id, target))
+    }
+
+    /// Waits for server `id` to answer, for as long as it's the one in the slot. False when it stopped because its
+    /// port was taken before it could listen on it.
+    async fn wait_until_loaded(&self, id: u64, target: &Target, log: &Path) -> Result<bool> {
+        let base = target.url.trim_end_matches("/v1/chat/completions");
+        let key = target.key.as_deref().unwrap_or_default();
+        loop {
+            let started = {
+                let mut slot = self.slot();
+                let Some(s) = slot.as_mut().filter(|s| s.id == id) else { return Err(unloaded()) };
+                if let Ok(Some(status)) = s.child.try_wait() {
+                    *slot = None;
+                    if port_taken(&std::fs::read_to_string(log).unwrap_or_default()) {
+                        log::warn!("DJ: the model's port was taken before it could listen on it; trying another");
+                        return Ok(false);
+                    }
+                    return Err(AppError::Other(format!(
+                        "The DJ's model stopped while loading ({status}). {}",
+                        last_line(log).unwrap_or_default()
+                    )));
+                }
+                s.started
+            };
+            if self.answers(base, key).await {
+                break;
+            }
+            if started.elapsed() > LOAD_TIMEOUT {
+                let timed_out = {
+                    let mut slot = self.slot();
+                    if slot.as_ref().is_some_and(|s| s.id == id) { slot.take() } else { None }
+                };
+                if let Some(mut s) = timed_out {
+                    let _ = s.child.kill().await;
+                }
+                return Err(AppError::Other("The DJ's model took too long to load".into()));
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let mut slot = self.slot();
+        let Some(s) = slot.as_mut().filter(|s| s.id == id) else { return Err(unloaded()) };
+        s.loaded = true;
+        log::info!("DJ model loaded from {} in {:.1} s", s.model.display(), s.started.elapsed().as_secs_f64());
+        Ok(true)
+    }
+
+    /// Whether the server at `base` is up, and is ours: `/health` answers anyone, `/props` only its own key.
+    async fn answers(&self, base: &str, key: &str) -> bool {
+        for path in ["health", "props"] {
+            let r = self.http.get(format!("{base}/{path}")).bearer_auth(key).timeout(Duration::from_secs(2)).send().await;
+            if !r.is_ok_and(|r| r.status().is_success()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Option<Server>> {
+        self.server.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn touch(&self) {
         *self.last_used.lock().unwrap() = Some(Instant::now());
     }
 
-    /// Stops the local server, if it's running.
+    /// Stops the local server, loaded or still loading, and waits for it to exit (Windows can't delete its files
+    /// before). A caller waiting for it to load is told it was unloaded.
     pub async fn stop(&self) {
-        if let Some(mut r) = self.running.lock().await.take() {
-            let _ = r.child.kill().await;
+        self.stops.fetch_add(1, Ordering::SeqCst);
+        let taken = self.slot().take();
+        if let Some(mut s) = taken {
+            let _ = s.child.kill().await;
         }
     }
 
-    /// For app exit, where nothing can wait: asks the server to stop if nobody's starting it right now.
+    /// For app exit, where nothing can wait, and nothing still loading is dropped to kill it: tells the server to
+    /// stop, loaded or not.
     pub fn kill_now(&self) {
-        if let Ok(mut running) = self.running.try_lock() {
-            if let Some(r) = running.as_mut() {
-                let _ = r.child.start_kill();
-            }
+        self.stops.fetch_add(1, Ordering::SeqCst);
+        if let Some(s) = self.slot().as_mut() {
+            let _ = s.child.start_kill();
         }
     }
 
-    pub async fn is_running(&self) -> bool {
-        self.running.lock().await.is_some()
+    pub fn is_running(&self) -> bool {
+        self.slot().is_some()
+    }
+
+    /// Why the server stopped, when it stopped on its own: how it exited, and the last thing it said.
+    pub fn died(&self) -> Option<String> {
+        let mut slot = self.slot();
+        let s = slot.as_mut()?;
+        let status = s.child.try_wait().ok().flatten()?;
+        let said = last_line(&s.log).map(|l| format!(". {l}")).unwrap_or_default();
+        Some(format!("{status}{said}"))
     }
 
     /// Whether nothing has asked for the model in `IDLE`.
@@ -78,16 +251,15 @@ impl Engine {
     }
 }
 
-/// Starts `llama-server` on a free loopback port and waits for it to load the model.
-async fn start(server: &Path, model: &Path, log: &Path) -> Result<Running> {
-    if !server.is_file() || !model.is_file() {
-        return Err(AppError::Other("The DJ's model isn't downloaded yet".into()));
-    }
-    let port = free_port()?;
-    let key = crate::config::random_hex(16);
+fn unloaded() -> AppError {
+    AppError::Other("The DJ's model was unloaded before it finished loading".into())
+}
+
+/// Starts `llama-server` for `model` on a loopback `port`, writing what it says to `log`.
+fn spawn(server: &Path, model: &Path, port: u16, key: &str, log: &Path) -> Result<Child> {
     let log_file = std::fs::File::create(log)?;
     let mut cmd = tokio::process::Command::new(server);
-    cmd.args(server_args(model, port, &key))
+    cmd.args(server_args(model, port, key))
         .current_dir(server.parent().unwrap_or(Path::new(".")))
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file.try_clone()?))
@@ -95,44 +267,7 @@ async fn start(server: &Path, model: &Path, log: &Path) -> Result<Running> {
         .kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(NO_WINDOW);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| AppError::Other(format!("Couldn't start the DJ's model: {e}")))?;
-
-    let base = format!("http://127.0.0.1:{port}");
-    let http = reqwest::Client::new();
-    let started = Instant::now();
-    let deadline = started + LOAD_TIMEOUT;
-    loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            return Err(AppError::Other(format!(
-                "The DJ's model stopped while loading ({status}). {}",
-                last_line(log).unwrap_or_default()
-            )));
-        }
-        let health = http.get(format!("{base}/health")).bearer_auth(&key).timeout(Duration::from_secs(2)).send().await;
-        if health.is_ok_and(|r| r.status().is_success()) {
-            break;
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill().await;
-            return Err(AppError::Other("The DJ's model took too long to load".into()));
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-    log::info!("DJ model loaded from {} in {:.1} s", model.display(), started.elapsed().as_secs_f64());
-    Ok(Running {
-        child,
-        model: model.to_owned(),
-        target: Target {
-            api: Api::Local,
-            url: format!("{base}/v1/chat/completions"),
-            key: Some(key),
-            model: "dj".into(),
-            tools: false,
-            effort: false,
-        },
-    })
+    cmd.spawn().map_err(|e| AppError::Other(format!("Couldn't start the DJ's model: {e}")))
 }
 
 /// Hides the console window Windows would open for a console program started from a GUI app.
@@ -147,6 +282,8 @@ fn server_args(model: &Path, port: u16, key: &str) -> Vec<std::ffi::OsString> {
         "--api-key", key,
         "--alias", "dj",
         "--ctx-size", CONTEXT,
+        // One answer at a time: two would split the context (or need more memory) and share the processor. An ask
+        // the DJ stops waiting for hangs up, which frees the slot for the next (`newest` in mod.rs).
         "--parallel", "1",
         "--no-webui",
         // The model's own chat template, which is what understands tool calls and `chat_template_kwargs`.
@@ -161,6 +298,14 @@ fn server_args(model: &Path, port: u16, key: &str) -> Vec<std::ffi::OsString> {
 
 fn free_port() -> Result<u16> {
     Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+}
+
+/// Whether the server's log says its port was taken: llama.cpp's own words, or the system's.
+fn port_taken(log: &str) -> bool {
+    let log = log.to_lowercase();
+    ["couldn't bind http server socket", "address already in use", "only one usage of each socket address"]
+        .iter()
+        .any(|said| log.contains(said))
 }
 
 /// The last non-empty line of the server's log, for an error message.
@@ -204,6 +349,247 @@ mod tests {
         let missing = Path::new("/nonexistent/llama-server");
         let err = e.local(missing, Path::new("/nonexistent/m.gguf"), Path::new("/nonexistent/log")).await;
         assert!(matches!(err, Err(AppError::Other(m)) if m.contains("isn't downloaded")));
-        assert!(!e.is_running().await);
+        assert!(!e.is_running());
+    }
+
+    /// A "server" that never answers: it stays loading until it's stopped.
+    #[cfg(unix)]
+    fn sleeper() -> Result<Child> {
+        Ok(tokio::process::Command::new("sleep").arg("30").kill_on_drop(true).spawn()?)
+    }
+
+    #[cfg(unix)]
+    fn log_path() -> PathBuf {
+        std::env::temp_dir().join(format!("mildify-engine-{}.log", crate::config::random_hex(8)))
+    }
+
+    /// Starts loading `model` with a server that never answers, in the background.
+    #[cfg(unix)]
+    fn loading(e: &std::sync::Arc<Engine>) -> tokio::task::JoinHandle<Result<Target>> {
+        let e = e.clone();
+        tokio::spawn(async move { e.load(Path::new("/m.gguf"), &log_path(), |_, _| sleeper()).await })
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_doesnt_wait_for_a_load() {
+        let e = std::sync::Arc::new(Engine::default());
+        let load = loading(&e);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(e.is_running());
+        tokio::time::timeout(Duration::from_secs(1), e.stop()).await.expect("stopping waited for the load");
+        assert!(!e.is_running());
+        let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
+        assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn quitting_kills_a_server_still_loading() {
+        let e = std::sync::Arc::new(Engine::default());
+        let load = loading(&e);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        e.kill_now();
+        let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
+        assert!(err.to_string().contains("stopped while loading"), "{err}");
+        assert!(!e.is_running());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_also_stops_a_load_waiting_its_turn() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        let e = Arc::new(Engine::default());
+        let spawned = Arc::new(AtomicUsize::new(0));
+        let load = || {
+            let (e, spawned) = (e.clone(), spawned.clone());
+            tokio::spawn(async move {
+                let spawn = |_: u16, _: &str| {
+                    spawned.fetch_add(1, Ordering::SeqCst);
+                    sleeper()
+                };
+                e.load(Path::new("/m.gguf"), &log_path(), spawn).await
+            })
+        };
+        let first = load();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Another ask, waiting for the first to load the model.
+        let waiting = load();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        e.stop().await;
+        for load in [first, waiting] {
+            let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
+            assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
+        }
+        assert_eq!(spawned.load(Ordering::SeqCst), 1);
+        assert!(!e.is_running());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn quitting_as_a_server_starts_doesnt_leave_it_running() {
+        let (e, log) = (Engine::default(), log_path());
+        let load = e.load(Path::new("/m.gguf"), &log, |_, _| {
+            // The app quits while the server is being started, before it's in the slot to be killed.
+            e.kill_now();
+            sleeper()
+        });
+        let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap_err();
+        assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
+        assert!(!e.is_running());
+    }
+
+    /// Answers as a loaded server does: `/health` for anyone, and `/props` while `ours` (another server on the port
+    /// would turn our key down).
+    #[cfg(unix)]
+    async fn answer(listener: tokio::net::TcpListener, ours: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let ours = ours.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let props = String::from_utf8_lossy(&buf[..n]).starts_with("GET /props");
+                let status = if props && !ours.load(Ordering::SeqCst) { "401 Unauthorized" } else { "200 OK" };
+                let reply = format!("HTTP/1.1 {status}\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok");
+                let _ = socket.write_all(reply.as_bytes()).await;
+            });
+        }
+    }
+
+    #[cfg(unix)]
+    async fn answer_ok(listener: tokio::net::TcpListener) {
+        answer(listener, std::sync::Arc::new(true.into())).await;
+    }
+
+    /// A server on `port` that answers, as `answer` does.
+    #[cfg(unix)]
+    fn answering(port: u16, ours: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<Child> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+        listener.set_nonblocking(true)?;
+        tokio::spawn(answer(tokio::net::TcpListener::from_std(listener)?, ours));
+        sleeper()
+    }
+
+    /// A server that stops at once, having said `said`.
+    #[cfg(unix)]
+    fn failing(log: &Path, said: &str) -> Result<Child> {
+        std::fs::write(log, said)?;
+        Ok(tokio::process::Command::new("sh").args(["-c", "exit 1"]).kill_on_drop(true).spawn()?)
+    }
+
+    #[test]
+    fn knows_a_taken_port_from_the_servers_log() {
+        assert!(port_taken("main: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 8080"));
+        assert!(port_taken("bind: Address already in use"));
+        assert!(port_taken("Only one usage of each socket address (protocol/network address/port) is normally permitted."));
+        assert!(!port_taken("llama_model_load: error loading model: failed to load model"));
+        assert!(!port_taken(""));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tries_another_port_when_its_taken() {
+        let e = Engine::default();
+        let log = log_path();
+        let mut ports = Vec::new();
+        let load = e.load(Path::new("/m.gguf"), &log, |port, _| {
+            ports.push(port);
+            if ports.len() < 3 {
+                return failing(&log, "main: couldn't bind HTTP server socket, hostname: 127.0.0.1, port: 8080");
+            }
+            answering(port, std::sync::Arc::new(true.into()))
+        });
+        let target = tokio::time::timeout(Duration::from_secs(10), load).await.unwrap().unwrap();
+        assert_eq!(ports.len(), 3);
+        assert!(target.url.contains(&format!(":{}/", ports[2])), "{}", target.url);
+        e.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn gives_up_on_ports_after_a_few_and_on_anything_else_at_once() {
+        let e = Engine::default();
+        let log = log_path();
+        let mut spawns = 0;
+        let taken = e.load(Path::new("/m.gguf"), &log, |_, _| {
+            spawns += 1;
+            failing(&log, "bind: Address already in use")
+        });
+        let err = tokio::time::timeout(Duration::from_secs(10), taken).await.unwrap().unwrap_err();
+        assert_eq!(spawns, PORT_TRIES);
+        assert!(err.to_string().contains("couldn't get a port"), "{err}");
+        let mut spawns = 0;
+        let broken = e.load(Path::new("/m.gguf"), &log, |_, _| {
+            spawns += 1;
+            failing(&log, "llama_model_load: error loading model: failed to load model")
+        });
+        let err = tokio::time::timeout(Duration::from_secs(5), broken).await.unwrap().unwrap_err();
+        assert_eq!(spawns, 1);
+        assert!(err.to_string().contains("failed to load model"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn waits_for_its_own_server_not_another_on_its_port() {
+        let e = std::sync::Arc::new(Engine::default());
+        let ours = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let load = tokio::spawn({
+            let (e, ours) = (e.clone(), ours.clone());
+            async move { e.load(Path::new("/m.gguf"), &log_path(), |port, _| answering(port, ours.clone())).await }
+        });
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(!load.is_finished(), "taken for loaded by another server's /health");
+        ours.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap();
+        e.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_why_a_loaded_server_stopped() {
+        let e = Engine::default();
+        let log = log_path();
+        let load = e.load(Path::new("/m.gguf"), &log, |port, _| {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+            listener.set_nonblocking(true)?;
+            tokio::spawn(answer(tokio::net::TcpListener::from_std(listener)?, std::sync::Arc::new(true.into())));
+            std::fs::write(&log, "ggml_abort: out of memory\n")?;
+            Ok(tokio::process::Command::new("sh").args(["-c", "sleep 0.5; exit 3"]).kill_on_drop(true).spawn()?)
+        });
+        tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap();
+        assert_eq!(e.died(), None);
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(e.died().as_deref(), Some("exit status: 3. ggml_abort: out of memory"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_load_its_caller_stopped_waiting_for_carries_on_for_the_next() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        let e = Engine::default();
+        let (model, log) = (Path::new("/m.gguf"), log_path());
+        let spawned = Arc::new(AtomicUsize::new(0));
+        let port = Arc::new(StdMutex::new(None));
+        let first = e.load(model, &log, |p, _| {
+            spawned.fetch_add(1, Ordering::SeqCst);
+            *port.lock().unwrap() = Some(p);
+            sleeper()
+        });
+        // Given up on, as a newer request would.
+        assert!(tokio::time::timeout(Duration::from_millis(300), first).await.is_err());
+        assert!(e.is_running());
+        let p = port.lock().unwrap().unwrap();
+        tokio::spawn(answer_ok(tokio::net::TcpListener::bind(("127.0.0.1", p)).await.unwrap()));
+        let next = e.load(model, &log, |_, _| {
+            spawned.fetch_add(1, Ordering::SeqCst);
+            sleeper()
+        });
+        let target = tokio::time::timeout(Duration::from_secs(5), next).await.unwrap().unwrap();
+        assert_eq!(spawned.load(Ordering::SeqCst), 1);
+        assert!(target.url.contains(&format!(":{p}/")), "{}", target.url);
+        e.stop().await;
     }
 }

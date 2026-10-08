@@ -363,14 +363,15 @@ export function onAuthLost(fn: () => void) {
   authLost = fn;
 }
 
-/** Calls the Spotify Web API through the backend, which owns the token. */
-export function api<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<T> {
+/** Calls the Spotify Web API through the backend, which owns the token. `once`: not sent again after a server error,
+ * for a request Spotify may have carried out before failing (adding songs to a playlist would add them twice). */
+export function api<T>(method: string, path: string, opts: { query?: Query; body?: unknown; once?: boolean } = {}): Promise<T> {
   const query = opts.query
     ? Object.entries(opts.query)
         .filter(([, v]) => v !== undefined && v !== null)
         .map(([k, v]) => [k, String(v)] as [string, string])
     : undefined;
-  return invoke<T>("api", { method, path, query, body: opts.body }).catch((e) => {
+  return invoke<T>("api", { method, path, query, body: opts.body, once: opts.once }).catch((e) => {
     if (isAppError(e) && e.kind === "not_signed_in") authLost?.();
     throw e;
   });

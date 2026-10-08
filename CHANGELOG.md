@@ -9,6 +9,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 - Asking the DJ for a set understands short artist names like U2, decades in words ("the eighties") and single
   years, and "but" both ways: "no Drake, but Future", "Drake but also Future".
+- Picking another voice for the DJ no longer stops the music: the set carries on, and the DJ switches to the new
+  voice after any line it already has ready. Only a voice that still has to download ends the session.
 
 ### Fixed
 
@@ -19,6 +21,16 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   from a timer it left running.
 - When the DJ's model runs out of room or declines to answer, the DJ says so, instead of that it "didn't answer in
   JSON"; and an API key a provider repeats in an error is never shown in full.
+- Quitting while the DJ's model is still loading no longer leaves it running in the background, and turning the DJ
+  off or removing its files no longer waits for the model to finish loading.
+- After you skip a set or ask for another, the DJ's model drops the set it was still working on, instead of making
+  the new one wait behind it.
+- The DJ talks to a model on your computer directly, even when your system sends web traffic through a proxy, and
+  says plainly when a model server can't be reached or its model stopped.
+- A busy or rate-limited model is asked once more after a short wait, before the DJ talks from a template; when the
+  provider asks for a longer wait, the DJ says how long.
+- When the DJ looks songs up before picking, every song gets Spotify's facts first, so a slow MusicBrainz no longer
+  leaves the last songs with nothing.
 
 ## 1.3.0 - 2026-10-06
 

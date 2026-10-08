@@ -213,7 +213,8 @@ If a request fails anyway, the DJ talks from a template and says why in the log.
 
 With a downloaded model, the model and the voice run on your computer. Your listening, your instructions and what
 the DJ says never leave it, except to a model server you set up yourself. The local model server listens on
-127.0.0.1 only, behind a random key, and is started with `--offline`.
+127.0.0.1 only, behind a random key, and is started with `--offline`. The app talks to it, and to a model server of
+your own on this computer, directly, never through a proxy set for your system.
 
 With a cloud model, what the DJ is asked goes to that provider: your first name, the songs it's choosing from
 with when you played or liked them, what it looked up about them, what it said before, and your instructions.
