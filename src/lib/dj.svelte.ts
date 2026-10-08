@@ -14,29 +14,31 @@ import { listen } from "@tauri-apps/api/event";
 import {
   buildPool,
   choicesFor,
-  fallbackPick,
-  INSTRUCTIONS_MAX,
+  MIN_CHOICES,
   nextInSet,
   nextSegment,
-  readAnswer,
-  segmentMessages,
-  MIN_CHOICES,
   REQUEST_MAX,
   requestChoices,
   requestScore,
   requestSegment,
+  type Candidate,
+  type Reactions,
   type Segment,
+  type SegmentId,
+} from "./djPicks";
+import {
+  fallbackPick,
+  INSTRUCTIONS_MAX,
   lookUpMessages,
   lookUpsAsked,
   lookUpTool,
-  songFacts,
-  type SegmentAsk,
+  readAnswer,
+  segmentMessages,
   segmentSchema,
-  type Candidate,
+  songFacts,
   type Pick,
-  type Reactions,
-  type SegmentId,
-} from "./djPicks";
+  type SegmentAsk,
+} from "./djTalk";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, vocals, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";

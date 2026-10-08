@@ -5,7 +5,8 @@
   import Icon from "../components/Icon.svelte";
   import OnAirLamp from "../components/OnAirLamp.svelte";
   import { dj, type DjSet } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX, REQUEST_MAX } from "../lib/djPicks";
+  import { REQUEST_MAX } from "../lib/djPicks";
+  import { INSTRUCTIONS_MAX } from "../lib/djTalk";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";

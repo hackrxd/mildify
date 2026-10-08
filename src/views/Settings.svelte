@@ -3,7 +3,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
   import { dj } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX } from "../lib/djPicks";
+  import { INSTRUCTIONS_MAX } from "../lib/djTalk";
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
