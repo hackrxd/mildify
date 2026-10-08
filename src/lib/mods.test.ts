@@ -301,7 +301,14 @@ describe("extensions", () => {
     modules["a.js"] = { default: (api: ExtensionApi) => void (ns = api) };
     await boot();
     await mods.startExtensions();
+    const ipc = await import("./ipc");
+    void ns!.api("GET", "/me");
+    expect(ipc.api).toHaveBeenCalledWith("GET", "/me", undefined);
+    vi.mocked(ipc.api).mockClear();
     await mods.setEnabled("a.js", false);
+    // Nothing more goes to Spotify for it.
+    await expect(ns!.api("GET", "/me/player/queue")).rejects.toMatchObject({ kind: "cancelled" });
+    expect(ipc.api).not.toHaveBeenCalled();
     const effect = vi.fn();
     const unloaded = vi.fn();
     const removers = [
