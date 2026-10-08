@@ -290,6 +290,15 @@ const NEGATIONS = new Set([
 ]);
 /** Words that turn them back, unless right after one: "no Drake, more Radiohead", "less Drake and more Future". */
 const TURNS = new Set(["more", "instead", "only", "just", "rather"]);
+/** Short words that are never a whole artist's name worth matching. */
+const SHORT_FILLER = new Set([
+  "a", "i", "me", "my", "it", "of", "to", "in", "on", "up", "an", "or", "so", "do", "is", "be", "we", "us", "at",
+  "as", "if", "pl", "pls", "im", "id", "ok", "oh",
+]);
+/** Decades said in words, by their first year. */
+const DECADE_WORDS: Record<string, number> = {
+  fifties: 1950, sixties: 1960, seventies: 1970, eighties: 1980, nineties: 1990, noughties: 2000, aughts: 2000,
+};
 
 /** How well a song fits what a request names: its artists, album, title or decade. Below zero for what the request
  * says to leave out. */
@@ -298,17 +307,29 @@ export function requestScore(request: string): (c: Candidate) => number {
   const tokens = request.toLowerCase().replace(/[\u2018\u2019]/g, "'").match(/[\p{L}\p{N}']+|[.,;!?]/gu) ?? [];
   const wanted: string[] = [];
   const unwanted: string[] = [];
-  /** Decades, by their first year. */
-  const decades: number[] = [];
-  const notDecades: number[] = [];
+  /** Words too short to find in titles, only ever a whole artist's name: "U2", "MØ". */
+  const short: string[] = [];
+  const notShort: string[] = [];
+  /** Decades and years, by their first year and how many years they span. */
+  const spans: [number, number][] = [];
+  const notSpans: [number, number][] = [];
   let against = false;
+  /** Whether the clause a comma just ended was against, for a "but" after it: "no Drake, but Future". */
+  let ended = false;
   let prev = "";
   for (const t of tokens) {
     const w = t.replace(/'/g, "");
     const after = prev;
     prev = w;
-    // "Nothing but Radiohead" is only Radiohead.
-    if (w === "but" && after === "nothing") {
+    if (w === "but") {
+      // "Nothing but Radiohead" is only Radiohead; "anything but Drake" leaves Drake out; "no Drake but Future"
+      // turns back to Future.
+      const was: boolean = /^[.,;!?]$/.test(after) ? ended : against;
+      against = NEGATIONS.has(after) ? false : !was;
+      continue;
+    }
+    // "Drake but also Future".
+    if (w === "also" && after === "but") {
       against = false;
       continue;
     }
@@ -317,17 +338,24 @@ export function requestScore(request: string): (c: Candidate) => number {
       continue;
     }
     if (/^[.,;!?]$/.test(w) || (TURNS.has(w) && !NEGATIONS.has(after))) {
+      if (/^[.,;!?]$/.test(w)) ended = against;
       against = false;
       continue;
     }
-    const decade = decadeOf(w);
-    if (decade !== null) {
-      (against ? notDecades : decades).push(decade);
+    const span = spanOf(w);
+    if (span) {
+      (against ? notSpans : spans).push(span);
       continue;
     }
-    if (w.length < 3 || FILLER.has(w)) continue;
+    if (w.length < 3) {
+      if (!SHORT_FILLER.has(w)) (against ? notShort : short).push(w);
+      continue;
+    }
+    if (FILLER.has(w)) continue;
     (against ? unwanted : wanted).push(w);
   }
+  const whole = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  const named = (c: Candidate, w: string) => c.artists.some((a) => whole(a) === w);
   const has = (text: string, w: string) => text.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w);
   const about = (c: Candidate, w: string) =>
     (c.artists.some((a) => has(a, w)) ? 3 : 0) + (has(c.album, w) ? 2 : 0) + (has(c.name, w) ? 1 : 0);
@@ -335,20 +363,31 @@ export function requestScore(request: string): (c: Candidate) => number {
     let n = 0;
     for (const w of wanted) n += about(c, w);
     for (const w of unwanted) if (about(c, w) > 0) n -= 10;
+    for (const w of short) if (named(c, w)) n += 3;
+    for (const w of notShort) if (named(c, w)) n -= 10;
     const year = Number(c.year);
-    const inDecade = (d: number) => year >= d && year < d + 10;
-    if (decades.some(inDecade)) n += 2;
-    if (notDecades.some(inDecade)) n -= 10;
+    const within = ([from, years]: [number, number]) => year >= from && year < from + years;
+    if (spans.some(within)) n += 2;
+    if (notSpans.some(within)) n -= 10;
     return n;
   };
 }
 
-/** The decade a word names ("90s", "1980s", "2010s"), as its first year. */
+/** The decade a word names ("90s", "1980s", "2010s", "eighties"), as its first year. */
 function decadeOf(word: string): number | null {
+  if (word in DECADE_WORDS) return DECADE_WORDS[word];
   const m = word.match(/^(19|20)?(\d)0s$/);
   if (!m) return null;
   const century = m[1] ? Number(m[1]) * 100 : Number(m[2]) >= 3 ? 1900 : 2000;
   return century + Number(m[2]) * 10;
+}
+
+/** The years a word names, as the first and how many: a decade ("90s", "the eighties") or a year ("2012"). */
+function spanOf(word: string): [number, number] | null {
+  const decade = decadeOf(word);
+  if (decade !== null) return [decade, 10];
+  const year = /^(19[5-9]\d|20[0-3]\d)$/.test(word) ? Number(word) : null;
+  return year === null ? null : [year, 1];
 }
 
 /** The songs a request can choose from: those whose title, artist, album or decade it names first, then a spread

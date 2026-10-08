@@ -183,6 +183,28 @@ describe("requests", () => {
     expect(score("90s, not the 2000s", "spotify:track:n1")).toBeGreaterThan(0);
   });
 
+  it("knows short artist names, \"but\" turning a clause around, decades in words and single years", () => {
+    const u2 = { ...pool[0], uri: "spotify:track:u2", name: "One", artists: ["U2"], album: "Achtung Baby", year: "1991" };
+    const me = { ...pool[0], uri: "spotify:track:me", name: "Me", artists: ["Me"], album: "x", year: "2001" };
+    const score = (request: string, c: Candidate) => requestScore(request)(c);
+    const rh = pool.find((c) => c.uri === "spotify:track:rh1")!;
+    expect(score("some U2 please", u2)).toBeGreaterThan(0);
+    expect(score("no U2", u2)).toBeLessThan(0);
+    // Short words are only whole names, and the usual short words never are.
+    expect(score("play me something", me)).toBe(0);
+    expect(score("Radiohead but also U2", u2)).toBeGreaterThan(0);
+    expect(score("Radiohead but also U2", rh)).toBeGreaterThan(0);
+    expect(score("no U2 but Radiohead", rh)).toBeGreaterThan(0);
+    expect(score("no U2 but Radiohead", u2)).toBeLessThan(0);
+    expect(score("no U2, but Radiohead", rh)).toBeGreaterThan(0);
+    expect(score("anything but Radiohead", rh)).toBeLessThan(0);
+    expect(score("the nineties", u2)).toBeGreaterThan(0);
+    expect(score("anything but the nineties", u2)).toBeLessThan(0);
+    expect(score("songs from 1991", u2)).toBeGreaterThan(0);
+    expect(score("songs from 1992", u2)).toBe(0);
+    expect(score("the 2000s", me)).toBeGreaterThan(0);
+  });
+
   it("reads contractions and typographic apostrophes, and \"nothing but\" as only", () => {
     const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
     expect(score("don't play Radiohead", "spotify:track:rh1")).toBeLessThan(0);
