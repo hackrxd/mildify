@@ -356,6 +356,10 @@ class Mods {
   }
 
   #api(mod: ModInfo, url: string, running: Running): ExtensionApi {
+    // Once turned off (or edited, or reloaded), the API it was handed adds nothing: a timer or callback the
+    // extension left behind can't put things back that nothing would take away again.
+    const live = () => this.#running.get(mod.id) === running;
+    const none = () => {};
     const track = (fn: () => void) => {
       running.cleanups.push(fn);
       let done = false;
@@ -374,14 +378,17 @@ class Mods {
       router,
       session,
       api,
-      toasts: { show: (message, tone = "info") => toasts.show(message, tone) },
+      toasts: { show: (message, tone = "info") => void (live() && toasts.show(message, tone)) },
       watch: (fn) =>
-        track(
-          $effect.root(() => {
-            $effect(fn);
-          }),
-        ),
+        live()
+          ? track(
+              $effect.root(() => {
+                $effect(fn);
+              }),
+            )
+          : none,
       addStyle: (css) => {
+        if (!live()) return none;
         const style = document.createElement("style");
         style.dataset.nativifyExtension = mod.id;
         style.textContent = css;
@@ -394,16 +401,19 @@ class Mods {
         remove: (k) => save(key(k), null),
       },
       addTrackMenuItem: (item) => {
+        if (!live()) return none;
         const entry = { ...item, extension: mod.id };
         this.trackMenuItems = [...this.trackMenuItems, entry];
         return track(() => (this.trackMenuItems = this.trackMenuItems.filter((i) => i !== entry)));
       },
       addPage: (page) => {
+        if (!live()) return none;
         const registered: RegisteredPage = { ...page, key: `${mod.id}/${page.id}`, extension: mod.id };
         this.pages = [...this.pages.filter((p) => p.key !== registered.key), registered];
         return track(() => (this.pages = this.pages.filter((p) => p !== registered)));
       },
-      onUnload: (fn) => void running.cleanups.push(fn),
+      // Already unloaded: it runs now.
+      onUnload: (fn) => (live() ? void running.cleanups.push(fn) : fn()),
     };
   }
 }

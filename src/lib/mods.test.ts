@@ -1,3 +1,4 @@
+import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModInfo, ModList } from "./ipc";
 import type { ExtensionApi } from "./mods.svelte";
@@ -291,6 +292,36 @@ describe("extensions", () => {
     expect(mods.trackMenuItems).toEqual([]);
     expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
     expect(localStorage.getItem("nativify:extensions")).toBe("[]");
+  });
+
+  it("can't add anything once turned off, from a timer or callback left behind", async () => {
+    list.extensions = [mod("a.js")];
+    localStorage.setItem("nativify:extensions", '["a.js"]');
+    let ns: ExtensionApi | undefined;
+    modules["a.js"] = { default: (api: ExtensionApi) => void (ns = api) };
+    await boot();
+    await mods.startExtensions();
+    await mods.setEnabled("a.js", false);
+    const effect = vi.fn();
+    const unloaded = vi.fn();
+    const removers = [
+      ns!.addStyle(".late { color: red }"),
+      ns!.addPage({ id: "late", label: "Late", render: () => {} }),
+      ns!.addTrackMenuItem({ label: "Late", action: () => {} }),
+      ns!.watch(effect),
+    ];
+    ns!.toasts.show("still here");
+    ns!.onUnload(unloaded);
+    flushSync();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
+    expect(mods.pages).toEqual([]);
+    expect(mods.trackMenuItems).toEqual([]);
+    expect(effect).not.toHaveBeenCalled();
+    expect(show).not.toHaveBeenCalledWith("still here", "info");
+    // Its own clean-up still runs, at once.
+    expect(unloaded).toHaveBeenCalledOnce();
+    for (const remove of removers) remove();
   });
 
   it("removers returned by the API only run once", async () => {
