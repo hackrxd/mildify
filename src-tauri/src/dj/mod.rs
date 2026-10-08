@@ -600,10 +600,17 @@ impl Dj {
             (None, Some(schema)) => Ask::Json(schema),
             (None, None) => return Err(AppError::Other("Ask the DJ's model for JSON or look-ups".into())),
         };
+        let kind = if tools.is_some() { "look-ups" } else { "picks" };
+        let started = Instant::now();
         let target = self.target(cfg).await?;
+        let ready = started.elapsed().as_secs_f64();
         self.engine.touch();
         let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
         self.engine.touch();
+        // For tuning how early sets are picked: the model's own time, and any wait for it to be ready.
+        let asked = started.elapsed().as_secs_f64() - ready;
+        let outcome = if answer.is_ok() { "answered" } else { "failed" };
+        log::info!("DJ model ({}) {outcome} {kind} in {asked:.1} s{}", cfg.provider, waited(ready));
         answer
     }
 
@@ -748,9 +755,20 @@ impl install::Progress for Reporter {
     }
 }
 
+/// ", after 3.2 s getting it ready", when the model had to be loaded or reached first.
+fn waited(secs: f64) -> String {
+    if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_how_long_getting_the_model_ready_took_only_when_it_did() {
+        assert_eq!(waited(0.1), "");
+        assert_eq!(waited(3.24), ", after 3.2 s getting it ready");
+    }
 
     fn dj() -> Dj {
         let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
