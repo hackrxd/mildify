@@ -107,7 +107,9 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, `onUnload` callbacks) and calls the function it returned. Editing it (for a folder extension,
+items, watchers, `onUnload` callbacks) and calls the function it returned. From then on, the `ns` it was given
+does nothing: a timer or event handler the extension left running can't add styles, pages, menu items, watchers
+or toasts back, and an `onUnload` registered then runs at once. Editing it (for a folder extension,
 any file in the folder) restarts it the next time the app window gets focus. A module without a default export just runs once; it
 can't be undone, so turning it off or editing it takes effect when the window reloads (Settings
 offers a **Reload window** button then).
