@@ -652,7 +652,7 @@ impl Dj {
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                if engine.idle(Instant::now()) && engine.is_running().await {
+                if engine.idle(Instant::now()) && engine.is_running() {
                     log::info!("DJ: unloading the model after {} idle minutes", engine::IDLE.as_secs() / 60);
                     engine.stop().await;
                 }

@@ -21,6 +21,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   from a timer it left running.
 - When the DJ's model runs out of room or declines to answer, the DJ says so, instead of that it "didn't answer in
   JSON"; and an API key a provider repeats in an error is never shown in full.
+- Quitting while the DJ's model is still loading no longer leaves it running in the background, and turning the DJ
+  off or removing its files no longer waits for the model to finish loading.
 
 ## 1.3.0 - 2026-10-06
 
