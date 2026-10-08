@@ -5,6 +5,10 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Fixed
+
+- Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
+
 ## 1.3.0 - 2026-10-06
 
 ### Added
