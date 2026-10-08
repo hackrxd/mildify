@@ -119,12 +119,13 @@ another device. Songs it already added to Spotify's queue stay there; Spotify ha
 
 While the DJ is on, **Ask for the next set** on the DJ page takes a request in your own words: "something
 upbeat", "more Radiohead", "the 90s", "songs for a rainy evening". The DJ offers its model the songs from your
-listening that the request names (by artist, album, title or decade) first, then a spread of the rest for it to
+listening that the request names (by artist, album, title, decade or year: "U2", "the eighties", "2012") first, then a spread of the rest for it to
 judge a mood or genre by, and the set it picks says it's your request. If the next set is already picked but not yet
 introduced, the request takes its place; once its introduction has started, the request is the set after it. Never
 mind takes a request back.
 
-Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, more Future". When the
+Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, but Future". A "but"
+can turn the other way too: "Drake but also Future", "nothing but Radiohead". When the
 model doesn't answer, the DJ plays only songs the request names, and if there aren't enough of those it plays an
 ordinary set while your request waits for the next one.
 
