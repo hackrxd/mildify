@@ -12,6 +12,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ### Fixed
 
+- The DJ's Qwen3 4B model now downloads from a fixed version with a checked hash, like everything else it
+  downloads, so a later change to the file can't slip in.
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.
 - An extension you turn off can no longer add styles, pages or menu items back from a timer it left running.
 - When the DJ's model runs out of room or declines to answer, the DJ says so, instead of that it "didn't answer in
