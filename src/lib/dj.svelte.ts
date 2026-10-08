@@ -315,13 +315,15 @@ class Dj {
   }
 
   async configure(patch: Partial<DjConfig>) {
-    const switching = patch.provider !== undefined || patch.model !== undefined || patch.voice !== undefined;
+    // Another model ends the session. A new voice carries on, the next line in it, unless it has to download first.
+    const switching = patch.provider !== undefined || patch.model !== undefined;
     if (patch.enabled === false || switching) this.stop();
     try {
       this.status = await backend.djConfigure(patch);
     } catch (e) {
       toasts.error(e);
     }
+    if (patch.voice !== undefined && !this.ready) this.stop();
   }
 
   /** Saves a cloud provider's API key in the system keychain, or removes it with null. Removing the key the DJ is

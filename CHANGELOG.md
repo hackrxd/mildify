@@ -9,6 +9,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 - Asking the DJ for a set understands short artist names like U2, decades in words ("the eighties") and single
   years, and "but" both ways: "no Drake, but Future", "Drake but also Future".
+- Picking another voice for the DJ no longer stops the music: the set carries on, and the DJ's next line is in the
+  new voice. Only a voice that still has to download ends the session.
 
 ### Fixed
 
