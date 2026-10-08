@@ -694,26 +694,9 @@ class Dj {
       return;
     }
     const run = ++this.#run;
-    this.#invariantsBroken.clear();
-    this.#voiceWarned = false;
-    this.#modelWarned = false;
-    this.modelTrouble = null;
-    this.#setsThisSession = 0;
-    this.requested = null;
-    this.#setSkipped = null;
-    this.#leftSet = null;
+    // Playback is at rest already: there's no session to start from but a stopped one.
+    this.#resetShow();
     this.phase = "starting";
-    this.said = [];
-    this.current = null;
-    this.upNext = null;
-    this.announced = null;
-    this.#segments = [];
-    this.#skippedArtists = new Set();
-    this.#outOfSongs = false;
-    this.#liked = [];
-    this.#skippedSongs = [];
-    this.#told = new Set();
-    this.#likeSeen.clear();
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
     // The DJ plays here; music on another device would play on under its voice.
@@ -766,6 +749,32 @@ class Dj {
       if (modes.repeat !== "off") backend.device({ action: "repeat", mode: modes.repeat }).catch(() => {});
     }
     this.phase = "off";
+    this.#resetPlayback();
+    backend.djRelease().catch(() => {});
+    if (import.meta.env.DEV) this.#checkInvariants();
+  }
+
+  /** What a session remembers about its show: what was said and played, liked and skipped, and what it's warned
+   * about. A new session starts it afresh; stopping keeps it, for the DJ page to show. */
+  #resetShow() {
+    this.#invariantsBroken.clear();
+    this.#voiceWarned = false;
+    this.#modelWarned = false;
+    this.modelTrouble = null;
+    this.#setsThisSession = 0;
+    this.said = [];
+    this.#segments = [];
+    this.#skippedArtists = new Set();
+    this.#outOfSongs = false;
+    this.#liked = [];
+    this.#skippedSongs = [];
+    this.#told = new Set();
+    this.#likeSeen.clear();
+  }
+
+  /** Where the playing is: the sets, the talk, the queue, the hand-over and its cues, what the music is held
+   * for. Stopping clears all of it. */
+  #resetPlayback() {
     this.activity = null;
     this.speaking = false;
     this.caption = null;
@@ -804,8 +813,9 @@ class Dj {
     this.#goingBack = null;
     this.#foreignSince = null;
     this.#remoteSince = null;
-    backend.djRelease().catch(() => {});
-    if (import.meta.env.DEV) this.#checkInvariants();
+    this.#lastVocals = null;
+    this.#lastPos = 0;
+    this.#lastDuration = 0;
   }
 
   #after(ms: number, fn: () => void) {
@@ -1214,7 +1224,8 @@ class Dj {
         !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.#preparing &&
           !this.#rush && this.#queued === "no" && !this.#cues.length && !this.#speechCues.length && !this.#bringIn &&
           !this.#plannedOn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet && !this.#holdFor &&
-          !this.#muteAtEnd,
+          !this.#muteAtEnd && !this.#queueFor && !this.#leftSet && !this.#setSkipped && !this.#lining &&
+          !this.#setEnds && !this.#heading && !this.requested,
         "stopped with playback state left",
       );
     }
