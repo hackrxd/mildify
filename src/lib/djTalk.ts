@@ -47,7 +47,7 @@ export interface SegmentAsk {
   setNumber?: number;
   /** What the DJ said before these, most recent last, so it doesn't say it again. */
   earlier?: string[];
-  /** The DJ may name every song it picked, not just the first. */
+  /** The DJ may name every song it picked, not just the first; not while it picks them as it goes (`live`). */
   nameAll?: boolean;
   /** What the DJ looked up about some of the choices, as `songFacts` lines. */
   lookedUp?: string[];
@@ -83,7 +83,8 @@ function persona(ask: SegmentAsk, opening: boolean): string {
     "- Introduce the first song you picked by its title and artist, and say why it's here using only the",
     "  facts given or looked up (when they played it, when they liked it, what it is).",
   ];
-  if (!ask.nameAll) system.push("- Name only that first song. Don't read out the rest of the set: they'll hear it as it comes.");
+  if (ask.live) system.push("- Name only that first song: you pick the rest as the listener goes, so they aren't settled yet.");
+  else if (!ask.nameAll) system.push("- Name only that first song. Don't read out the rest of the set: they'll hear it as it comes.");
   if (!opening) {
     system.push(
       "- The show is already on. Don't greet the listener, welcome them or open the show again: carry on between",
@@ -148,7 +149,6 @@ export function segmentMessages(ask: SegmentAsk): DjMessage[] {
     `Pick ${SET_MIN} to ${SET_MAX} of them by number, in the order to play them. Give the segment a short name,`,
     "then write what you say before the first song you picked. Answer in JSON.",
   ];
-  if (ask.live) user.push("Name only the first song when you talk: you pick the rest as the listener goes.");
   return [
     { role: "system", content: persona(ask, opening) },
     { role: "user", content: user.join("\n") },

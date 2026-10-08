@@ -354,6 +354,15 @@ describe("what the DJ is asked", () => {
     expect(lastPrompt()[0].content).not.toContain("Name only that first song");
   });
 
+  it("names only the first song while it picks songs as it goes, and keeps the setting for when it doesn't", async () => {
+    dj.setNameAll(true);
+    dj.setLive(true);
+    player.isPlaying = false;
+    await dj.start();
+    expect(lastPrompt()[0].content).toContain("Name only that first song: you pick the rest as the listener goes");
+    expect(dj.nameAll).toBe(true);
+  });
+
   describe("with a model that can look songs up", () => {
     const info = (uri: string) => ({
       uri,

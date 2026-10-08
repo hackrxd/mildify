@@ -84,7 +84,7 @@ describe("segmentMessages", () => {
   });
 
   it("tells the model what the listener just liked and skipped, and to name only the first song when picking as it goes", () => {
-    const [, user] = segmentMessages({
+    const [system, user] = segmentMessages({
       segment: seg("onRepeat"),
       choices,
       listener: null,
@@ -96,10 +96,10 @@ describe("segmentMessages", () => {
     });
     expect(user.content).toContain('the listener liked "Song 1" by Artist 1.');
     expect(user.content).toContain('They skipped "Song 2" by Artist 2; "Song 3" by Artist 3.');
-    expect(user.content).toContain("Name only the first song");
-    const [, plain] = segmentMessages({ segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW });
+    expect(system.content).toContain("Name only that first song: you pick the rest as the listener goes");
+    const [plainSystem, plain] = segmentMessages({ segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW });
     expect(plain.content).not.toContain("liked \"");
-    expect(plain.content).not.toContain("Name only the first song");
+    expect(plainSystem.content).not.toContain("you pick the rest as the listener goes");
   });
 
   it("carries on the show after the opening: no new hello, and nothing it said before again", () => {
@@ -125,12 +125,17 @@ describe("segmentMessages", () => {
     expect(opening.content).not.toContain("Don't greet");
   });
 
-  it("names only the first song unless it's allowed to name them all", () => {
+  it("names only the first song unless it's allowed to name them all, and not while it picks them as it goes", () => {
     const ask = { segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW };
     const [system] = segmentMessages(ask);
     expect(system.content).toContain("Name only that first song. Don't read out the rest of the set");
     const [all] = segmentMessages({ ...ask, nameAll: true });
     expect(all.content).not.toContain("Name only that first song");
+    const [live, liveUser] = segmentMessages({ ...ask, nameAll: true, live: true });
+    expect(live.content).toContain("Name only that first song: you pick the rest as the listener goes");
+    expect(liveUser.content).not.toContain("Name only");
+    // The look-up round is told the same.
+    expect(lookUpMessages({ ...ask, nameAll: true, live: true })[0].content).toContain("Name only that first song");
   });
 
   it("gives what was looked up beside the list", () => {
