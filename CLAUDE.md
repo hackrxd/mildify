@@ -91,7 +91,8 @@ when a cloud model is asked); `voice.rs` reads lines to WAV
 and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
 output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
-segments from top tracks, recent plays and liked songs and asks for `{name, songs, talk}` against a JSON schema
+segments from top tracks, recent plays and liked songs (read by `djListening.ts`), and `djTalk.ts` asks for
+`{name, songs, talk}` against a JSON schema
 (llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates. Later
 sets are told their number and what was said before, so they don't greet again, and only the first song is named
 unless `dj.nameAll`. When `DjStatus.tools` says the model can call tools, a first request offers `look_up_songs`;
