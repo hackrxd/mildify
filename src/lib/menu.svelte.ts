@@ -1,4 +1,5 @@
 // A single app-wide context menu.
+import type { Attachment } from "svelte/attachments";
 import { toasts } from "./toasts.svelte";
 
 export interface MenuItem {
@@ -27,6 +28,19 @@ class Menu {
 }
 
 export const menu = new Menu();
+
+/** Opens the menu on right-click, or the keyboard's menu key, with the items `items` makes as it opens:
+ * `{@attach contextMenu(() => items)}`. Without any, there's no menu. */
+export function contextMenu(items: () => MenuItem[]): Attachment<HTMLElement> {
+  return (el) => {
+    const open = (e: MouseEvent) => {
+      const list = items();
+      if (list.length) menu.show(e, list);
+    };
+    el.addEventListener("contextmenu", open);
+    return () => el.removeEventListener("contextmenu", open);
+  };
+}
 
 /** A menu entry that code from outside the app adds, such as an extension's, for a thing of type T. */
 export interface AddedItem<T> {

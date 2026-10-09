@@ -1,3 +1,4 @@
+import { flushSync } from "svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const toasts = vi.hoisted(() => ({ error: vi.fn() }));
@@ -64,5 +65,31 @@ describe("addedItems", () => {
     expect(toasts.error).toHaveBeenCalledWith(new Error("failed at once"));
     later.action();
     await vi.waitFor(() => expect(toasts.error).toHaveBeenCalledWith(new Error("failed later")));
+  });
+});
+
+describe("contextMenu", () => {
+  it("opens the menu where it's right-clicked, with items made as it opens", () => {
+    const el = document.createElement("div");
+    let label = "First";
+    const detach = m.contextMenu(() => [{ label, action: () => {} }])(el);
+    label = "Made as it opens";
+    const e = new MouseEvent("contextmenu", { clientX: 30, clientY: 40, cancelable: true });
+    el.dispatchEvent(e);
+    flushSync();
+    expect(e.defaultPrevented).toBe(true);
+    expect([m.menu.open, m.menu.x, m.menu.y]).toEqual([true, 30, 40]);
+    expect(m.menu.items.map((i) => i.label)).toEqual(["Made as it opens"]);
+    m.menu.close();
+    (detach as () => void)();
+    el.dispatchEvent(new MouseEvent("contextmenu"));
+    expect(m.menu.open).toBe(false);
+  });
+
+  it("opens no menu with nothing in it", () => {
+    const el = document.createElement("div");
+    m.contextMenu(() => [])(el);
+    el.dispatchEvent(new MouseEvent("contextmenu"));
+    expect(m.menu.open).toBe(false);
   });
 });
