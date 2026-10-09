@@ -130,39 +130,41 @@
 
   {#if djStatus && !djStatus.supported}
     <div class="row"><span class="muted small">The DJ's model and voice aren't built for this computer's processor.</span></div>
-  {:else if dj.enabled && djSettings}
-    <div class="row">
-      <span>
-        {#if djInstall?.running}
-          <span class="label">Downloading {lowerFirst(djInstall.component ?? "the DJ")}…</span>
-          <span class="muted small">
-            {formatBytes(djInstall.received)}{djInstall.total ? ` of ${formatBytes(djInstall.total)}` : ""}
-          </span>
-        {:else if djInstall?.error}
-          <span class="label">Download stopped</span>
-          <span class="small error">{djInstall.error}</span>
-        {:else if djMissing.length}
-          <span class="label">{formatBytes(djToDownload)} left to download</span>
-        {:else if djStatus?.setup}
-          <span class="label">{cloud ? `Set up ${CLOUD_NAMES[cloud]}` : "Set up your model server"}</span>
-          <span class="small error">{djStatus.setup}</span>
-        {:else}
-          <span class="label">Ready</span>
-          <span class="muted small">Start it from the DJ page in the sidebar.</span>
-        {/if}
-      </span>
-      <span class="buttons">
-        {#if djInstall?.running}
-          <button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause</button>
-        {:else if djMissing.length}
-          <button class="btn primary" onclick={() => dj.retry()}>Download</button>
-        {:else if djStatus?.setup}
-          <!-- The fields are right below. -->
-        {:else}
-          <button class="btn quiet" onclick={() => router.go({ name: "dj" })}><Icon name="dj" size={16} /> Open the DJ</button>
-        {/if}
-      </span>
-    </div>
+  {:else if djSettings}
+    {#if dj.enabled}
+      <div class="row">
+        <span>
+          {#if djInstall?.running}
+            <span class="label">Downloading {lowerFirst(djInstall.component ?? "the DJ")}…</span>
+            <span class="muted small">
+              {formatBytes(djInstall.received)}{djInstall.total ? ` of ${formatBytes(djInstall.total)}` : ""}
+            </span>
+          {:else if djInstall?.error}
+            <span class="label">Download stopped</span>
+            <span class="small error">{djInstall.error}</span>
+          {:else if djMissing.length}
+            <span class="label">{formatBytes(djToDownload)} left to download</span>
+          {:else if djStatus?.setup}
+            <span class="label">{cloud ? `Set up ${CLOUD_NAMES[cloud]}` : "Set up your model server"}</span>
+            <span class="small error">{djStatus.setup}</span>
+          {:else}
+            <span class="label">Ready</span>
+            <span class="muted small">Start it from the DJ page in the sidebar.</span>
+          {/if}
+        </span>
+        <span class="buttons">
+          {#if djInstall?.running}
+            <button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause</button>
+          {:else if djMissing.length}
+            <button class="btn primary" onclick={() => dj.retry()}>Download</button>
+          {:else if djStatus?.setup}
+            <!-- The fields are right below. -->
+          {:else}
+            <button class="btn quiet" onclick={() => router.go({ name: "dj" })}><Icon name="dj" size={16} /> Open the DJ</button>
+          {/if}
+        </span>
+      </div>
+    {/if}
 
     <label class="row">
       <span>
@@ -321,124 +323,126 @@
       </select>
     </label>
 
-    <label class="row">
-      <span>
-        <span class="label">Allow DJ to talk over beginning of track</span>
-        <span class="muted small">
-          The next song comes in under the last few seconds of the DJ's talk, and the DJ is done before anyone
-          sings. When the song's intro is too short, or its lyrics aren't synced, it starts after the DJ anyway.
-          Off, songs always start once the DJ is done.
+    {#if dj.enabled}
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over beginning of track</span>
+          <span class="muted small">
+            The next song comes in under the last few seconds of the DJ's talk, and the DJ is done before anyone
+            sings. When the song's intro is too short, or its lyrics aren't synced, it starts after the DJ anyway.
+            Off, songs always start once the DJ is done.
+          </span>
         </span>
-      </span>
-      <input type="checkbox" class="switch" checked={dj.overStart} onchange={(e) => dj.setOverStart(e.currentTarget.checked)} />
-    </label>
+        <input type="checkbox" class="switch" checked={dj.overStart} onchange={(e) => dj.setOverStart(e.currentTarget.checked)} />
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">Allow DJ to talk over end of track</span>
-        <span class="muted small">
-          The DJ starts over the last few seconds of a song, once nobody is singing. Off, it waits for the song to
-          finish.
+      <label class="row">
+        <span>
+          <span class="label">Allow DJ to talk over end of track</span>
+          <span class="muted small">
+            The DJ starts over the last few seconds of a song, once nobody is singing. Off, it waits for the song to
+            finish.
+          </span>
         </span>
-      </span>
-      <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
-    </label>
+        <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">How much your DJ talks</span>
-        <span class="muted small">
-          Just play has no voice: the music plays straight through, and what the DJ would say shows as captions.
-          Applies from its next set.
+      <label class="row">
+        <span>
+          <span class="label">How much your DJ talks</span>
+          <span class="muted small">
+            Just play has no voice: the music plays straight through, and what the DJ would say shows as captions.
+            Applies from its next set.
+          </span>
         </span>
-      </span>
-      <select class="field" value={dj.talk} onchange={(e) => isTalkStyle(e.currentTarget.value) && dj.setTalk(e.currentTarget.value)}>
-        <option value="silent">Just play</option>
-        <option value="brief">Brief</option>
-        <option value="normal">Normal</option>
-        <option value="chatty">Chatty</option>
-      </select>
-    </label>
+        <select class="field" value={dj.talk} onchange={(e) => isTalkStyle(e.currentTarget.value) && dj.setTalk(e.currentTarget.value)}>
+          <option value="silent">Just play</option>
+          <option value="brief">Brief</option>
+          <option value="normal">Normal</option>
+          <option value="chatty">Chatty</option>
+        </select>
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">Use my name</span>
-        <span class="muted small">
-          The DJ greets you by name, and says it again now and then: every fourth set on Normal and Chatty. Off, it
-          never does.
+      <label class="row">
+        <span>
+          <span class="label">Use my name</span>
+          <span class="muted small">
+            The DJ greets you by name, and says it again now and then: every fourth set on Normal and Chatty. Off, it
+            never does.
+          </span>
         </span>
-      </span>
-      <input type="checkbox" class="switch" checked={dj.useName} onchange={(e) => dj.setUseName(e.currentTarget.checked)} />
-    </label>
+        <input type="checkbox" class="switch" checked={dj.useName} onchange={(e) => dj.setUseName(e.currentTarget.checked)} />
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">What your DJ calls you</span>
-        <span class="muted small">
-          {#if accountName}
-            Empty, it calls you {accountName}, from your Spotify account.
-          {:else}
-            Empty, it uses no name: the one on your Spotify account doesn't look like one.
-          {/if}
+      <label class="row">
+        <span>
+          <span class="label">What your DJ calls you</span>
+          <span class="muted small">
+            {#if accountName}
+              Empty, it calls you {accountName}, from your Spotify account.
+            {:else}
+              Empty, it uses no name: the one on your Spotify account doesn't look like one.
+            {/if}
+          </span>
         </span>
-      </span>
-      <input
-        class="field"
-        maxlength={NAME_MAX}
-        placeholder={accountName ?? "Your name"}
-        disabled={!dj.useName}
-        bind:value={callMe}
-        onblur={saveCallMe}
-        onkeydown={(e) => e.key === "Enter" && saveCallMe()}
-      />
-    </label>
+        <input
+          class="field"
+          maxlength={NAME_MAX}
+          placeholder={accountName ?? "Your name"}
+          disabled={!dj.useName}
+          bind:value={callMe}
+          onblur={saveCallMe}
+          onkeydown={(e) => e.key === "Enter" && saveCallMe()}
+        />
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">Pick songs as it goes</span>
-        <span class="muted small">
-          The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
-          plays more like it, skip one and that artist sits out, skip two and it moves on to something else. Off, it
-          picks a whole set ahead. Applies from its next set.
+      <label class="row">
+        <span>
+          <span class="label">Pick songs as it goes</span>
+          <span class="muted small">
+            The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
+            plays more like it, skip one and that artist sits out, skip two and it moves on to something else. Off, it
+            picks a whole set ahead. Applies from its next set.
+          </span>
         </span>
-      </span>
-      <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
-    </label>
+        <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
+      </label>
 
-    <label class="row">
-      <span>
-        <span class="label">Let the DJ name every song in a set</span>
-        <span class="muted small">
-          {#if dj.live}
-            While it picks songs as it goes, it introduces only the first song: it hasn't picked the rest yet.
-          {:else}
-            Off, it introduces only the first song and lets the rest of the set speak for itself.
-          {/if}
+      <label class="row">
+        <span>
+          <span class="label">Let the DJ name every song in a set</span>
+          <span class="muted small">
+            {#if dj.live}
+              While it picks songs as it goes, it introduces only the first song: it hasn't picked the rest yet.
+            {:else}
+              Off, it introduces only the first song and lets the rest of the set speak for itself.
+            {/if}
+          </span>
         </span>
-      </span>
-      <input
-        type="checkbox"
-        class="switch"
-        checked={dj.nameAll}
-        disabled={dj.live}
-        onchange={(e) => dj.setNameAll(e.currentTarget.checked)}
-      />
-    </label>
+        <input
+          type="checkbox"
+          class="switch"
+          checked={dj.nameAll}
+          disabled={dj.live}
+          onchange={(e) => dj.setNameAll(e.currentTarget.checked)}
+        />
+      </label>
 
-    <label class="row stacked">
-      <span>
-        <span class="label">Tell your DJ</span>
-        <span class="muted small">How it should talk and what to play from your listening. Applies from its next set.</span>
-      </span>
-      <textarea
-        class="field prose"
-        rows="3"
-        maxlength={INSTRUCTIONS_MAX}
-        placeholder="Talk like a late-night radio host. Keep it short."
-        value={dj.instructions}
-        oninput={(e) => dj.setInstructions(e.currentTarget.value)}
-      ></textarea>
-    </label>
+      <label class="row stacked">
+        <span>
+          <span class="label">Tell your DJ</span>
+          <span class="muted small">How it should talk and what to play from your listening. Applies from its next set.</span>
+        </span>
+        <textarea
+          class="field prose"
+          rows="3"
+          maxlength={INSTRUCTIONS_MAX}
+          placeholder="Talk like a late-night radio host. Keep it short."
+          value={dj.instructions}
+          oninput={(e) => dj.setInstructions(e.currentTarget.value)}
+        ></textarea>
+      </label>
+    {/if}
   {/if}
 
   {#if djStatus?.disk_bytes}
