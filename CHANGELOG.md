@@ -31,6 +31,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
   DJ's settings, instead of only in a notice that goes away.
+- Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
+  and before removing the DJ's files.
 
 ### Fixed
 
