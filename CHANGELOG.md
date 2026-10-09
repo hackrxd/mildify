@@ -9,6 +9,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
+- "What your DJ calls you" and "Use my name", in Settings → AI DJ.
 
 ### Changed
 
@@ -17,6 +18,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - Picking another voice for the DJ no longer stops the music: the set carries on, and the DJ switches to the new
   voice after any line it already has ready. Only a voice that still has to download ends the session.
 - When the DJ's voice fails, what it would have said shows as captions while the music plays on.
+- The DJ no longer calls you by a username from your Spotify account, and after its greeting it says your name only
+  now and then.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
 

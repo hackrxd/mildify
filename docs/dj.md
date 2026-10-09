@@ -88,6 +88,11 @@ keeping the one that brings in the song. With **Just play** the DJ has no voice:
 from song to song, and what it would have said shows as captions for about as long as it would take to say. A change
 applies from its next set.
 
+The DJ greets you by the first name on your Spotify account, when it looks like a name rather than a username, or by
+what you put under **What your DJ calls you** (Settings → AI DJ). After the opening it says your name only now and
+then: every fourth set on Normal and Chatty, and never again on Brief or Just play. With **Use my name** off, it
+never does.
+
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.
 If you've nudged a song's lyric timing in the lyrics view, the DJ goes by that too.
@@ -225,8 +230,9 @@ the DJ says never leave it, except to a model server you set up yourself. The lo
 127.0.0.1 only, behind a random key, and is started with `--offline`. The app talks to it, and to a model server of
 your own on this computer, directly, never through a proxy set for your system.
 
-With a cloud model, what the DJ is asked goes to that provider: your first name, the songs it's choosing from
-with when you played or liked them, what it looked up about them, what it said before, and your instructions.
+With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
+off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
+before, and your instructions.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ## Platforms
