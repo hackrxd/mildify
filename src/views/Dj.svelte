@@ -7,7 +7,7 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
-  import { djLead, providerName } from "../lib/djView";
+  import { djLead, offNote, providerName } from "../lib/djView";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -95,11 +95,7 @@
           </section>
         {:else if !dj.enabled}
           <section class="card" in:rise>
-            <p>
-              The DJ is off. Turning it on downloads what it runs on, about {formatBytes(toDownload)}: a language model, a
-              voice and the programs for them. Nothing is downloaded until then, and you can remove it all again in
-              Settings.
-            </p>
+            <p>{offNote(status)}</p>
             <div class="actions">
               <button class="btn primary" onclick={() => dj.setEnabled(true)}><Icon name="dj" size={18} /> Turn on the DJ</button>
               <button class="btn quiet" onclick={() => router.go({ name: "settings", section: "dj" })}>Choose a model and voice</button>
