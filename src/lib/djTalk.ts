@@ -62,9 +62,34 @@ export function talkLength(style: TalkStyle = "normal"): TalkLength {
   return TALK_STYLES[style];
 }
 
+/** The longest name the DJ calls the listener. */
+export const NAME_MAX = 40;
+/** On Normal and Chatty, the listener's name comes up again every this many sets after the opening's. */
+export const NAME_EVERY = 4;
+
+/** A name the listener gave the DJ to call them, on one line and without marks that could pass for markup. */
+export function cleanName(raw: string): string {
+  return raw.replace(/[\p{C}"“”`*_#<>{}[\]|\\]/gu, " ").replace(/\s+/g, " ").trim().slice(0, NAME_MAX).trim();
+}
+
+/** The first word of a Spotify display name, when it looks like a name: "Sam Smith" gives Sam, a username like
+ * "hackr8027" or "dj_sam" nothing. */
+export function listenerName(displayName: string | null | undefined): string | null {
+  const first = displayName?.trim().split(/\s+/)[0] ?? "";
+  return first.length <= NAME_MAX && /^[\p{Lu}\p{Lt}\p{Lo}][\p{L}\p{M}'’-]*$/u.test(first) ? first : null;
+}
+
+/** Whether a set's line may use the listener's name: always at the opening, then every few sets on Normal and
+ * Chatty, and never again on Brief or Just play. */
+export function saysName(setNumber: number, opening: boolean, talk: TalkStyle = "normal"): boolean {
+  if (opening) return true;
+  return (talk === "normal" || talk === "chatty") && setNumber > 1 && setNumber % NAME_EVERY === 1;
+}
+
 export interface SegmentAsk {
   segment: Segment;
   choices: Candidate[];
+  /** What the DJ calls the listener; none when it doesn't use their name. */
   listener: string | null;
   /** The song playing out as the DJ talks; none for the opening. */
   previous: { name: string; artists: string[] } | null;
@@ -154,6 +179,13 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
   } else {
     const set = ask.setNumber && ask.setNumber > 1 ? `set ${ask.setNumber} of the show` : "a new set in the show";
     where.push(`It's ${partOfDay(now)}. This is ${set}, already under way.`);
+    if (ask.listener) {
+      where.push(
+        saysName(ask.setNumber ?? 0, false, ask.talk)
+          ? `You can call the listener ${ask.listener} this time.`
+          : "Don't call the listener by name this time.",
+      );
+    }
     if (ask.previous) where.push(`You're coming out of "${ask.previous.name}" by ${ask.previous.artists.join(", ")}.`);
     const earlier = (ask.earlier ?? []).filter((t) => t.trim()).slice(-2);
     if (earlier.length) where.push(`What you said before: ${earlier.map((t) => `"${t.trim()}"`).join(" Then: ")}`);

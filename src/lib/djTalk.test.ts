@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   answerOptions,
+  cleanName,
   cleanTalk,
   facts,
   fallbackPick,
@@ -10,12 +11,15 @@ import {
   fence,
   introduced,
   isTalkStyle,
+  listenerName,
   LOOK_UP_MAX,
   lookUpMessages,
   lookUpsAsked,
   lookUpTool,
   readAnswer,
   segmentMessages,
+  NAME_MAX,
+  saysName,
   segmentSchema,
   sentences,
   songFacts,
@@ -123,6 +127,7 @@ describe("segmentMessages", () => {
     expect(user.content).not.toContain("welcome to the show");
     expect(user.content).not.toContain("greet the listener");
     expect(user.content).not.toContain("name is Sam");
+    expect(user.content).toContain("Don't call the listener by name this time.");
     expect(system.content).toContain("Don't greet the listener, welcome them or open the show again");
     // The opening is where it says hello.
     const [opening] = segmentMessages({ segment: seg("onRepeat"), choices, listener: "Sam", previous: null, instructions: "", now: NOW });
@@ -277,6 +282,38 @@ describe("how much the DJ talks", () => {
     expect(["silent", "brief", "normal", "chatty"].every(isTalkStyle)).toBe(true);
     expect(isTalkStyle("loud")).toBe(false);
     expect(isTalkStyle("constructor")).toBe(false);
+  });
+});
+
+describe("the listener's name", () => {
+  it("takes the first word of the account's name only when it looks like a name", () => {
+    expect(["Sam Smith", "Zoë", "O'Brien", "Jean-Luc Picard", "王小明"].map(listenerName)).toEqual(["Sam", "Zoë", "O'Brien", "Jean-Luc", "王小明"]);
+    expect(["hackr8027", "dj_sam", "sam.smith", "@sam", "sam smith", "", "  "].map(listenerName)).toEqual(Array(7).fill(null));
+    expect(listenerName(null)).toBeNull();
+    expect(listenerName("A".repeat(NAME_MAX + 1))).toBeNull();
+  });
+
+  it("tidies a name the listener gives", () => {
+    expect(cleanName('  Sam "the Man"\n Smith ')).toBe("Sam the Man Smith");
+    expect(cleanName("<Sam>")).toBe("Sam");
+    expect(cleanName("x".repeat(NAME_MAX + 10))).toHaveLength(NAME_MAX);
+  });
+
+  it("says it at the opening, then every few sets on Normal and Chatty, and never again on Brief or Just play", () => {
+    const sets = [1, 2, 3, 4, 5, 6, 9, 13];
+    expect(sets.map((n) => saysName(n, n === 1))).toEqual([true, false, false, false, true, false, true, true]);
+    expect(sets.map((n) => saysName(n, n === 1, "chatty"))).toEqual([true, false, false, false, true, false, true, true]);
+    expect(sets.map((n) => saysName(n, n === 1, "brief"))).toEqual([true, false, false, false, false, false, false, false]);
+    expect(sets.map((n) => saysName(n, n === 1, "silent"))).toEqual([true, false, false, false, false, false, false, false]);
+  });
+
+  it("tells the model when it may use the name mid-show, and only when there is one", () => {
+    const choices = candidates(4, ["onRepeat"]);
+    const ask = { segment: seg("onRepeat"), choices, listener: "Sam", previous: { name: "x", artists: ["y"] }, instructions: "", now: NOW };
+    expect(segmentMessages({ ...ask, setNumber: 5 })[1].content).toContain("You can call the listener Sam this time.");
+    expect(segmentMessages({ ...ask, setNumber: 5, talk: "brief" })[1].content).toContain("Don't call the listener by name this time.");
+    const nameless = segmentMessages({ ...ask, listener: null, setNumber: 5 })[1].content;
+    expect(nameless).not.toContain("call the listener");
   });
 });
 

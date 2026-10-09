@@ -297,6 +297,37 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("calls the listener by the first name on their account, or by what they asked to be called", async () => {
+    const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
+    await started();
+    expect(openingPrompt()).toContain("The listener's name is Sam.");
+    dj.stop();
+    dj.setCallMe('  "Sammy"  ');
+    expect(localStorage.getItem("nativify:djName")).toBe("Sammy");
+    backend.djGenerate.mockClear();
+    await started();
+    expect(openingPrompt()).toContain("The listener's name is Sammy.");
+    dj.setCallMe(" ");
+    expect(localStorage.getItem("nativify:djName")).toBeNull();
+  });
+
+  it("doesn't call the listener by a username, nor by any name once they'd rather it didn't", async () => {
+    const { session } = await import("./session.svelte");
+    session.user!.display_name = "hackr8027";
+    // From a template too.
+    backend.djGenerate.mockRejectedValue(new Error("no model"));
+    await started();
+    expect(dj.said[0].talk).toMatch(/^Hey, it's your DJ\./);
+    dj.stop();
+    session.user!.display_name = "Sam Smith";
+    dj.setUseName(false);
+    expect(localStorage.getItem("nativify:djUseName")).toBe("false");
+    backend.djGenerate.mockClear();
+    await started();
+    expect(dj.said[0].talk).toMatch(/^Hey, it's your DJ\./);
+    expect((backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content).not.toContain("name is");
+  });
+
   it("counts its sets from the start of each session", async () => {
     await started();
     dj.stop();
@@ -1017,11 +1048,17 @@ describe("settings", () => {
     expect(localStorage.getItem("nativify:djTalk")).toBeNull();
   });
 
-  it("reads how much it talks back, and only a setting it knows", () => {
+  it("reads how much it talks, and what it calls the listener, back", () => {
+    const fresh = () => new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>);
     localStorage.setItem("nativify:djTalk", "brief");
-    expect(new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>).talk).toBe("brief");
+    localStorage.setItem("nativify:djName", ' "Sammy" ');
+    localStorage.setItem("nativify:djUseName", "false");
+    expect([fresh().talk, fresh().callMe, fresh().useName]).toEqual(["brief", "Sammy", false]);
+    // Only a setting it knows.
     localStorage.setItem("nativify:djTalk", "shouty");
-    expect(new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>).talk).toBe("normal");
+    expect(fresh().talk).toBe("normal");
+    localStorage.clear();
+    expect([fresh().talk, fresh().callMe, fresh().useName]).toEqual(["normal", "", true]);
   });
 });
 

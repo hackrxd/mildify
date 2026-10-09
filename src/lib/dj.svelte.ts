@@ -25,7 +25,17 @@ import {
   type Segment,
   type SegmentId,
 } from "./djPicks";
-import { fallbackPick, INSTRUCTIONS_MAX, isTalkStyle, sentences, type Pick, type SegmentAsk, type TalkStyle } from "./djTalk";
+import {
+  cleanName,
+  fallbackPick,
+  INSTRUCTIONS_MAX,
+  isTalkStyle,
+  listenerName,
+  sentences,
+  type Pick,
+  type SegmentAsk,
+  type TalkStyle,
+} from "./djTalk";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
@@ -49,6 +59,8 @@ const OVER_END_KEY = "nativify:djOverEnd";
 const LIVE_KEY = "nativify:djLive";
 const NAME_ALL_KEY = "nativify:djNameAll";
 const TALK_KEY = "nativify:djTalk";
+const NAME_KEY = "nativify:djName";
+const USE_NAME_KEY = "nativify:djUseName";
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -178,6 +190,10 @@ class Dj {
   nameAll = $state(load(NAME_ALL_KEY, false, (raw) => raw === "true"));
   /** Settings → AI DJ: how much the DJ talks; Just play ("silent") only shows its lines, and the music plays on. */
   talk = $state<TalkStyle>(load(TALK_KEY, "normal", (raw) => (isTalkStyle(raw) ? raw : "normal")));
+  /** Settings → AI DJ: what the DJ calls the listener; empty for the first name on their Spotify account. */
+  callMe = $state(load(NAME_KEY, "", cleanName));
+  /** Settings → AI DJ: the DJ may say the listener's name. */
+  useName = $state(load(USE_NAME_KEY, true, (raw) => raw !== "false"));
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
@@ -412,6 +428,23 @@ class Dj {
   setTalk(style: TalkStyle) {
     this.talk = style;
     persist(TALK_KEY, style === "normal" ? null : style);
+  }
+
+  setCallMe(name: string) {
+    this.callMe = cleanName(name);
+    persist(NAME_KEY, this.callMe || null);
+  }
+
+  setUseName(on: boolean) {
+    this.useName = on;
+    persist(USE_NAME_KEY, on ? null : "false");
+  }
+
+  /** What the DJ calls the listener: the name they gave it, or the first name on their Spotify account when it looks
+   * like one; none when they'd rather it didn't. */
+  #listener(): string | null {
+    if (!this.useName) return null;
+    return this.callMe || listenerName(session.user?.display_name);
   }
 
   /** ms into the line the DJ is speaking or showing, per frame, for captions. */
@@ -891,7 +924,7 @@ class Dj {
     let { segment, choices } = chosen;
     // Said until a set that says it is on its way: one given up on leaves it for the one picked instead.
     const skippedSet = this.#setSkipped ?? undefined;
-    const listener = session.user?.display_name?.split(" ")[0] ?? null;
+    const listener = this.#listener();
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     const live = this.live;
     const reactions = live ? this.#taste.news() : undefined;
