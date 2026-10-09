@@ -26,8 +26,11 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and Chatty, it says why the song is here.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
+- The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
 
 ### Fixed
+
+- In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
 
 - With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
   rest aren't picked yet. Settings says so, and keeps your choice for when it picks whole sets.
