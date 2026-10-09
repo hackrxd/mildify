@@ -277,6 +277,8 @@ describe("how much the DJ talks", () => {
     expect(asked("silent")).toContain("- One or two short sentences, under 25 words in all.");
     expect(asked("brief")).toContain("- One or two short sentences, under 25 words in all.");
     expect(asked("chatty")).toContain("- Two to four sentences, under 80 words in all.");
+    expect(asked("normal")).toContain("It is spoken aloud:");
+    expect(asked("silent")).toContain("It is shown as a caption:");
     const longest = (talk?: TalkStyle) => (segmentSchema(4, talk) as { properties: { talk: { maxLength: number } } }).properties.talk.maxLength;
     expect([longest(), longest("silent"), longest("brief"), longest("normal"), longest("chatty")]).toEqual([400, 220, 220, 400, 700]);
   });
@@ -364,6 +366,8 @@ describe("pickAngle", () => {
     expect(angles({ ...ask, previous: null, opening: false })).toEqual(new Set<Angle>(["why", "theme", "moment"]));
     expect(angles({ ...ask, request: "more Radiohead" })).toEqual(new Set<Angle>(["why", "theme", "bridge", "moment", "request"]));
     expect(pickAngle({ ...ask, previous: null }, [], first)).toBeNull();
+    // Out of a set the listener skipped, the show goes somewhere else: no bridge from it.
+    expect(angles({ ...ask, skippedSet: "Set 1" })).toEqual(new Set<Angle>(["why", "theme", "moment"]));
   });
 
   it("tells the model how to lead", () => {

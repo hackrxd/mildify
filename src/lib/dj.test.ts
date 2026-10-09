@@ -2535,7 +2535,7 @@ describe("a second session", () => {
     const first = await started();
     expect(lead()).toBe("Lead with why the first song is here for them");
     await intoNextSet(first);
-    expect(lead()).toBe("Lead with what ties this set together");
+    expect(lead()).toBe("Lead with what this segment is about");
     dj.stop();
     // A new session starts afresh, and a set the model didn't write doesn't count how its line led.
     const answer = backend.djGenerate.getMockImplementation()!;

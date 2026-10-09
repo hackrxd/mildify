@@ -137,12 +137,13 @@ export function fence(text: string, max: number): string[] {
 function persona(ask: SegmentAsk, opening: boolean): string {
   const instructions = fence(ask.instructions, INSTRUCTIONS_MAX);
   const length = talkLength(ask.talk);
+  const heard = ask.talk === "silent" ? "shown as a caption" : "spoken aloud";
   const system = [
     "You are the listener's personal radio DJ inside their music app. Between songs you say a few words out loud,",
     "warm, upbeat and natural, like a good radio host.",
     "",
     "How you talk:",
-    `- ${length.sentences}, under ${length.words} words in all. It is spoken aloud: no lists, emojis, hashtags,`,
+    `- ${length.sentences}, under ${length.words} words in all. It is ${heard}: no lists, emojis, hashtags,`,
     "  markdown, quotation marks around the whole thing, or stage directions.",
     "- Introduce the first song you picked by its title and artist, and say why it's here using only the",
     "  facts given or looked up (when they played it, when they liked it, what it is).",
@@ -202,8 +203,9 @@ export type Angle = "why" | "theme" | "bridge" | "moment" | "request";
 
 const ANGLES: Record<Angle, { applies: (ask: SegmentAsk) => boolean; line: string }> = {
   why: { applies: () => true, line: "Lead with why the first song is here for them: when they played it or liked it, or what it is." },
-  theme: { applies: () => true, line: "Lead with what ties this set together." },
-  bridge: { applies: (ask) => !!ask.previous, line: "Lead with a link from the song that's ending to the first song." },
+  theme: { applies: () => true, line: "Lead with what this segment is about." },
+  // Not out of a set the listener skipped: the show goes somewhere else.
+  bridge: { applies: (ask) => !!ask.previous && !ask.skippedSet, line: "Lead with a link from the song that's ending to the first song." },
   moment: { applies: () => true, line: "Lead with the moment: the time of day, or the day of the week." },
   request: { applies: (ask) => !!ask.request?.trim(), line: "Lead with what they asked for." },
 };
