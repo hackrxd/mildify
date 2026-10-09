@@ -954,14 +954,16 @@
     letter-spacing: -0.03em;
     line-height: 1;
   }
-  section {
+  /* Sections, rows, labels, fields and switches: global within the page, so the sections other components bring
+     (the AI DJ's) look the same. */
+  :where(.page) :global(section) {
     display: grid;
     gap: 4px;
   }
-  section h2 {
+  :where(.page) :global(section h2) {
     margin-bottom: 10px;
   }
-  .small {
+  :where(.page) :global(.small) {
     font-size: var(--t-sm);
   }
   .status {
@@ -994,7 +996,7 @@
   .dot.state-premium_required {
     background: var(--danger);
   }
-  .row {
+  :where(.page) :global(.row) {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1003,32 +1005,32 @@
     border-bottom: 1px solid var(--border);
     font-size: var(--t-md);
   }
-  .row > span {
+  :where(.page) :global(.row > span) {
     display: grid;
     gap: 2px;
   }
-  .label {
+  :where(.page) :global(.label) {
     font-weight: 600;
   }
-  .row .field {
+  :where(.page) :global(.row .field) {
     width: 260px;
     flex: none;
   }
   .count {
-    display: flex !important;
+    display: flex;
     align-items: center;
     gap: 10px;
   }
   .row .count .field {
     width: 80px;
   }
-  select.field {
+  :where(.page) :global(select.field) {
     appearance: auto;
   }
   .row .field.narrow {
     width: 160px;
   }
-  .switch {
+  :where(.page) :global(.switch) {
     /* Checkboxes drawn as toggle switches. */
     appearance: none;
     position: relative;
@@ -1041,7 +1043,7 @@
     cursor: pointer;
     transition: background 160ms;
   }
-  .switch::before {
+  :where(.page) :global(.switch::before) {
     content: "";
     position: absolute;
     top: 3px;
@@ -1053,19 +1055,19 @@
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
     transition: transform 160ms;
   }
-  .switch:checked {
+  :where(.page) :global(.switch:checked) {
     background: var(--highlight);
   }
-  .switch:checked::before {
+  :where(.page) :global(.switch:checked::before) {
     transform: translateX(18px);
     background: var(--on-highlight);
   }
-  .switch:disabled {
+  :where(.page) :global(.switch:disabled) {
     cursor: default;
     opacity: 0.4;
   }
   .timing {
-    display: flex !important;
+    display: flex;
     align-items: center;
     gap: 10px;
   }
@@ -1082,7 +1084,7 @@
   .login .field {
     width: 200px;
   }
-  .stacked {
+  :where(.page) :global(.stacked) {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -1111,7 +1113,7 @@
     margin-left: 8px;
     font-weight: 400;
   }
-  .error {
+  :where(.page) :global(.error) {
     color: var(--danger);
   }
   .link {
@@ -1130,8 +1132,8 @@
     gap: 8px;
     padding-top: 12px;
   }
-  .buttons {
-    display: flex !important;
+  :where(.page) :global(.row > .buttons) {
+    display: flex;
     align-items: center;
     flex: none;
     gap: 8px;
