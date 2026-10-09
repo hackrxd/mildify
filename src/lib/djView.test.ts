@@ -4,6 +4,7 @@ import {
   cloudModelOf,
   cloudOf,
   djLead,
+  djNav,
   firstCloudModel,
   modelChoiceOf,
   modelName,
@@ -98,3 +99,15 @@ describe("djLead", () => {
     expect(djLead(null)).toBe("Your own radio DJ. It plays songs from your listening and talks between them.");
   });
 });
+
+describe("djNav", () => {
+  it("shows the DJ wherever it can run: resting while it's off, with the equaliser while it plays", () => {
+    expect(djNav(null, "off")).toBe("hidden");
+    expect(djNav({ ...status(), supported: false }, "off")).toBe("hidden");
+    expect(djNav(status({ enabled: false }), "off")).toBe("off");
+    expect(djNav(status(), "off")).toBe("stopped");
+    expect(djNav(status(), "starting")).toBe("playing");
+    expect(djNav(status(), "on")).toBe("playing");
+  });
+});
+

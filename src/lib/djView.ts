@@ -73,3 +73,13 @@ export function djLead(status: DjStatus | null): string {
   }
   return `Your own radio DJ. ${plays}: ${writer(status)} writes what it says, and ${voice} reads it out on this computer.`;
 }
+
+/** How the sidebar shows the DJ: not at all on a computer it can't run on, resting while it's turned off, and with
+ * the equaliser while it plays. */
+export type DjNav = "hidden" | "off" | "stopped" | "playing";
+
+export function djNav(status: DjStatus | null, phase: "off" | "starting" | "on"): DjNav {
+  if (!status?.supported) return "hidden";
+  if (phase !== "off") return "playing";
+  return status.settings.enabled ? "stopped" : "off";
+}
