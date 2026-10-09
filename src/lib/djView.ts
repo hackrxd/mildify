@@ -1,6 +1,7 @@
 // What the DJ's pages say about it, and how its settings' choices map onto its config: who writes its talk and which
 // voice reads it out. Pure, so the wording is tested without a page.
 import type { DjCloud, DjConfig, DjModelChoice, DjStatus } from "./ipc";
+import { formatBytes } from "./util";
 
 export const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
 /** A cloud provider's model before one is picked: the backend's own default (src-tauri/src/dj/mod.rs). */
@@ -82,4 +83,17 @@ export function djNav(status: DjStatus | null, phase: "off" | "starting" | "on")
   if (!status?.supported) return "hidden";
   if (phase !== "off") return "playing";
   return status.settings.enabled ? "stopped" : "off";
+}
+
+/** What the DJ page says while the DJ is turned off: what turning it on downloads, if anything is left to. */
+export function offNote(status: DjStatus): string {
+  const missing = status.needed.filter((n) => !n.installed);
+  if (!missing.length) return "The DJ is off. What it runs on is already downloaded, and you can remove it in Settings.";
+  const size = formatBytes(missing.reduce((n, c) => n + c.bytes, 0));
+  const what = status.needed.some((n) => n.installed)
+    ? `the rest of what it runs on, about ${size}`
+    : status.settings.provider === "local"
+      ? `what it runs on, about ${size}: a language model, a voice and the programs for them`
+      : `what it runs on, about ${size}: a voice and the program for it`;
+  return `The DJ is off. Turning it on downloads ${what}. Nothing is downloaded until then, and you can remove it all again in Settings.`;
 }

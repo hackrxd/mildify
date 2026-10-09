@@ -8,6 +8,7 @@ import {
   firstCloudModel,
   modelChoiceOf,
   modelName,
+  offNote,
   providerName,
   voiceName,
 } from "./djView";
@@ -111,3 +112,28 @@ describe("djNav", () => {
   });
 });
 
+describe("offNote", () => {
+  const parts = [
+    { id: "llama", label: "Language model runtime (llama.cpp)", bytes: 20_000_000, installed: false },
+    { id: "model", label: "Language model (Qwen2.5 1.5B Instruct)", bytes: 1_100_000_000, installed: false },
+    { id: "sherpa", label: "Speech runtime (sherpa-onnx)", bytes: 30_000_000, installed: false },
+    { id: "voice", label: "Voices (Kokoro)", bytes: 150_000_000, installed: false },
+  ];
+  const off = (patch: Partial<DjConfig>, needed: typeof parts) => ({ ...status({ enabled: false, ...patch }), needed });
+
+  it("says what turning the DJ on downloads, for the model it's set to use", () => {
+    expect(offNote(off({}, parts))).toBe(
+      "The DJ is off. Turning it on downloads what it runs on, about 1.3 GB: a language model, a voice and the " +
+        "programs for them. Nothing is downloaded until then, and you can remove it all again in Settings.",
+    );
+    expect(offNote(off({ provider: "openai" }, parts.slice(2)))).toContain("downloads what it runs on, about 180 MB: a voice and the program for it.");
+  });
+
+  it("counts only what's left, and says so once it's all downloaded", () => {
+    const voiceIn = parts.map((p) => ({ ...p, installed: p.id === "sherpa" || p.id === "voice" }));
+    expect(offNote(off({}, voiceIn))).toContain("Turning it on downloads the rest of what it runs on, about 1.1 GB.");
+    expect(offNote(off({}, parts.map((p) => ({ ...p, installed: true }))))).toBe(
+      "The DJ is off. What it runs on is already downloaded, and you can remove it in Settings.",
+    );
+  });
+});
