@@ -537,18 +537,120 @@ function byline(c: { name: string; artists: string[] }): string {
   return `${c.name} by ${c.artists.slice(0, 2).join(" and ") || "an artist you love"}`;
 }
 
-/** A segment without the model: the first choices in order, and a line from a template. */
-export function fallbackPick(
-  segment: Segment,
-  choices: Candidate[],
-  listener: string | null,
-  previous: { name: string; artists: string[] } | null,
-): Pick {
-  const songs = choices.slice(0, 4);
+/** What a template knows about the set it introduces. */
+export interface TemplateContext {
+  /** What the DJ calls the listener, said at the opening. */
+  listener: string | null;
+  /** The song playing out; none for the opening. */
+  previous: { name: string; artists: string[] } | null;
+  /** The listener skipped the rest of the set before. */
+  skipped?: boolean;
+  /** The set is one the listener asked for. */
+  request?: boolean;
+  /** A song the listener liked since the last set, picking as it goes. */
+  liked?: { name: string; artists: string[] } | null;
+  /** On Normal and Chatty, the line also says why the first song is here. */
+  talk?: TalkStyle;
+  /** The template the DJ used last, not to come again straight away. */
+  last?: string | null;
+  now?: Date;
+}
+
+/** A set from a template, and which template it was. */
+export interface TemplatePick extends Pick {
+  template: string;
+}
+
+interface TemplateWords {
+  /** The segment, as said: "some throwbacks". */
+  phrase: string;
+  first: string;
+  previous: string;
+  liked: string;
+  /** What the DJ calls the listener, or nothing. */
+  listener: string;
+  /** "Good evening", by the time of day. */
+  hello: string;
+}
+
+/** The listener's name with what goes before it, or nothing without one. */
+function named(before: string, name: string): string {
+  return name ? `${before}${name}` : "";
+}
+
+function greeting(now: Date): string {
+  const h = now.getHours();
+  return h < 5 ? "Hello" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
+
+type TemplateKind = "opening" | "after" | "skipped" | "request" | "liked";
+
+const TEMPLATES: Record<TemplateKind, ((t: TemplateWords) => string)[]> = {
+  opening: [
+    (t) => `Hey${named(" ", t.listener)}, it's your DJ. Let's start with ${t.phrase}: here's ${t.first}.`,
+    (t) => `${t.hello}${named(", ", t.listener)}. Your DJ here, opening with ${t.phrase}, starting with ${t.first}.`,
+    (t) => `Hi${named(" ", t.listener)}, welcome in. We begin with ${t.phrase}, and ${t.first}.`,
+  ],
+  after: [
+    (t) => `That was ${t.previous}. Now, ${t.phrase}, starting with ${t.first}.`,
+    (t) => `You just heard ${t.previous}. Next, ${t.phrase}: here's ${t.first}.`,
+    (t) => `Coming out of ${t.previous}, we're on to ${t.phrase}, with ${t.first}.`,
+    (t) => `After ${t.previous}, it's time for ${t.phrase}. Here's ${t.first}.`,
+  ],
+  skipped: [
+    (t) => `Not feeling that set? Let's switch to ${t.phrase}, starting with ${t.first}.`,
+    (t) => `Something else, then: ${t.phrase}, beginning with ${t.first}.`,
+    (t) => `Let's go another way, with ${t.phrase}. Here's ${t.first}.`,
+  ],
+  request: [
+    (t) => `Your request is on, starting with ${t.first}.`,
+    (t) => `Here's what you asked for, beginning with ${t.first}.`,
+    (t) => `As requested, ${t.first} to start.`,
+  ],
+  liked: [
+    (t) => `You liked ${t.liked}, so here's more like it, starting with ${t.first}.`,
+    (t) => `Since you liked ${t.liked}, here's ${t.first}.`,
+  ],
+};
+
+/** Why a song is here, said to the listener: what their listening shows. */
+function whyHere(c: Candidate, now: Date): string | null {
+  if (c.reasons.includes("onRepeat")) return "You've had it on repeat lately.";
+  if (c.reasons.includes("favorite")) return "It's been one of your favorites these past months.";
+  if (c.reasons.includes("allTime")) return "It's one of your most played ever.";
+  if (c.likedAt) return `You liked it in ${monthYear(c.likedAt)}.`;
+  if (!c.playedAt) return null;
+  const days = Math.floor((now.getTime() - c.playedAt.getTime()) / DAY_MS);
+  return days <= 0 ? "You played it earlier today." : days === 1 ? "You played it yesterday." : `You last played it ${days} days ago.`;
+}
+
+/** A segment without the model: 3 to 5 of the first choices, in order, and a line from a template for where the
+ * show is, never the one used last. On Normal and Chatty it also says why the first song is here. */
+export function fallbackPick(segment: Segment, choices: Candidate[], ctx: TemplateContext, random: () => number = Math.random): TemplatePick {
+  const now = ctx.now ?? new Date();
+  const songs = choices.slice(0, SET_MIN + Math.floor(random() * (SET_MAX - SET_MIN + 1)));
   const first = songs[0];
-  const intro = previous
-    ? `That was ${byline(previous)}. Up next, ${segment.phrase}`
-    : `Hey${listener ? ` ${listener}` : ""}, it's your DJ. Let's start with ${segment.phrase}`;
-  const talk = first ? `${intro}, starting with ${byline(first)}.` : `${intro}.`;
-  return { name: segment.label, songs, talk };
+  if (!first) return { name: segment.label, songs, talk: `Here's ${segment.phrase}.`, template: "none" };
+  const kind: TemplateKind = !ctx.previous
+    ? "opening"
+    : ctx.request
+      ? "request"
+      : ctx.skipped
+        ? "skipped"
+        : ctx.liked
+          ? "liked"
+          : "after";
+  const bank = TEMPLATES[kind].map((write, i) => ({ write, id: `${kind}-${i}` })).filter((t) => t.id !== ctx.last);
+  const { write, id } = bank[Math.floor(random() * bank.length)];
+  const line = write({
+    phrase: segment.phrase,
+    first: byline(first),
+    previous: ctx.previous ? byline(ctx.previous) : "",
+    liked: ctx.liked ? byline(ctx.liked) : "",
+    listener: ctx.listener ?? "",
+    hello: greeting(now),
+  });
+  const talk = ctx.talk ?? "normal";
+  const why = talk === "normal" || talk === "chatty" ? whyHere(first, now) : null;
+  return { name: segment.label, songs, talk: why ? `${line} ${why}` : line, template: id };
 }

@@ -504,16 +504,59 @@ describe("cleanTalk", () => {
 
 describe("fallbackPick", () => {
   const choices = candidates(6, ["onRepeat"]);
+  const previous = { name: "Midnight City", artists: ["M83"] };
+  const first = () => 0;
+  const last = () => 0.999;
+  const evening = new Date("2026-10-04T20:30:00");
 
-  it("greets by name at the start", () => {
-    const pick = fallbackPick(seg("onRepeat"), choices, "Sam", null);
-    expect(pick.talk).toBe("Hey Sam, it's your DJ. Let's start with some songs you've had on repeat, starting with Song 0 by Artist 0.");
-    expect(pick.songs).toHaveLength(4);
+  it("greets by name at the opening, and says why the first song is here", () => {
+    const pick = fallbackPick(seg("onRepeat"), choices, { listener: "Sam", previous: null, now: evening }, first);
+    expect(pick.talk).toBe(
+      "Hey Sam, it's your DJ. Let's start with some songs you've had on repeat: here's Song 0 by Artist 0. You've had it on repeat lately.",
+    );
+    expect(pick.template).toBe("opening-0");
+    expect(pick.name).toBe("On repeat");
+    const evening2 = fallbackPick(seg("onRepeat"), choices, { listener: "Sam", previous: null, now: evening, last: "opening-0" }, first);
+    expect(evening2.talk).toMatch(/^Good evening, Sam\. Your DJ here/);
+    expect(fallbackPick(seg("onRepeat"), choices, { listener: null, previous: null, now: evening }, first).talk).toMatch(/^Hey, it's your DJ\./);
   });
 
-  it("follows on from the last song", () => {
-    const pick = fallbackPick(seg("throwbacks"), choices, null, { name: "Midnight City", artists: ["M83"] });
-    expect(pick.talk).toBe("That was Midnight City by M83. Up next, some throwbacks, starting with Song 0 by Artist 0.");
-    expect(pick.name).toBe("Throwbacks");
+  it("follows on from the last song, a set skipped, a request or a like, each in its own way", () => {
+    const talk = (ctx: Partial<Parameters<typeof fallbackPick>[2]>) =>
+      fallbackPick(seg("throwbacks"), choices, { listener: "Sam", previous, talk: "brief", ...ctx }, first).talk;
+    expect(talk({})).toBe("That was Midnight City by M83. Now, some throwbacks, starting with Song 0 by Artist 0.");
+    expect(talk({ skipped: true })).toBe("Not feeling that set? Let's switch to some throwbacks, starting with Song 0 by Artist 0.");
+    expect(talk({ request: true, skipped: true })).toBe("Your request is on, starting with Song 0 by Artist 0.");
+    expect(talk({ liked: { name: "Lisztomania", artists: ["Phoenix"] } })).toBe(
+      "You liked Lisztomania by Phoenix, so here's more like it, starting with Song 0 by Artist 0.",
+    );
+    // Only the opening says the name.
+    expect(talk({})).not.toContain("Sam");
+  });
+
+  it("never uses the template it used last", () => {
+    const pick = (lastUsed: string | null, random: () => number) =>
+      fallbackPick(seg("throwbacks"), choices, { listener: null, previous, last: lastUsed }, random).template;
+    expect(pick(null, first)).toBe("after-0");
+    expect(pick("after-0", first)).toBe("after-1");
+    expect(pick("after-3", last)).toBe("after-2");
+    expect(pick("opening-0", first)).toBe("after-0");
+  });
+
+  it("says why the first song is here on Normal and Chatty only", () => {
+    const talk = (t: TalkStyle, c: Candidate) =>
+      fallbackPick(seg("rediscover"), [c, ...choices], { listener: null, previous, talk: t, now: NOW }, first).talk;
+    const liked = { ...choices[0], reasons: [], likedAt: new Date("2019-03-02T12:00:00") } as Candidate;
+    expect(talk("normal", liked)).toMatch(/ You liked it in March 2019\.$/);
+    expect(talk("chatty", { ...liked, likedAt: null, playedAt: new Date("2026-10-03T12:00:00") })).toMatch(/ You played it yesterday\.$/);
+    expect(talk("brief", liked)).not.toContain("You liked it");
+    expect(talk("silent", liked)).not.toContain("You liked it");
+  });
+
+  it("plays 3 to 5 songs, in the order given", () => {
+    const sizes = [first, () => 0.5, last].map((r) => fallbackPick(seg("onRepeat"), choices, { listener: null, previous }, r).songs);
+    expect(sizes.map((s) => s.length)).toEqual([3, 4, 5]);
+    expect(sizes[2]).toEqual(choices.slice(0, 5));
+    expect(fallbackPick(seg("onRepeat"), choices.slice(0, 2), { listener: null, previous }, last).songs).toHaveLength(2);
   });
 });

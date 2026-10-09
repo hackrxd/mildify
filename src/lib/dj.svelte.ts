@@ -281,6 +281,8 @@ class Dj {
   #setsThisSession = 0;
   /** How the model's lines this session have started, so the next starts another way. */
   #angles: Angle[] = [];
+  /** The template the DJ talked from last this session, so the next is another. */
+  #lastTemplate: string | null = null;
   /** Bumped when the next set being picked is no longer wanted (the listener asked for something else). */
   #prepareGen = 0;
   /** The set the listener skipped the rest of, for the next prompt; and its songs, which leaving isn't a skip of. */
@@ -817,6 +819,7 @@ class Dj {
     this.modelTrouble = null;
     this.#setsThisSession = 0;
     this.#angles = [];
+    this.#lastTemplate = null;
     this.said = [];
     this.#segments = [];
     this.#outOfSongs = false;
@@ -964,7 +967,19 @@ class Dj {
       if (!instead) return null;
       ({ segment, choices } = instead);
     }
-    pick ??= fallbackPick(segment, choices, listener, prev);
+    if (!pick) {
+      const template = fallbackPick(segment, choices, {
+        listener,
+        previous: prev,
+        skipped: skippedSet !== undefined,
+        request: segment.id === "request",
+        liked: reactions?.liked[0] ?? null,
+        talk: this.talk,
+        last: this.#lastTemplate,
+      });
+      this.#lastTemplate = template.template;
+      pick = template;
+    }
     // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
     const songs = live ? pick.songs.slice(0, 1) : pick.songs;
     for (const s of songs) this.#played.add(s.uri);
