@@ -87,8 +87,8 @@ the song its line brings in, whatever order the model gave, and a line the model
 whole sentence.
 
 **How much your DJ talks** (Settings → AI DJ) sets how long its lines are: **Brief** is a sentence or two,
-**Normal** (the default) up to three, and **Chatty** up to four. A line longer than that is cut to whole sentences,
-keeping the one that brings in the song. With **Just play** the DJ has no voice: the music plays straight through
+**Normal** (the default) up to three, and **Chatty** up to four. A line that runs well past that is cut to whole
+sentences, keeping the one that brings in the song. With **Just play** the DJ has no voice: the music plays straight through
 from song to song, and what it would have said shows as captions for about as long as it would take to say. A change
 applies from its next set.
 
