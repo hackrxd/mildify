@@ -29,6 +29,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
 - The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
+- When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
+  DJ's settings, instead of only in a notice that goes away.
 
 ### Fixed
 
