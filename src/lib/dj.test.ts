@@ -1854,7 +1854,12 @@ describe("picking as it goes", () => {
     backend.djGenerate.mockRejectedValue(new Error("no model"));
     await untilNextSet();
     expect(dj.upNext!.byModel).toBe(false);
-    expect(dj.upNext!.talk).toContain(`liked ${set.songs[0].name} by`);
+    expect(dj.upNext!.talk).toMatch(new RegExp(`^(Thanks for liking|Glad you liked) ${set.songs[0].name} by`));
+    // Said once: the set after doesn't thank them for it again.
+    await nextSet();
+    await untilNextSet();
+    expect(dj.upNext!.byModel).toBe(false);
+    expect(dj.upNext!.talk).not.toMatch(/Thanks for liking|Glad you liked/);
   });
 
   it("keeps what's lined up once the player may have started loading it", async () => {

@@ -37,6 +37,7 @@ import {
   type Pick,
   type SegmentAsk,
   type TalkStyle,
+  type TemplatePick,
 } from "./djTalk";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
@@ -967,17 +968,18 @@ class Dj {
       if (!instead) return null;
       ({ segment, choices } = instead);
     }
+    const liked = reactions?.liked[0] ?? null;
+    let template: TemplatePick | null = null;
     if (!pick) {
-      const template = fallbackPick(segment, choices, {
+      template = fallbackPick(segment, choices, {
         listener,
         previous: prev,
         skipped: skippedSet !== undefined,
         request: segment.id === "request",
-        liked: reactions?.liked[0] ?? null,
+        liked,
         talk: this.talk,
         last: this.#lastTemplate,
       });
-      this.#lastTemplate = template.template;
       pick = template;
     }
     // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
@@ -992,8 +994,12 @@ class Dj {
       return null;
     }
     if (skippedSet !== undefined && this.#setSkipped === skippedSet) this.#setSkipped = null;
-    // A template doesn't mention them: the next prompt still does.
+    // A template mentions only the like it's about, if any: the next prompt tells of the rest.
     if (byModel && reactions) this.#taste.toldOf(reactions);
+    if (template) {
+      this.#lastTemplate = template.template;
+      if (template.kind === "liked" && liked) this.#taste.toldOf({ liked: [liked], skipped: [] });
+    }
     if (byModel && ask.angle) this.#angles.push(ask.angle);
     this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));

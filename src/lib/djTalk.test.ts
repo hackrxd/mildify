@@ -583,7 +583,7 @@ describe("fallbackPick", () => {
     expect(talk({ skipped: true })).toBe("Not feeling that set? Let's switch to some throwbacks, starting with Song 0 by Artist 0.");
     expect(talk({ request: true, skipped: true })).toBe("Your request is on, starting with Song 0 by Artist 0.");
     expect(talk({ liked: { name: "Lisztomania", artists: ["Phoenix"] } })).toBe(
-      "You liked Lisztomania by Phoenix, so here's more like it, starting with Song 0 by Artist 0.",
+      "Thanks for liking Lisztomania by Phoenix. Next, some throwbacks, starting with Song 0 by Artist 0.",
     );
     // Only the opening says the name.
     expect(talk({})).not.toContain("Sam");
@@ -596,6 +596,16 @@ describe("fallbackPick", () => {
     expect(pick("after-0", first)).toBe("after-1");
     expect(pick("after-3", last)).toBe("after-2");
     expect(pick("opening-0", first)).toBe("after-0");
+  });
+
+  it("says first why the song fits its segment", () => {
+    const why = (segment: string, c: Partial<Candidate>) =>
+      fallbackPick(seg(segment), [{ ...choices[0], ...c }], { listener: null, previous, now: NOW }, first).talk.replace(/^.*\. /, "");
+    const liked = new Date("2019-03-02T12:00:00");
+    expect(why("rediscover", { reasons: ["favorite", "likedLongAgo"], likedAt: liked })).toBe("You liked it in March 2019.");
+    expect(why("throwbacks", { reasons: ["favorite", "allTime"] })).toBe("It's one of your most played ever.");
+    expect(why("favorites", { reasons: ["allTime", "favorite"] })).toBe("It's been one of your favorites these past months.");
+    expect(why("onRepeat", { reasons: ["favorite", "onRepeat"], likedAt: liked })).toBe("You've had it on repeat lately.");
   });
 
   it("says why the first song is here on Normal and Chatty only", () => {

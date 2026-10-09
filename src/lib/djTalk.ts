@@ -1,7 +1,7 @@
 // What the DJ's model is told and how its answers are read: the persona, the situation, the look-up round, the
 // answer's schema and checks, and the templates the DJ talks from without it.
 import type { DjMessage, DjSongInfo, DjTool, DjToolCall } from "./ipc";
-import { DAY_MS, REQUEST_MAX, SET_MAX, SET_MIN, type Candidate, type Reactions, type Segment } from "./djPicks";
+import { DAY_MS, REQUEST_MAX, SET_MAX, SET_MIN, type Candidate, type Reactions, type Segment, type SegmentId } from "./djPicks";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -585,9 +585,10 @@ export interface TemplateContext {
   now?: Date;
 }
 
-/** A set from a template, and which template it was. */
+/** A set from a template, and which template it was, for which moment. */
 export interface TemplatePick extends Pick {
   template: string;
+  kind: TemplateKind | null;
 }
 
 interface TemplateWords {
@@ -612,7 +613,7 @@ function greeting(now: Date): string {
   return h < 5 ? "Hello" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
-type TemplateKind = "opening" | "after" | "skipped" | "request" | "liked";
+export type TemplateKind = "opening" | "after" | "skipped" | "request" | "liked";
 
 const TEMPLATES: Record<TemplateKind, ((t: TemplateWords) => string)[]> = {
   opening: [
@@ -637,20 +638,34 @@ const TEMPLATES: Record<TemplateKind, ((t: TemplateWords) => string)[]> = {
     (t) => `As requested, ${t.first} to start.`,
   ],
   liked: [
-    (t) => `You liked ${t.liked}, so here's more like it, starting with ${t.first}.`,
-    (t) => `Since you liked ${t.liked}, here's ${t.first}.`,
+    (t) => `Thanks for liking ${t.liked}. Next, ${t.phrase}, starting with ${t.first}.`,
+    (t) => `Glad you liked ${t.liked}. Now, ${t.phrase}: here's ${t.first}.`,
   ],
 };
 
-/** Why a song is here, said to the listener: what their listening shows. */
-function whyHere(c: Candidate, now: Date): string | null {
-  if (c.reasons.includes("onRepeat")) return "You've had it on repeat lately.";
-  if (c.reasons.includes("favorite")) return "It's been one of your favorites these past months.";
-  if (c.reasons.includes("allTime")) return "It's one of your most played ever.";
-  if (c.likedAt) return `You liked it in ${monthYear(c.likedAt)}.`;
-  if (!c.playedAt) return null;
-  const days = Math.floor((now.getTime() - c.playedAt.getTime()) / DAY_MS);
-  return days <= 0 ? "You played it earlier today." : days === 1 ? "You played it yesterday." : `You last played it ${days} days ago.`;
+type Why = "onRepeat" | "favorite" | "allTime" | "liked" | "played";
+const WHY_ORDER: Why[] = ["onRepeat", "favorite", "allTime", "liked", "played"];
+/** What a segment's line says first about its song, to match what the segment is. */
+const WHY_FIRST: Partial<Record<SegmentId, Why[]>> = {
+  favorites: ["favorite"],
+  throwbacks: ["allTime", "liked"],
+  fresh: ["liked"],
+  rediscover: ["liked"],
+};
+
+/** Why a song is here, said to the listener: what their listening shows, the segment's own reason first. */
+function whyHere(c: Candidate, segment: SegmentId, now: Date): string | null {
+  const days = c.playedAt ? Math.floor((now.getTime() - c.playedAt.getTime()) / DAY_MS) : null;
+  const say: Record<Why, string | null> = {
+    onRepeat: c.reasons.includes("onRepeat") ? "You've had it on repeat lately." : null,
+    favorite: c.reasons.includes("favorite") ? "It's been one of your favorites these past months." : null,
+    allTime: c.reasons.includes("allTime") ? "It's one of your most played ever." : null,
+    liked: c.likedAt ? `You liked it in ${monthYear(c.likedAt)}.` : null,
+    played:
+      days === null ? null : days <= 0 ? "You played it earlier today." : days === 1 ? "You played it yesterday." : `You last played it ${days} days ago.`,
+  };
+  for (const why of [...(WHY_FIRST[segment] ?? []), ...WHY_ORDER]) if (say[why]) return say[why];
+  return null;
 }
 
 /** A segment without the model: 3 to 5 of the first choices, in order, and a line from a template for where the
@@ -659,7 +674,7 @@ export function fallbackPick(segment: Segment, choices: Candidate[], ctx: Templa
   const now = ctx.now ?? new Date();
   const songs = choices.slice(0, SET_MIN + Math.floor(random() * (SET_MAX - SET_MIN + 1)));
   const first = songs[0];
-  if (!first) return { name: segment.label, songs, talk: `Here's ${segment.phrase}.`, template: "none" };
+  if (!first) return { name: segment.label, songs, talk: `Here's ${segment.phrase}.`, template: "none", kind: null };
   const kind: TemplateKind = !ctx.previous
     ? "opening"
     : ctx.request
@@ -680,6 +695,6 @@ export function fallbackPick(segment: Segment, choices: Candidate[], ctx: Templa
     hello: greeting(now),
   });
   const talk = ctx.talk ?? "normal";
-  const why = talk === "normal" || talk === "chatty" ? whyHere(first, now) : null;
-  return { name: segment.label, songs, talk: why ? `${line} ${why}` : line, template: id };
+  const why = talk === "normal" || talk === "chatty" ? whyHere(first, segment.id, now) : null;
+  return { name: segment.label, songs, talk: why ? `${line} ${why}` : line, template: id, kind };
 }
