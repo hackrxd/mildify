@@ -1026,8 +1026,6 @@ class Dj {
   }
 
   /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
-   * time or was given up on. */
-  /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
    * time or was given up on. A failure the listener can fix is said once a session. */
   async #askModel(ask: SegmentAsk, timeoutMs: number, stale: () => boolean): Promise<{ pick: Pick | null; why: string | null }> {
     const round = await askModel(ask, {
