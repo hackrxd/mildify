@@ -2,11 +2,24 @@
   // Settings → AI DJ: turning the DJ on, its downloads, the model and voice, and how it talks.
   import { dj } from "../lib/dj.svelte";
   import { INSTRUCTIONS_MAX, isTalkStyle, listenerName, NAME_MAX } from "../lib/djTalk";
-  import { choicePatch, CLOUD_NAMES, cloudModelOf, cloudOf, DEFAULT_CLOUD_MODEL, firstCloudModel, modelChoiceOf } from "../lib/djView";
+  import {
+    askBefore,
+    choicePatch,
+    CLOUD_NAMES,
+    cloudModelOf,
+    cloudOf,
+    DEFAULT_CLOUD_MODEL,
+    firstCloudModel,
+    isCloud,
+    modelChoiceOf,
+    type DjChange,
+    type Question,
+  } from "../lib/djView";
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router, SECTION_IDS } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
+  import ConfirmStrip from "./ConfirmStrip.svelte";
   import Icon from "./Icon.svelte";
 
   dj.refresh();
@@ -54,6 +67,28 @@
     dj.configure(choicePatch(value));
   }
 
+  /** A change waiting on the answer to what Settings asked about it. */
+  let pending = $state<{ change: DjChange; question: Question } | null>(null);
+  /** The model picker shows the model it's asking about, and its description, until that's answered. */
+  const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : modelChoice);
+
+  /** Makes `change`, once it's asked about it when it stops the DJ or can't be taken back. */
+  function change(c: DjChange) {
+    pending = null;
+    // Back to the model in use, from one it was asking about.
+    if (c.kind === "model" && c.choice === modelChoice) return;
+    const question = djStatus ? askBefore(c, djStatus, dj.phase !== "off") : null;
+    if (question) pending = { change: c, question };
+    else make(c);
+  }
+
+  function make(c: DjChange) {
+    pending = null;
+    if (c.kind === "model") pickModel(c.choice);
+    else if (c.kind === "key") removeKey(c.provider);
+    else dj.remove();
+  }
+
   let apiKey = $state("");
   async function saveKey() {
     const key = apiKey.trim();
@@ -63,10 +98,9 @@
     if (await dj.setKey(cloud, key)) apiKey = "";
   }
 
-  function removeKey() {
-    if (!cloud) return;
+  function removeKey(provider: DjCloud) {
     forgetModels();
-    dj.setKey(cloud, null);
+    dj.setKey(provider, null);
   }
 
   function forgetModels() {
@@ -106,6 +140,15 @@
   }
 </script>
 
+{#snippet asking(asked: { change: DjChange; question: Question })}
+  <ConfirmStrip
+    {...asked.question}
+    danger={asked.change.kind !== "model"}
+    onconfirm={() => make(asked.change)}
+    oncancel={() => (pending = null)}
+  />
+{/snippet}
+
 <section id={SECTION_IDS.dj}>
   <h2>AI DJ</h2>
 
@@ -131,6 +174,7 @@
   {#if djStatus && !djStatus.supported}
     <div class="row"><span class="muted small">The DJ's model and voice aren't built for this computer's processor.</span></div>
   {:else if djSettings}
+    {@const shown = { ...djSettings, ...choicePatch(shownChoice) }}
     {#if dj.enabled}
       <div class="row">
         <span>
@@ -170,17 +214,21 @@
       <span>
         <span class="label">Language model</span>
         <span class="muted small">
-          {#if djSettings.provider === "own"}
+          {#if shown.provider === "own"}
             Any server with an OpenAI-style chat API: Ollama, LM Studio, llama.cpp. Nothing is downloaded for it.
-          {:else if cloud}
-            Usually smarter than the downloaded models, with your own {CLOUD_NAMES[cloud]} API key; what it uses is
-            billed to your account. Nothing is downloaded for it.
+          {:else if isCloud(shown.provider)}
+            Usually smarter than the downloaded models, with your own {CLOUD_NAMES[shown.provider]} API key; what it
+            uses is billed to your account. Nothing is downloaded for it.
           {:else}
-            {djStatus?.models.find((m) => m.id === djSettings.model)?.detail ?? ""}
+            {djStatus?.models.find((m) => m.id === shown.model)?.detail ?? ""}
           {/if}
         </span>
       </span>
-      <select class="field" value={modelChoice} onchange={(e) => pickModel(e.currentTarget.value)}>
+      <select
+        class="field"
+        value={shownChoice}
+        onchange={(e) => change({ kind: "model", choice: e.currentTarget.value })}
+      >
         <optgroup label="On this computer">
           {#each djStatus?.models ?? [] as m (m.id)}
             <option value="local:{m.id}">{m.label} ({formatBytes(m.bytes)})</option>
@@ -196,6 +244,9 @@
         </optgroup>
       </select>
     </label>
+    {#if pending?.change.kind === "model"}
+      {@render asking(pending)}
+    {/if}
 
     {#if cloud}
       {#if djStatus?.keys[cloud]}
@@ -204,8 +255,11 @@
             <span class="label">{CLOUD_NAMES[cloud]} API key</span>
             <span class="muted small">Saved in your system's keychain. It never leaves this computer except to {CLOUD_NAMES[cloud]}.</span>
           </span>
-          <button class="btn quiet" onclick={removeKey}>Remove key</button>
+          <button class="btn quiet danger" onclick={() => cloud && change({ kind: "key", provider: cloud })}>Remove key</button>
         </div>
+        {#if pending?.change.kind === "key" && pending.change.provider === cloud}
+          {@render asking(pending)}
+        {/if}
 
         <div class="row">
           <span>
@@ -451,8 +505,11 @@
         <span class="label">The DJ's files take {formatBytes(djStatus.disk_bytes)}</span>
         <span class="muted small">Removing them turns the DJ off. They download again if you turn it back on.</span>
       </span>
-      <button class="btn quiet" onclick={() => dj.remove()}>Remove the DJ's files</button>
+      <button class="btn quiet danger" onclick={() => change({ kind: "files" })}>Remove the DJ's files</button>
     </div>
+    {#if pending?.change.kind === "files"}
+      {@render asking(pending)}
+    {/if}
   {/if}
 </section>
 
