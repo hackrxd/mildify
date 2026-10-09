@@ -107,6 +107,23 @@ describe("askModel", () => {
     expect(opening.pick?.talk).toBe("Welcome! Here's Song 1 by Artist 1.");
   });
 
+  it("asks for a line as long as the setting says, and keeps the answer to it", async () => {
+    const talk = "What a week of music you've had, and plenty more to come tonight. Here's Song 1 by Artist 1. Then more.";
+    backend.djGenerate.mockResolvedValue({ ...answer, talk });
+    const brief = await askModel({ ...ask, talk: "brief" }, { tools: false, wait: now, stale: () => false });
+    const [, schema, maxTokens] = backend.djGenerate.mock.calls[0] as [unknown, { properties: { talk: { maxLength: number } } }, number];
+    expect([schema.properties.talk.maxLength, maxTokens]).toEqual([220, 250]);
+    expect(brief.pick?.talk).toBe(talk);
+    const chatty = await askModel({ ...ask, talk: "chatty" }, { tools: false, wait: now, stale: () => false });
+    expect(backend.djGenerate.mock.calls[1].slice(2)).toEqual([400]);
+    expect(chatty.pick?.talk).toBe(talk);
+    // A model that ignores the schema's limit, as cloud ones do, is held to it here.
+    backend.djGenerate.mockResolvedValue({ ...answer, talk: `${talk} ${"And on and on it goes. ".repeat(6)}` });
+    const long = await askModel({ ...ask, talk: "brief" }, { tools: false, wait: now, stale: () => false });
+    expect(long.pick?.talk.length).toBeLessThanOrEqual(220);
+    expect(long.pick?.talk).toContain("Here's Song 1 by Artist 1.");
+  });
+
   it("asks for no pick once the set isn't wanted any more", async () => {
     backend.djLookUp.mockResolvedValue({ calls: [] });
     const round = await askModel(ask, { tools: true, wait: now, stale: () => true });

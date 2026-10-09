@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  answerOptions,
   cleanTalk,
   facts,
   fallbackPick,
   finishTalk,
+  fitTalk,
   INSTRUCTIONS_MAX,
   fence,
   introduced,
+  isTalkStyle,
   LOOK_UP_MAX,
   lookUpMessages,
   lookUpsAsked,
@@ -16,6 +19,7 @@ import {
   segmentSchema,
   sentences,
   songFacts,
+  type TalkStyle,
 } from "./djTalk";
 import { type Candidate, type Listening, requestSegment, SEGMENTS, SET_MAX } from "./djPicks";
 
@@ -250,6 +254,63 @@ describe("segmentSchema", () => {
   });
 });
 
+describe("how much the DJ talks", () => {
+  const choices = candidates(4, ["onRepeat"]);
+  const ask = { segment: seg("onRepeat"), choices, listener: null, previous: null, instructions: "", now: NOW };
+
+  it("asks for a line as long as the setting says, and holds a model that takes a schema to it", () => {
+    const asked = (talk?: TalkStyle) => segmentMessages({ ...ask, talk })[0].content;
+    expect(asked()).toContain("- One to three short sentences, under 50 words in all.");
+    expect(asked("silent")).toContain("- One or two short sentences, under 25 words in all.");
+    expect(asked("brief")).toContain("- One or two short sentences, under 25 words in all.");
+    expect(asked("chatty")).toContain("- Two to four sentences, under 80 words in all.");
+    const longest = (talk?: TalkStyle) => (segmentSchema(4, talk) as { properties: { talk: { maxLength: number } } }).properties.talk.maxLength;
+    expect([longest(), longest("silent"), longest("brief"), longest("normal"), longest("chatty")]).toEqual([400, 220, 220, 400, 700]);
+  });
+
+  it("reads the answer to the length the ask says", () => {
+    expect(answerOptions({ ...ask, talk: "chatty", topUp: [choices[2]] })).toEqual({ opening: true, topUp: [choices[2]], maxChars: 700 });
+    expect(answerOptions({ ...ask, previous: { name: "x", artists: [] } })).toEqual({ opening: false, topUp: undefined, maxChars: 400 });
+  });
+
+  it("knows its own settings only", () => {
+    expect(["silent", "brief", "normal", "chatty"].every(isTalkStyle)).toBe(true);
+    expect(isTalkStyle("loud")).toBe(false);
+    expect(isTalkStyle("constructor")).toBe(false);
+  });
+});
+
+describe("fitTalk", () => {
+  const lead: Candidate = { ...candidates(1, ["onRepeat"])[0], name: "Midnight City", artists: ["M83"] };
+
+  it("leaves a line that fits", () => {
+    expect(fitTalk("Here's Midnight City by M83.", 40, lead)).toBe("Here's Midnight City by M83.");
+  });
+
+  it("keeps whole sentences, from the start, and always the one bringing in the first song", () => {
+    expect(fitTalk("Here's Midnight City by M83. A big one. And a lot more to say after it.", 40, lead)).toBe("Here's Midnight City by M83. A big one.");
+    // The song comes last: what comes before it goes once there's no room, the song's sentence stays.
+    expect(fitTalk("Good evening. You've had this on repeat all week. Here's Midnight City by M83.", 45, lead)).toBe(
+      "Good evening. Here's Midnight City by M83.",
+    );
+    // Sentences don't come back once one didn't fit: the line reads on from where it stopped.
+    expect(fitTalk("Good evening. You've had this on repeat all week. Yes. Here's Midnight City.", 40, lead)).toBe(
+      "Good evening. Here's Midnight City.",
+    );
+  });
+
+  it("finds the song's sentence by its title alone, when its artist is named in another", () => {
+    const home: Candidate = { ...lead, name: "Home", artists: ["Edward Sharpe"] };
+    expect(fitTalk("Edward Sharpe wrote this one for the road. It's a long story. Here's Home.", 30, home)).toBe("Here's Home.");
+  });
+
+  it("keeps the first sentence when nothing fits", () => {
+    expect(fitTalk("A very long first sentence that runs well past the limit. Short.", 20, lead)).toBe(
+      "A very long first sentence that runs well past the limit.",
+    );
+  });
+});
+
 describe("readAnswer", () => {
   const choices = candidates(6, ["onRepeat"]);
 
@@ -284,6 +345,14 @@ describe("readAnswer", () => {
     // A request's set is topped up only with songs it names.
     expect(names({ songs: [1, 2], talk: "Your request, Song 0." }, { topUp: [choices[4]] })).toEqual(["Song 0", "Song 1", "Song 4"]);
     expect(readAnswer({ songs: [1, 2, 3], talk: "Here's Song 0. And after that we" }, choices, seg("onRepeat"))?.talk).toBe("Here's Song 0.");
+  });
+
+  it("keeps the line to its length, with the sentence bringing in the song it starts with", () => {
+    const talk = "What a week it's been for you and your music. Let's keep it going. Here's Song 4 by Artist 4.";
+    const pick = readAnswer({ songs: [1, 2, 3], talk }, choices, seg("onRepeat"), { maxChars: 60 });
+    expect(pick?.talk).toBe("Here's Song 4 by Artist 4.");
+    expect(pick?.songs[0].name).toBe("Song 4");
+    expect(readAnswer({ songs: [1, 2, 3], talk }, choices, seg("onRepeat"))?.talk).toBe(talk);
   });
 });
 

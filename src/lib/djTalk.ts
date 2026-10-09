@@ -34,6 +34,34 @@ function partOfDay(now: Date): string {
 /** The longest custom instructions the DJ takes. */
 export const INSTRUCTIONS_MAX = 1000;
 
+/** How much the DJ talks (Settings → AI DJ). "silent" is Just play: no voice, its line only shown, as long as Brief's. */
+export type TalkStyle = "silent" | "brief" | "normal" | "chatty";
+
+export interface TalkLength {
+  /** How long a line should be, as the persona asks for it: so many sentences, under so many words. */
+  sentences: string;
+  words: number;
+  /** The longest line kept: the schema's limit for models that take one, and where `fitTalk` cuts for the rest. */
+  maxChars: number;
+  /** Room for the whole answer, for models that aren't cloud ones. */
+  maxTokens: number;
+}
+
+export const TALK_STYLES: Record<TalkStyle, TalkLength> = {
+  silent: { sentences: "One or two short sentences", words: 25, maxChars: 220, maxTokens: 250 },
+  brief: { sentences: "One or two short sentences", words: 25, maxChars: 220, maxTokens: 250 },
+  normal: { sentences: "One to three short sentences", words: 50, maxChars: 400, maxTokens: 300 },
+  chatty: { sentences: "Two to four sentences", words: 80, maxChars: 700, maxTokens: 400 },
+};
+
+export function isTalkStyle(raw: string): raw is TalkStyle {
+  return Object.hasOwn(TALK_STYLES, raw);
+}
+
+export function talkLength(style: TalkStyle = "normal"): TalkLength {
+  return TALK_STYLES[style];
+}
+
 export interface SegmentAsk {
   segment: Segment;
   choices: Candidate[];
@@ -60,7 +88,13 @@ export interface SegmentAsk {
   reactions?: Reactions;
   /** What too short a set may be topped up from: for a request, only the songs it names. */
   topUp?: Candidate[];
+  /** How much the DJ talks: Normal by default. */
+  talk?: TalkStyle;
   now?: Date;
+}
+
+function isOpening(ask: SegmentAsk): boolean {
+  return ask.opening ?? !ask.previous;
 }
 
 /** Someone else's words, cut to `max` and set between triple quotes they can't close: any run of quote marks
@@ -73,12 +107,13 @@ export function fence(text: string, max: number): string[] {
 /** The system message: who the DJ is and how it talks. */
 function persona(ask: SegmentAsk, opening: boolean): string {
   const instructions = fence(ask.instructions, INSTRUCTIONS_MAX);
+  const length = talkLength(ask.talk);
   const system = [
     "You are the listener's personal radio DJ inside their music app. Between songs you say a few words out loud,",
     "warm, upbeat and natural, like a good radio host.",
     "",
     "How you talk:",
-    "- One to three short sentences, under 50 words in all. It is spoken aloud: no lists, emojis, hashtags,",
+    `- ${length.sentences}, under ${length.words} words in all. It is spoken aloud: no lists, emojis, hashtags,`,
     "  markdown, quotation marks around the whole thing, or stage directions.",
     "- Introduce the first song you picked by its title and artist, and say why it's here using only the",
     "  facts given or looked up (when they played it, when they liked it, what it is).",
@@ -142,7 +177,7 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
 
 export function segmentMessages(ask: SegmentAsk): DjMessage[] {
   const now = ask.now ?? new Date();
-  const opening = ask.opening ?? !ask.previous;
+  const opening = isOpening(ask);
   const user = [
     ...situation(ask, opening, now),
     "",
@@ -185,7 +220,7 @@ export function lookUpTool(choices: number): DjTool {
 /** The first question to a model that can look things up: which songs, if any, it wants to know more about. */
 export function lookUpMessages(ask: SegmentAsk): DjMessage[] {
   const now = ask.now ?? new Date();
-  const opening = ask.opening ?? !ask.previous;
+  const opening = isOpening(ask);
   const user = [
     ...situation({ ...ask, lookedUp: undefined }, opening, now),
     "",
@@ -244,7 +279,7 @@ function reactionLines(r: Reactions | undefined): string[] {
 
 /** The answer's shape. llama.cpp writes properties in alphabetical order: the name, then the songs,
  * then the talk, which can then introduce the first song it picked. */
-export function segmentSchema(choices: number): object {
+export function segmentSchema(choices: number, talk?: TalkStyle): object {
   return {
     type: "object",
     properties: {
@@ -255,7 +290,7 @@ export function segmentSchema(choices: number): object {
         minItems: Math.min(SET_MIN, choices),
         maxItems: SET_MAX,
       },
-      talk: { type: "string", maxLength: 400 },
+      talk: { type: "string", maxLength: talkLength(talk).maxChars },
     },
     required: ["name", "songs", "talk"],
     additionalProperties: false,
@@ -321,13 +356,18 @@ const EVERYDAY = new Set([
   "me", "music", "now", "one", "outro", "run", "song", "stay", "time", "together", "tonight", "up", "us", "you",
 ]);
 
-/** The song the talk brings in: of `choices`, the one whose title comes first in it, on whole words and without
- * its version ("(Remastered 2011)", " - Live at…"). A short or everyday title counts only with its artist named. */
+/** A song's title as a talk is searched for it: without its version ("(Remastered 2011)", " - Live at…"). */
+function titleOf(c: Candidate): string {
+  return wordsOf(c.name.replace(/\s*[([][^)\]]*[)\]]/g, "").split(" - ")[0]);
+}
+
+/** The song the talk brings in: of `choices`, the one whose title comes first in it, on whole words. A short or
+ * everyday title counts only with its artist named. */
 export function introduced(talk: string, choices: Candidate[]): Candidate | null {
   const said = ` ${wordsOf(talk)} `;
   let found: { c: Candidate; at: number } | null = null;
   for (const c of choices) {
-    const title = wordsOf(c.name.replace(/\s*[([][^)\]]*[)\]]/g, "").split(" - ")[0]);
+    const title = titleOf(c);
     const at = title ? said.indexOf(` ${title} `) : -1;
     if (at < 0 || (found && at >= found.at)) continue;
     const weak = title.length <= 3 || (!title.includes(" ") && EVERYDAY.has(title));
@@ -337,15 +377,47 @@ export function introduced(talk: string, choices: Candidate[]): Candidate | null
   return found?.c ?? null;
 }
 
+/** The line cut to whole sentences within `maxChars`: as many as fit from the start, and always the one that brings
+ * in `lead`, wherever it is. Cloud models aren't held to the schema's length, so their lines are kept short this
+ * way. A line with nothing that fits keeps its first sentence. */
+export function fitTalk(talk: string, maxChars: number, lead: Candidate): string {
+  if (talk.length <= maxChars) return talk;
+  const parts = sentences(talk);
+  const title = titleOf(lead);
+  let keep = parts.findIndex((s) => introduced(s, [lead]));
+  if (keep < 0 && title) keep = parts.findIndex((s) => ` ${wordsOf(s)} `.includes(` ${title} `));
+  // Each sentence takes its length and a space before it.
+  let room = maxChars + 1 - (keep >= 0 ? parts[keep].length + 1 : 0);
+  let full = false;
+  const kept = parts.filter((s, i) => {
+    if (i === keep) return true;
+    if (full || s.length + 1 > room) {
+      full = true;
+      return false;
+    }
+    room -= s.length + 1;
+    return true;
+  });
+  return kept.length ? kept.join(" ") : parts[0];
+}
+
 export interface AnswerOptions {
   /** The show's first set, whose line greets the listener. */
   opening?: boolean;
   /** What too short a set is topped up from: for a request, only the songs it names. All the choices by default. */
   topUp?: Candidate[];
+  /** The longest line kept, in whole sentences. */
+  maxChars?: number;
+}
+
+/** How the answer to `ask` is read. */
+export function answerOptions(ask: SegmentAsk): AnswerOptions {
+  return { opening: isOpening(ask), topUp: ask.topUp, maxChars: talkLength(ask.talk).maxChars };
 }
 
 /** The model's answer, checked against the choices it had: the set starts with the song its talk brings in, is
- * topped up to a set's length when it can be, and its line ends on a whole sentence. Null when it isn't usable. */
+ * topped up to a set's length when it can be, and its line ends on a whole sentence, within its length. Null when
+ * it isn't usable. */
 export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment, opts: AnswerOptions = {}): Pick | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as { name?: unknown; songs?: unknown; talk?: unknown };
@@ -372,7 +444,7 @@ export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment,
     songs.push(c);
   }
   const name = typeof a.name === "string" ? cleanTalk(a.name).slice(0, 40) : "";
-  return { name: name || segment.label, songs, talk };
+  return { name: name || segment.label, songs, talk: opts.maxChars ? fitTalk(talk, opts.maxChars, songs[0]) : talk };
 }
 
 function byline(c: { name: string; artists: string[] }): string {
