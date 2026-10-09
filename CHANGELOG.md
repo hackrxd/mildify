@@ -27,11 +27,14 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
 - The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
+- The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
+  and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 
 ### Fixed
 
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
-
+- The DJ page no longer says turning the DJ on downloads "0 B" when its files are already there, or a language model
+  when a cloud model or your own server writes what it says.
 - With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
   rest aren't picked yet. Settings says so, and keeps your choice for when it picks whole sets.
 - The DJ's set starts with the song its line introduces, and a line the model left unfinished ends at its last
