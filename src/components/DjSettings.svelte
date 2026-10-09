@@ -4,7 +4,7 @@
   import { INSTRUCTIONS_MAX, isTalkStyle, listenerName, NAME_MAX } from "../lib/djTalk";
   import { choicePatch, CLOUD_NAMES, cloudModelOf, cloudOf, DEFAULT_CLOUD_MODEL, firstCloudModel, modelChoiceOf } from "../lib/djView";
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
-  import { router } from "../lib/router.svelte";
+  import { router, SECTION_IDS } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
   import Icon from "./Icon.svelte";
@@ -106,7 +106,7 @@
   }
 </script>
 
-<section>
+<section id={SECTION_IDS.dj}>
   <h2>AI DJ</h2>
 
   <label class="row">
@@ -453,6 +453,10 @@
 </section>
 
 <style>
+  /* Opened from a link, it clears the top bar as the page's own heading does. */
+  section {
+    scroll-margin-top: 80px;
+  }
   .row .prose {
     width: 100%;
     height: auto;
