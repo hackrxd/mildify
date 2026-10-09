@@ -42,7 +42,8 @@
 
 {#if menu.open}
   <ul class="menu" role="menu" bind:this={el} style:left="{pos.x}px" style:top="{pos.y}px">
-    {#each menu.items as item (item.label)}
+    <!-- Not keyed by label: two entries may share one, as two artists may share a name. -->
+    {#each menu.items as item}
       <li role="none">
         <button
           role="menuitem"
