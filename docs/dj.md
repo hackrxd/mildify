@@ -5,8 +5,9 @@ listening and talks between them. The voice is always made on your computer, and
 have a cloud model write it ([Cloud models](#cloud-models)).
 
 It's **off by default**, and nothing of it is installed with Mildify. Turning it on (Settings → AI DJ, or
-the DJ page) downloads what it runs on, once. Turning it off stops a download and unloads the model; Settings
-→ AI DJ → **Remove the DJ's files** deletes all of it.
+the DJ page in the sidebar) downloads what it runs on, once. Before that, Settings → AI DJ lets you pick its
+language model and voice, so only what you picked downloads. Turning it off stops a download and unloads the
+model; Settings → AI DJ → **Remove the DJ's files** deletes all of it.
 
 ## What it plays
 
