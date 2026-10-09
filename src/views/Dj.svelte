@@ -7,6 +7,7 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
+  import { djLead, providerName } from "../lib/djView";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -30,9 +31,6 @@
     dj.request(request);
     request = "";
   }
-  const CLOUD_NAMES: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
-  /** The cloud provider writing the talk, if one is. */
-  const cloud = $derived(status ? (CLOUD_NAMES[status.settings.provider] ?? null) : null);
   const lamp = $derived(
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
   );
@@ -83,15 +81,7 @@
       <h1>DJ</h1>
       {#if ready}<OnAirLamp mode={lamp} />{/if}
     </div>
-    <p class="muted lead">
-      {#if cloud}
-        Your own radio DJ. It plays songs from your listening and talks between them: {cloud} writes what it says, and
-        the voice is made on this computer.
-      {:else}
-        Your own radio DJ, running on this computer. It plays songs from your listening and talks between them, in a
-        voice made here rather than in the cloud.
-      {/if}
-    </p>
+    <p class="muted lead">{djLead(status)}</p>
   </header>
 
   {#each blocks as b (b.key)}
@@ -141,7 +131,7 @@
         {:else if status.setup}
           <section class="card" in:rise>
             <p>
-              The DJ is set to use {cloud ?? "your own model server"}, and it isn't set up yet:
+              The DJ is set to use {providerName(status.settings)}, and it isn't set up yet:
               {lowerFirst(status.setup)}.
             </p>
             <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
