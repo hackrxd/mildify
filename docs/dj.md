@@ -76,11 +76,15 @@ under it), and next skips the rest of what it's saying. The queue lists it befor
 the DJ fades out whatever was playing, so its greeting is an item of its own too.
 
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
-what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
-introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
-in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with the
-song its line brings in, whatever order the model gave, and a line the model left unfinished ends at its last whole
-sentence.
+what it said lately, so it carries on instead of welcoming you again, and doesn't repeat itself. A model on your
+computer is reminded of its last three lines, a cloud model of its last six and how they started. Each line leads
+a different way from the two before: why the song is here, what ties the set together, how it follows the song
+that's ending, the time of day, or your request.
+
+It introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every
+song in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with
+the song its line brings in, whatever order the model gave, and a line the model left unfinished ends at its last
+whole sentence.
 
 **How much your DJ talks** (Settings → AI DJ) sets how long its lines are: **Brief** is a sentence or two,
 **Normal** (the default) up to three, and **Chatty** up to four. A line longer than that is cut to whole sentences,

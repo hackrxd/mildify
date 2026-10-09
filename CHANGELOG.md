@@ -20,6 +20,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - When the DJ's voice fails, what it would have said shows as captions while the music plays on.
 - The DJ no longer calls you by a username from your Spotify account, and after its greeting it says your name only
   now and then.
+- The DJ repeats itself less: each line starts a different way from the two before, and it remembers more of what it
+  said.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
 
