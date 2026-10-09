@@ -7,7 +7,10 @@ have a cloud model write it ([Cloud models](#cloud-models)).
 It's **off by default**, and nothing of it is installed with Mildify. Turning it on (Settings → AI DJ, or
 the DJ page in the sidebar) downloads what it runs on, once. Before that, Settings → AI DJ lets you pick its
 language model and voice, so only what you picked downloads. Turning it off stops a download and unloads the
-model; Settings → AI DJ → **Remove the DJ's files** deletes all of it.
+model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once you've said so under the button.
+
+Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
+shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it.
 
 ## What it plays
 
@@ -228,7 +231,8 @@ They usually write better than the downloaded models. You need your own API key 
 Paste the key and press Save. It's kept in your system's keychain (macOS Keychain, Windows Credential Manager, or
 the Secret Service on Linux, such as GNOME Keyring or KWallet). Where there's no keychain, it's kept in a file in
 the app's data folder that only you can read. The key is sent only to its provider, never shown again, and
-**Remove key** deletes it. Once a key is saved, Settings lists the models it can use, newest first.
+**Remove key** deletes it, asking first when the DJ is playing with it, since that stops it. Once a key is saved,
+Settings lists the models it can use, newest first.
 
 What the DJ uses is billed to your account with the provider; each set is one or two short requests. Nothing is
 downloaded for a cloud model, and the voice is still made on your computer. For Anthropic's newest models, the DJ
