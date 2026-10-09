@@ -1,5 +1,9 @@
 // In-memory navigation with back/forward history, like a native app.
 
+/** The parts of a page a route can open at, by the id of the element each one is. */
+export const SECTION_IDS = { dj: "dj-settings" } as const;
+export type Section = keyof typeof SECTION_IDS;
+
 export type Route =
   | { name: "home" }
   | { name: "search"; q?: string }
@@ -14,7 +18,8 @@ export type Route =
   | { name: "dj" }
   /** A page an extension added; `id` is `<extension id>/<page id>`. */
   | { name: "extension"; id: string }
-  | { name: "settings" }
+  /** `section` opens the page at that part of it. */
+  | { name: "settings"; section?: Section }
   /** What's new: the changelog. */
   | { name: "changelog" };
 
@@ -63,3 +68,8 @@ class Router {
 }
 
 export const router = new Router();
+
+/** The element a route opens its page at, if it names one. */
+export function sectionOf(route: Route): string | null {
+  return route.name === "settings" && route.section ? SECTION_IDS[route.section] : null;
+}
