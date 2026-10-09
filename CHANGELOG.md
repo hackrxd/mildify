@@ -33,10 +33,13 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   DJ's settings, instead of only in a notice that goes away.
 - Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
   and before removing the DJ's files.
+- The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
 
 ### Fixed
 
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
+- A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
+  app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.
 - The DJ page no longer says turning the DJ on downloads "0 B" when its files are already there, or a language model
   when a cloud model or your own server writes what it says.
 - With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
