@@ -32,6 +32,10 @@ song before halfway, that artist sits out the rest of the session.
 
 The 2026 Web API has no recommendations, so the DJ plays only music you already listen to.
 
+The DJ page lists each set's songs with their covers, which go to the album, and their artists. A song's heart
+likes it, as anywhere in the app, and right-clicking it gives the menu songs have everywhere, apart from **Add to
+queue**: a song queued there would play in the middle of the DJ's set.
+
 ### Picking as it goes
 
 With **Pick songs as it goes** on (Settings → AI DJ, off by default), the DJ still plans each set, but it only
