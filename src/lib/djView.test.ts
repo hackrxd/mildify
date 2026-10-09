@@ -10,6 +10,7 @@ import {
   modelName,
   offNote,
   providerName,
+  troubleNotes,
   voiceName,
 } from "./djView";
 import type { DjConfig, DjStatus } from "./ipc";
@@ -135,5 +136,24 @@ describe("offNote", () => {
     expect(offNote(off({}, parts.map((p) => ({ ...p, installed: true }))))).toBe(
       "The DJ is off. What it runs on is already downloaded, and you can remove it in Settings.",
     );
+  });
+});
+
+describe("troubleNotes", () => {
+  it("says what's wrong with the model and the voice, while the DJ plays or after, as whole sentences", () => {
+    expect(troubleNotes({ model: "OpenAI didn't accept your API key", voice: "No audio output device", talk: "normal", playing: true })).toEqual([
+      "Your DJ is talking from templates: OpenAI didn't accept your API key.",
+      "Your DJ lost its voice, so its lines show as captions: No audio output device.",
+    ]);
+    expect(troubleNotes({ model: "Your credit ran out.", voice: "Is a speaker plugged in?", talk: "brief", playing: false })).toEqual([
+      "When it last played, your DJ talked from templates: Your credit ran out.",
+      "When it last played, your DJ lost its voice: Is a speaker plugged in?",
+    ]);
+  });
+
+  it("has nothing to say when nothing's wrong, nor about the voice on Just play, which has none", () => {
+    expect(troubleNotes({ model: null, voice: null, talk: "normal", playing: true })).toEqual([]);
+    expect(troubleNotes({ model: null, voice: "No audio output device", talk: "silent", playing: true })).toEqual([]);
+    expect(troubleNotes({ model: "Out of credit", voice: "No audio output device", talk: "silent", playing: true })).toHaveLength(1);
   });
 });

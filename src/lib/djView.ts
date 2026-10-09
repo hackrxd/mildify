@@ -1,5 +1,6 @@
 // What the DJ's pages say about it, and how its settings' choices map onto its config: who writes its talk and which
 // voice reads it out. Pure, so the wording is tested without a page.
+import type { TalkStyle } from "./djTalk";
 import type { DjCloud, DjConfig, DjModelChoice, DjStatus } from "./ipc";
 import { formatBytes } from "./util";
 
@@ -96,4 +97,30 @@ export function offNote(status: DjStatus): string {
       ? `what it runs on, about ${size}: a language model, a voice and the programs for them`
       : `what it runs on, about ${size}: a voice and the program for it`;
   return `The DJ is off. Turning it on downloads ${what}. Nothing is downloaded until then, and you can remove it all again in Settings.`;
+}
+
+/** `why` as the end of a sentence: a full stop, unless it ends on its own. */
+function ended(why: string): string {
+  const text = why.trim();
+  return /[.!?…]["'”’)]*$/.test(text) ? text : `${text}.`;
+}
+
+/** What the DJ says when its model fails in a way the listener can fix, and plays on from templates: as it happens
+ * (`playing`), or after. */
+export function modelNote(why: string, playing: boolean): string {
+  return playing ? `Your DJ is talking from templates: ${ended(why)}` : `When it last played, your DJ talked from templates: ${ended(why)}`;
+}
+
+/** What the DJ says when its voice fails, and its lines show as captions instead. */
+export function voiceNote(why: string, playing: boolean): string {
+  return playing ? `Your DJ lost its voice, so its lines show as captions: ${ended(why)}` : `When it last played, your DJ lost its voice: ${ended(why)}`;
+}
+
+/** The DJ page's notes on what's wrong with the DJ's model and voice, until it's fixed. Just play has no voice to
+ * lose. */
+export function troubleNotes(trouble: { model: string | null; voice: string | null; talk: TalkStyle; playing: boolean }): string[] {
+  const notes: string[] = [];
+  if (trouble.model) notes.push(modelNote(trouble.model, trouble.playing));
+  if (trouble.voice && trouble.talk !== "silent") notes.push(voiceNote(trouble.voice, trouble.playing));
+  return notes;
 }
