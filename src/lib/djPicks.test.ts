@@ -70,6 +70,8 @@ describe("buildPool", () => {
     expect(one.playedAt?.toISOString()).toBe("2026-10-03T10:00:00.000Z");
     expect(one.year).toBe("2011");
     expect(one.artists).toEqual(["Artist 1"]);
+    // The track as the Web API gave it, for its cover and links.
+    expect(one.track).toEqual(track(1));
   });
 
   it("sorts likes by how long ago they were", () => {

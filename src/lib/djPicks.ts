@@ -23,6 +23,9 @@ export interface Candidate {
   likedAt: Date | null;
   /** When it was last played, if lately. */
   playedAt: Date | null;
+  /** The Web API's track it came from: its album, cover and artists for the DJ page, and the track extensions'
+   * menu entries are given. */
+  track?: Track;
 }
 
 /** The user's listening, as the Web API gives it. */
@@ -58,6 +61,7 @@ export function buildPool(l: Listening, now = new Date()): Candidate[] {
         reasons: [],
         likedAt: null,
         playedAt: null,
+        track: t,
       };
       pool.set(t.uri, c);
     }
