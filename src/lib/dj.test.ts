@@ -2494,6 +2494,41 @@ describe("a second session", () => {
     expect(dj.said.map((l) => l.name)).toEqual([first.name]);
   });
 
+  it("starts each line another way than the last two did, and afresh each session", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const lead = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0][1].content.match(/Lead with [^:.]*/)?.[0];
+    const intoNextSet = async (set: { songs: { uri: string }[] }) => {
+      const next = dj.upNext!;
+      await toLastSong(set);
+      await playing(next.songs[0].uri, 0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dj.current?.id).toBe(next.id);
+    };
+    const first = await started();
+    expect(lead()).toBe("Lead with why the first song is here for them");
+    await intoNextSet(first);
+    expect(lead()).toBe("Lead with what ties this set together");
+    dj.stop();
+    // A new session starts afresh, and a set the model didn't write doesn't count how its line led.
+    const answer = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate.mockImplementationOnce(answer).mockRejectedValueOnce(new Error("no model"));
+    const again = await started();
+    expect(lead()).toBe("Lead with why the first song is here for them");
+    await intoNextSet(again);
+    expect(lead()).toBe("Lead with why the first song is here for them");
+  });
+
+  it("remembers more of what it said for a cloud model, and how its lines started", async () => {
+    const prompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0][1].content;
+    await started();
+    expect(prompt()).toContain("What you said before:");
+    expect(prompt()).not.toContain("Openings you've used");
+    dj.stop();
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    await started();
+    expect(prompt()).toContain("Openings you've used: \"Here's set number…\"");
+  });
+
   it("takes a request made while it's starting as the set after the opening one", async () => {
     player.isPlaying = false;
     let release = () => {};

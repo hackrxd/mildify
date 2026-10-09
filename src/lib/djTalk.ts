@@ -100,6 +100,10 @@ export interface SegmentAsk {
   setNumber?: number;
   /** What the DJ said before these, most recent last, so it doesn't say it again. */
   earlier?: string[];
+  /** A small model's prompt: less of what was said before, so it has room to think. */
+  compact?: boolean;
+  /** How this set's line starts, so lines don't all start alike. */
+  angle?: Angle;
   /** The DJ may name every song it picked, not just the first; not while it picks them as it goes (`live`). */
   nameAll?: boolean;
   /** What the DJ looked up about some of the choices, as `songFacts` lines. */
@@ -148,7 +152,7 @@ function persona(ask: SegmentAsk, opening: boolean): string {
   if (!opening) {
     system.push(
       "- The show is already on. Don't greet the listener, welcome them or open the show again: carry on between",
-      '  songs the way a host does ("next up", "coming up", "here\'s"), without repeating what you said before.',
+      "  songs the way a host does. Start differently from anything you said before, and don't reuse its phrases.",
     );
   }
   system.push("- Never make up facts about artists, songs, charts or the listener.");
@@ -161,6 +165,56 @@ function persona(ask: SegmentAsk, opening: boolean): string {
     );
   }
   return system.join("\n");
+}
+
+/** How much of what was said before a prompt takes: a small model's less, so it has room to think. */
+const EARLIER_COMPACT = { lines: 3, chars: 500 };
+const EARLIER_FULL = { lines: 6, chars: 1500 };
+/** How many of the latest lines' openings a model with room is shown. */
+const OPENINGS_SHOWN = 8;
+
+/** The first few words of a line, as the listener hears it start. */
+function openingOf(line: string): string {
+  return line.trim().split(/\s+/).slice(0, 3).join(" ").replace(/[,.;:!?…]+$/, "");
+}
+
+/** What the DJ said before, for it not to say again: the latest lines that fit, oldest first, the latest always.
+ * A model with room for more is also told how its lines have started. */
+export function earlierLines(earlier: string[], compact: boolean): string[] {
+  const max = compact ? EARLIER_COMPACT : EARLIER_FULL;
+  const said = earlier.map((t) => t.trim()).filter(Boolean);
+  const kept: string[] = [];
+  let chars = 0;
+  for (const t of [...said].reverse()) {
+    if (kept.length && (kept.length >= max.lines || chars + t.length > max.chars)) break;
+    kept.unshift(t);
+    chars += t.length;
+  }
+  if (!kept.length) return [];
+  const out = [`What you said before: ${kept.map((t) => `"${t}"`).join(" Then: ")}`];
+  const openings = [...new Set(said.slice(-OPENINGS_SHOWN).map(openingOf))];
+  if (!compact) out.push(`Openings you've used: ${openings.map((o) => `"${o}…"`).join(", ")}. Start some other way.`);
+  return out;
+}
+
+/** Ways a line can start, so the show doesn't sound the same set after set. */
+export type Angle = "why" | "theme" | "bridge" | "moment" | "request";
+
+const ANGLES: Record<Angle, { applies: (ask: SegmentAsk) => boolean; line: string }> = {
+  why: { applies: () => true, line: "Lead with why the first song is here for them: when they played it or liked it, or what it is." },
+  theme: { applies: () => true, line: "Lead with what ties this set together." },
+  bridge: { applies: (ask) => !!ask.previous, line: "Lead with a link from the song that's ending to the first song." },
+  moment: { applies: () => true, line: "Lead with the moment: the time of day, or the day of the week." },
+  request: { applies: (ask) => !!ask.request?.trim(), line: "Lead with what they asked for." },
+};
+
+/** How a set's line starts: one that fits the set, and neither of the last two used. None at the opening, which
+ * greets the listener. */
+export function pickAngle(ask: SegmentAsk, recent: Angle[], random: () => number = Math.random): Angle | null {
+  if (isOpening(ask)) return null;
+  const last = recent.slice(-2);
+  const open = (Object.keys(ANGLES) as Angle[]).filter((a) => ANGLES[a].applies(ask) && !last.includes(a));
+  return open.length ? open[Math.floor(random() * open.length)] : null;
 }
 
 /** Where the show is, the songs on offer, and anything looked up about them. */
@@ -187,13 +241,13 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
       );
     }
     if (ask.previous) where.push(`You're coming out of "${ask.previous.name}" by ${ask.previous.artists.join(", ")}.`);
-    const earlier = (ask.earlier ?? []).filter((t) => t.trim()).slice(-2);
-    if (earlier.length) where.push(`What you said before: ${earlier.map((t) => `"${t.trim()}"`).join(" Then: ")}`);
+    where.push(...earlierLines(ask.earlier ?? [], ask.compact ?? false));
   }
   if (ask.skippedSet) {
     where.push(`The listener skipped the rest of the set "${ask.skippedSet}": they weren't feeling it, so take the show somewhere else.`);
   }
   where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions));
+  if (ask.angle) where.push(ANGLES[ask.angle].line);
   const request = fence(ask.request ?? "", REQUEST_MAX);
   if (request.length) {
     where.push(

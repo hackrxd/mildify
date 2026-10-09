@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   answerOptions,
+  earlierLines,
   cleanName,
   cleanTalk,
   facts,
@@ -19,10 +20,13 @@ import {
   readAnswer,
   segmentMessages,
   NAME_MAX,
+  pickAngle,
   saysName,
   segmentSchema,
   sentences,
   songFacts,
+  type Angle,
+  type SegmentAsk,
   type TalkStyle,
 } from "./djTalk";
 import { type Candidate, type Listening, requestSegment, SEGMENTS, SET_MAX } from "./djPicks";
@@ -123,12 +127,16 @@ describe("segmentMessages", () => {
     });
     expect(user.content).toContain("This is set 3 of the show, already under way.");
     expect(user.content).toContain('coming out of "Midnight City" by M83');
-    expect(user.content).toContain('What you said before: "That was a good one. Next up, some favorites." Then: "Here\'s Song 9."');
-    expect(user.content).not.toContain("welcome to the show");
+    expect(user.content).toContain(
+      'What you said before: "Hey Sam, welcome to the show." Then: "That was a good one. Next up, some favorites." Then: "Here\'s Song 9."',
+    );
     expect(user.content).not.toContain("greet the listener");
     expect(user.content).not.toContain("name is Sam");
     expect(user.content).toContain("Don't call the listener by name this time.");
     expect(system.content).toContain("Don't greet the listener, welcome them or open the show again");
+    expect(system.content).toContain("Start differently from anything you said before");
+    // No stock phrases to lean on.
+    expect(system.content).not.toMatch(/next up|coming up|here's/i);
     // The opening is where it says hello.
     const [opening] = segmentMessages({ segment: seg("onRepeat"), choices, listener: "Sam", previous: null, instructions: "", now: NOW });
     expect(opening.content).not.toContain("Don't greet");
@@ -314,6 +322,53 @@ describe("the listener's name", () => {
     expect(segmentMessages({ ...ask, setNumber: 5, talk: "brief" })[1].content).toContain("Don't call the listener by name this time.");
     const nameless = segmentMessages({ ...ask, listener: null, setNumber: 5 })[1].content;
     expect(nameless).not.toContain("call the listener");
+  });
+});
+
+describe("what it said before", () => {
+  const lines = Array.from({ length: 10 }, (_, i) => `Line ${i + 1} of the show, with some words.`);
+
+  it("keeps the latest few lines for a small model, and more, with how the latest started, for a cloud one", () => {
+    expect(earlierLines(lines, true)).toEqual([
+      'What you said before: "Line 8 of the show, with some words." Then: "Line 9 of the show, with some words." Then: "Line 10 of the show, with some words."',
+    ]);
+    const [said, openings] = earlierLines(lines, false);
+    expect(said.match(/"Line \d+/g)).toEqual(["\"Line 5", "\"Line 6", "\"Line 7", "\"Line 8", "\"Line 9", "\"Line 10"]);
+    expect(openings).toBe(`Openings you've used: ${lines.slice(2).map((_, i) => `"Line ${i + 3} of…"`).join(", ")}. Start some other way.`);
+  });
+
+  it("keeps lines within their length, and always the latest", () => {
+    const long = Array.from({ length: 3 }, (_, i) => `${i}${"x".repeat(199)}`);
+    expect(earlierLines(long, true)[0].match(/"\d/g)).toEqual(['"1', '"2']);
+    expect(earlierLines(["y".repeat(900)], true)[0]).toContain("y".repeat(900));
+    expect(earlierLines([" ", ""], false)).toEqual([]);
+  });
+});
+
+describe("pickAngle", () => {
+  const choices = candidates(4, ["onRepeat"]);
+  const ask = { segment: seg("onRepeat"), choices, listener: null, previous: { name: "x", artists: ["y"] }, instructions: "", now: NOW };
+  const first = () => 0;
+  const last = () => 0.999;
+
+  it("leads each set some way the last two didn't", () => {
+    expect(pickAngle(ask, [], first)).toBe("why");
+    expect(pickAngle(ask, ["why"], first)).toBe("theme");
+    expect(pickAngle(ask, ["bridge", "why", "theme"], first)).toBe("bridge");
+    expect(pickAngle(ask, [], last)).toBe("moment");
+  });
+
+  it("only in ways that fit the set, and not at the opening", () => {
+    const angles = (a: SegmentAsk) =>
+      new Set(Array.from({ length: 20 }, (_, i) => pickAngle(a, [], () => i / 20)));
+    expect(angles({ ...ask, previous: null, opening: false })).toEqual(new Set<Angle>(["why", "theme", "moment"]));
+    expect(angles({ ...ask, request: "more Radiohead" })).toEqual(new Set<Angle>(["why", "theme", "bridge", "moment", "request"]));
+    expect(pickAngle({ ...ask, previous: null }, [], first)).toBeNull();
+  });
+
+  it("tells the model how to lead", () => {
+    expect(segmentMessages({ ...ask, angle: "bridge" })[1].content).toContain("Lead with a link from the song that's ending");
+    expect(segmentMessages(ask)[1].content).not.toContain("Lead with");
   });
 });
 

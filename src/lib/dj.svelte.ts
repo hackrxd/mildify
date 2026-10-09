@@ -31,7 +31,9 @@ import {
   INSTRUCTIONS_MAX,
   isTalkStyle,
   listenerName,
+  pickAngle,
   sentences,
+  type Angle,
   type Pick,
   type SegmentAsk,
   type TalkStyle,
@@ -277,6 +279,8 @@ class Dj {
   #setIds = 0;
   /** Sets picked this session, for the model to know how far into the show it is. */
   #setsThisSession = 0;
+  /** How the model's lines this session have started, so the next starts another way. */
+  #angles: Angle[] = [];
   /** Bumped when the next set being picked is no longer wanted (the listener asked for something else). */
   #prepareGen = 0;
   /** The set the listener skipped the rest of, for the next prompt; and its songs, which leaving isn't a skip of. */
@@ -812,6 +816,7 @@ class Dj {
     this.#modelWarned = false;
     this.modelTrouble = null;
     this.#setsThisSession = 0;
+    this.#angles = [];
     this.said = [];
     this.#segments = [];
     this.#outOfSongs = false;
@@ -937,6 +942,8 @@ class Dj {
       opening,
       setNumber: this.#setsThisSession + 1,
       earlier: this.#earlier(),
+      // A model on this computer, or the listener's own, has less room than a cloud one.
+      compact: this.status?.settings.provider === "local" || this.status?.settings.provider === "own",
       nameAll: this.nameAll,
       live,
       reactions,
@@ -946,6 +953,7 @@ class Dj {
       skippedSet,
       talk: this.talk,
     };
+    ask.angle = pickAngle(ask, this.#angles) ?? undefined;
     const asked = await this.#askModel(ask, timeoutMs, stale);
     let pick = asked.pick;
     const why = asked.why;
@@ -971,6 +979,7 @@ class Dj {
     if (skippedSet !== undefined && this.#setSkipped === skippedSet) this.#setSkipped = null;
     // A template doesn't mention them: the next prompt still does.
     if (byModel && reactions) this.#taste.toldOf(reactions);
+    if (byModel && ask.angle) this.#angles.push(ask.angle);
     this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));
     this.#setsThisSession++;
@@ -1043,7 +1052,7 @@ class Dj {
     const spoken = this.said.map((s) => s.talk);
     const cur = this.current;
     if (cur && this.announced !== cur && !spoken.includes(cur.talk)) spoken.push(cur.talk);
-    return spoken.slice(-2);
+    return spoken;
   }
 
   /** The model failed in a way the listener can fix (a refused key, no credit, a model that doesn't exist): said once
