@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  askBefore,
   choicePatch,
   cloudModelOf,
   cloudOf,
@@ -40,7 +41,10 @@ function status(patch: Partial<DjConfig> = {}): DjStatus {
     install: { running: false, component: null, received: 0, total: null, error: null },
     disk_bytes: 0,
     folder: "/dj",
-    models: [{ id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1 }],
+    models: [
+      { id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1 },
+      { id: "qwen3-4b", label: "Qwen3 4B", detail: null, bytes: 2 },
+    ],
     voices: [{ id: "michael", label: "Michael (American)", detail: null, bytes: 1 }],
   };
 }
@@ -155,5 +159,43 @@ describe("troubleNotes", () => {
     expect(troubleNotes({ model: null, voice: null, talk: "normal", playing: true })).toEqual([]);
     expect(troubleNotes({ model: null, voice: "No audio output device", talk: "silent", playing: true })).toEqual([]);
     expect(troubleNotes({ model: "Out of credit", voice: "No audio output device", talk: "silent", playing: true })).toHaveLength(1);
+  });
+});
+
+describe("askBefore", () => {
+  it("asks before another model only while the DJ plays, since switching stops it", () => {
+    const qwen3 = { kind: "model", choice: "local:qwen3-4b" } as const;
+    expect(askBefore(qwen3, status(), true)).toEqual({
+      text: "Switch the DJ to Qwen3 4B? It stops playing to switch. Start it again from the DJ page.",
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    });
+    expect(askBefore(qwen3, status(), false)).toBeNull();
+    expect(askBefore({ kind: "model", choice: "own" }, status(), true)?.text).toMatch(/^Switch the DJ to your own model server\? /);
+    expect(askBefore({ kind: "model", choice: "anthropic" }, status(), true)?.text).toMatch(/^Switch the DJ to Anthropic\? /);
+    expect(askBefore({ kind: "model", choice: "local:qwen2.5-1.5b" }, status(), true)).toBeNull();
+  });
+
+  it("asks before removing the key the DJ is using, while it plays", () => {
+    const openai = status({ provider: "openai" });
+    expect(askBefore({ kind: "key", provider: "openai" }, openai, true)).toEqual({
+      text: "Remove your OpenAI API key? The DJ is using it, so it stops playing.",
+      confirm: "Remove and stop",
+      cancel: "Keep playing",
+    });
+    expect(askBefore({ kind: "key", provider: "openai" }, openai, false)).toBeNull();
+    expect(askBefore({ kind: "key", provider: "gemini" }, openai, true)).toBeNull();
+  });
+
+  it("always asks before removing the DJ's files", () => {
+    const files = { ...status(), disk_bytes: 1_300_000_000 };
+    expect(askBefore({ kind: "files" }, files, false)).toEqual({
+      text: "Remove the DJ's files, 1.3 GB? The DJ turns off, and they download again when you turn it back on.",
+      confirm: "Remove them",
+      cancel: "Keep them",
+    });
+    expect(askBefore({ kind: "files" }, files, true)?.text).toBe(
+      "Remove the DJ's files, 1.3 GB? It stops playing and turns off, and they download again when you turn it back on.",
+    );
   });
 });

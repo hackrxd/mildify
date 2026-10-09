@@ -124,3 +124,46 @@ export function troubleNotes(trouble: { model: string | null; voice: string | nu
   if (trouble.voice && trouble.talk !== "silent") notes.push(voiceNote(trouble.voice, trouble.playing));
   return notes;
 }
+
+/** A change in Settings that can stop the DJ: another model, its key removed, or its files deleted. */
+export type DjChange = { kind: "model"; choice: string } | { kind: "key"; provider: DjCloud } | { kind: "files" };
+
+/** What Settings asks under a setting before a change, and its two answers. */
+export interface Question {
+  text: string;
+  confirm: string;
+  cancel: string;
+}
+
+/** The model picker's value, named: the downloaded model, the own server or the cloud provider. */
+function choiceName(choice: string, status: DjStatus): string {
+  const settings = { ...status.settings, ...choicePatch(choice) };
+  return settings.provider === "local" ? modelName({ ...status, settings }) : providerName(settings);
+}
+
+/** What Settings asks before `change`, or null to go ahead: another model or removing the key in use only while the
+ * DJ plays, since either stops it; deleting its files always, gigabytes that take a while to download again. */
+export function askBefore(change: DjChange, status: DjStatus, playing: boolean): Question | null {
+  if (change.kind === "files") {
+    return {
+      text: `Remove the DJ's files, ${formatBytes(status.disk_bytes)}? ${playing ? "It stops playing and turns off" : "The DJ turns off"}, and they download again when you turn it back on.`,
+      confirm: "Remove them",
+      cancel: "Keep them",
+    };
+  }
+  if (!playing) return null;
+  if (change.kind === "model") {
+    if (change.choice === modelChoiceOf(status.settings)) return null;
+    return {
+      text: `Switch the DJ to ${choiceName(change.choice, status)}? It stops playing to switch. Start it again from the DJ page.`,
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    };
+  }
+  if (change.provider !== status.settings.provider) return null;
+  return {
+    text: `Remove your ${CLOUD_NAMES[change.provider]} API key? The DJ is using it, so it stops playing.`,
+    confirm: "Remove and stop",
+    cancel: "Keep playing",
+  };
+}
