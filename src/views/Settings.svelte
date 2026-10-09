@@ -1131,7 +1131,8 @@
     padding-top: 12px;
   }
   .buttons {
-    display: flex;
+    display: flex !important;
+    align-items: center;
     flex: none;
     gap: 8px;
   }
