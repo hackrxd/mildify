@@ -1009,6 +1009,10 @@
     display: grid;
     gap: 2px;
   }
+  /* A button beside a setting keeps its words on one line; the description wraps instead. */
+  :where(.page) :global(.row > .btn) {
+    flex: none;
+  }
   :where(.page) :global(.label) {
     font-weight: 600;
   }
