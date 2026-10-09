@@ -419,14 +419,40 @@ export function sentences(text: string): string[] {
 }
 
 const ENDS = /[.!?…]["”’')]*$/;
-const WELCOMES = /^(hey|hi|hello|welcome|good (morning|afternoon|evening|night))\b|\bwelcome\b/i;
+const WELCOMES = /^(hey|hi|hello|welcome|good (morning|afternoon|evening|night))\b|\bwelcome back\b/i;
 
-/** A line ending on a whole sentence: an unfinished last one (an answer cut off) goes when a whole one comes before
- * it, or gets a full stop. Past the opening, a first sentence welcoming the listener again goes too. */
-export function finishTalk(talk: string, opening = false): string {
-  let parts = sentences(talk);
-  if (parts.length > 1 && !ENDS.test(parts.at(-1)!)) parts = parts.slice(0, -1);
-  if (!opening && parts.length > 1 && WELCOMES.test(parts[0])) parts = parts.slice(1);
+/** The line's sentences, with a break that falls inside one of the songs' titles ("Mr. Brightside") undone. */
+function sentencesOf(talk: string, songs: Candidate[]): string[] {
+  const titles = songs.map(titleOf).filter(Boolean);
+  const has = (text: string, title: string) => ` ${wordsOf(text)} `.includes(` ${title} `);
+  const out: string[] = [];
+  for (const part of sentences(talk)) {
+    const before = out.at(-1);
+    const joined = `${before} ${part}`;
+    if (before !== undefined && titles.some((t) => has(joined, t) && !has(before, t) && !has(part, t))) out[out.length - 1] = joined;
+    else out.push(part);
+  }
+  return out;
+}
+
+/** An unfinished sentence up to its last comma, when what comes before that still brings the song in. */
+function toLastComma(sentence: string, brings: (text: string) => boolean): string {
+  const cut = sentence.lastIndexOf(",");
+  return cut > 0 && brings(sentence.slice(0, cut)) ? sentence.slice(0, cut) : sentence;
+}
+
+/** A line ending on a whole sentence. An unfinished last one (an answer cut off) goes when a whole one comes before
+ * it, unless it's the one bringing one of the `choices` in: then it ends at its last comma that keeps the song. Past
+ * the opening, a first sentence that only welcomes the listener again goes too. */
+export function finishTalk(talk: string, opening = false, choices: Candidate[] = []): string {
+  let parts = sentencesOf(talk, choices);
+  const brings = (text: string) => !!introduced(text, choices);
+  const last = parts.at(-1);
+  if (last && !ENDS.test(last)) {
+    if (brings(last) && !parts.slice(0, -1).some(brings)) parts = [...parts.slice(0, -1), toLastComma(last, brings)];
+    else if (parts.length > 1) parts = parts.slice(0, -1);
+  }
+  if (!opening && parts.length > 1 && WELCOMES.test(parts[0]) && !brings(parts[0])) parts = parts.slice(1);
   const out = parts.join(" ").replace(/[\s,;:–—-]+$/, "");
   return out && !ENDS.test(out) ? `${out}.` : out;
 }
@@ -468,7 +494,7 @@ export function introduced(talk: string, choices: Candidate[]): Candidate | null
  * way. A line with nothing that fits keeps its first sentence. */
 export function fitTalk(talk: string, maxChars: number, lead: Candidate): string {
   if (talk.length <= maxChars) return talk;
-  const parts = sentences(talk);
+  const parts = sentencesOf(talk, [lead]);
   const title = titleOf(lead);
   let keep = parts.findIndex((s) => introduced(s, [lead]));
   if (keep < 0 && title) keep = parts.findIndex((s) => ` ${wordsOf(s)} `.includes(` ${title} `));
@@ -514,7 +540,7 @@ export function readAnswer(raw: unknown, choices: Candidate[], segment: Segment,
     if (c && !songs.includes(c) && songs.length < SET_MAX) songs.push(c);
   }
   if (songs.length < Math.min(2, choices.length)) return null;
-  const talk = typeof a.talk === "string" ? finishTalk(cleanTalk(a.talk), opts.opening) : "";
+  const talk = typeof a.talk === "string" ? finishTalk(cleanTalk(a.talk), opts.opening, choices) : "";
   if (talk.length < 8) return null;
   // A talk naming every song names the first too; one that brings in another song starts the set with it.
   const named = introduced(talk, [songs[0]]) ? null : introduced(talk, choices);

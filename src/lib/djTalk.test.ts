@@ -396,6 +396,15 @@ describe("fitTalk", () => {
     expect(fitTalk("Edward Sharpe wrote this one for the road. It's a long story. Here's Home.", 30, home)).toBe("Here's Home.");
   });
 
+  it("keeps a title with a full stop in it whole", () => {
+    const brightside: Candidate = { ...lead, name: "Mr. Brightside", artists: ["The Killers"] };
+    const talk = `${"What a night it has been so far, and we are only getting started with the good stuff. ".repeat(2)}You've played this all week, so let's turn it right up. Here's Mr. Brightside by The Killers.`;
+    expect(talk.length).toBeGreaterThan(220);
+    const fitted = fitTalk(talk, 220, brightside);
+    expect(fitted).toContain("Here's Mr. Brightside by The Killers.");
+    expect(fitted.length).toBeLessThanOrEqual(220);
+  });
+
   it("keeps the first sentence when nothing fits", () => {
     expect(fitTalk("A very long first sentence that runs well past the limit. Short.", 20, lead)).toBe(
       "A very long first sentence that runs well past the limit.",
@@ -458,6 +467,40 @@ describe("sentences", () => {
     // Decimal points and closing quotes don't end a sentence early.
     expect(sentences("Version 2.0 of \u201cHello.\u201d Then more")).toEqual(["Version 2.0 of \u201cHello.\u201d", "Then more"]);
     expect(sentences("  ")).toEqual([]);
+  });
+});
+
+describe("finishTalk, with the songs on offer", () => {
+  const song = (name: string, artist: string): Candidate => ({ ...candidates(1, ["onRepeat"])[0], uri: `spotify:track:${name}`, name, artists: [artist] });
+  const all = [
+    song("Hey Jude", "The Beatles"),
+    song("Welcome to the Black Parade", "My Chemical Romance"),
+    song("Midnight City", "M83"),
+    song("Mr. Brightside", "The Killers"),
+    song("Hey Ya!", "OutKast"),
+  ];
+
+  it("keeps a first sentence that greets only when it brings a song in", () => {
+    for (const line of [
+      "Hey Jude by The Beatles. Enjoy!",
+      "Welcome to the Black Parade by My Chemical Romance, a throwback. Turn it up.",
+      "Hey Ya! by OutKast is next. Enjoy!",
+      "You're always welcome to turn this one up. Here's Midnight City by M83.",
+    ]) {
+      expect(finishTalk(line, false, all)).toBe(line);
+    }
+    expect(finishTalk("Hey there, welcome back! Here's Midnight City by M83.", false, all)).toBe("Here's Midnight City by M83.");
+  });
+
+  it("keeps the song's sentence when an answer is cut off in it, up to its last comma", () => {
+    expect(finishTalk("What a lovely Sunday afternoon. Here's Midnight City by M83, which you've had on repe", false, all)).toBe(
+      "What a lovely Sunday afternoon. Here's Midnight City by M83.",
+    );
+    expect(finishTalk("Something smooth now. Up next: Mr. Brightside by The Killers", false, all)).toBe(
+      "Something smooth now. Up next: Mr. Brightside by The Killers.",
+    );
+    // Once a whole sentence has brought the song in, the cut one goes.
+    expect(finishTalk("Here's Midnight City by M83. Then Hey Jude by The Beat", false, all)).toBe("Here's Midnight City by M83.");
   });
 });
 
