@@ -7,7 +7,7 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
-  import { djLead, offNote, providerName } from "../lib/djView";
+  import { djLead, offNote, providerName, troubleNotes } from "../lib/djView";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -31,6 +31,10 @@
     dj.request(request);
     request = "";
   }
+  /** What's wrong with the DJ's model or voice, until it's fixed; it plays on all the same. */
+  const troubles = $derived(
+    troubleNotes({ model: dj.modelTrouble, voice: dj.voiceTrouble, talk: dj.talk, playing: dj.phase !== "off" }),
+  );
   const lamp = $derived(
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
   );
@@ -38,10 +42,11 @@
   /** The page below the header as one keyed list: the card, then the running order. A set keeps its place as it
    * moves up and as it grows when it's picked as it goes, and the card is measured with the rest, so a change in
    * its height moves the blocks below smoothly. */
-  type Block = { key: number; kind: "set"; set: DjSet } | { key: string; kind: "card" | "said" | "tell" };
+  type Block = { key: number; kind: "set"; set: DjSet } | { key: string; kind: "card" | "trouble" | "said" | "tell" };
   const blocks = $derived.by(() => {
     const out: Block[] = [{ key: "card", kind: "card" }];
     if (ready) {
+      if (troubles.length) out.push({ key: "trouble", kind: "trouble" });
       if (dj.current) out.push({ key: dj.current.id, kind: "set", set: dj.current });
       if (dj.upNext && dj.upNext.id !== dj.current?.id) out.push({ key: dj.upNext.id, kind: "set", set: dj.upNext });
       if (said.length) out.push({ key: "said", kind: "said" });
@@ -57,10 +62,10 @@
   function settle(node: Element, rects: { from: DOMRect; to: DOMRect }, { duration = 420, still = false } = {}) {
     return still || reducedMotion() ? { duration: 0 } : flip(node, rects, { duration, easing: cubicOut });
   }
-  /** A new line's list drops in, once the blocks below have mostly made room; the sets bring their own rows'
-   * entrance. */
+  /** A new line's list, or trouble, drops in, once the blocks below have mostly made room; the sets bring their own
+   * rows' entrance. */
   function enter(node: Element, kind: Block["kind"]) {
-    if (kind === "said") return rise(node, { y: -8, delay: MAKE_ROOM_MS });
+    if (kind === "said" || kind === "trouble") return rise(node, { y: -8, delay: MAKE_ROOM_MS });
     // A transition, not a CSS animation: nothing fades in when the page opens.
     if (kind === "set" && !reducedMotion()) {
       return { delay: MAKE_ROOM_MS, duration: 240, easing: cubicOut, css: (t: number) => `opacity: ${t}` };
@@ -170,6 +175,13 @@
             {/if}
           </section>
         {/if}
+      {:else if b.kind === "trouble"}
+        <section class="card trouble">
+          {#each troubles as note (note)}<p>{note}</p>{/each}
+          <div class="actions">
+            <button class="btn quiet" onclick={() => router.go({ name: "settings", section: "dj" })}>Check the DJ's settings</button>
+          </div>
+        </section>
       {:else if b.kind === "set"}
         {@const now = b.set.id === dj.current?.id}
         <div class="set-head">
@@ -262,6 +274,12 @@
   }
   .card p {
     max-width: 66ch;
+  }
+  /* What's wrong with the DJ's model or voice, until it's fixed. */
+  .trouble {
+    display: grid;
+    gap: 10px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, var(--border));
   }
   .actions {
     display: flex;
