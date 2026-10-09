@@ -517,6 +517,14 @@ describe("finishTalk", () => {
 describe("introduced", () => {
   const choices = candidates(6, ["onRepeat"]);
 
+  it("takes the longer of two titles starting at the same word", () => {
+    const paranoid = { ...choices[0], name: "Paranoid", artists: ["Black Sabbath"] };
+    const android = { ...choices[1], name: "Paranoid Android", artists: ["Radiohead"] };
+    expect(introduced("Here's Paranoid Android by Radiohead.", [paranoid, android])).toBe(android);
+    expect(introduced("Here's Paranoid Android by Radiohead.", [android, paranoid])).toBe(android);
+    expect(introduced("Here's Paranoid by Black Sabbath.", [paranoid, android])).toBe(paranoid);
+  });
+
   it("finds the song a talk brings in by its title, the first named", () => {
     expect(introduced("Starting with Song 3 by Artist 3.", choices)?.name).toBe("Song 3");
     expect(introduced("First Song 4, then Song 2.", choices)?.name).toBe("Song 4");

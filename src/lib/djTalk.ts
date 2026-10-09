@@ -473,18 +473,19 @@ function titleOf(c: Candidate): string {
   return wordsOf(c.name.replace(/\s*[([][^)\]]*[)\]]/g, "").split(" - ")[0]);
 }
 
-/** The song the talk brings in: of `choices`, the one whose title comes first in it, on whole words. A short or
- * everyday title counts only with its artist named. */
+/** The song the talk brings in: of `choices`, the one whose title comes first in it, on whole words, and of two
+ * starting at the same word the longer ("Paranoid Android", not "Paranoid"). A short or everyday title counts only
+ * with its artist named. */
 export function introduced(talk: string, choices: Candidate[]): Candidate | null {
   const said = ` ${wordsOf(talk)} `;
-  let found: { c: Candidate; at: number } | null = null;
+  let found: { c: Candidate; at: number; title: string } | null = null;
   for (const c of choices) {
     const title = titleOf(c);
     const at = title ? said.indexOf(` ${title} `) : -1;
-    if (at < 0 || (found && at >= found.at)) continue;
+    if (at < 0 || (found && (at > found.at || (at === found.at && title.length <= found.title.length)))) continue;
     const weak = title.length <= 3 || (!title.includes(" ") && EVERYDAY.has(title));
     if (weak && !c.artists.some((a) => wordsOf(a) && said.includes(` ${wordsOf(a)} `))) continue;
-    found = { c, at };
+    found = { c, at, title };
   }
   return found?.c ?? null;
 }
