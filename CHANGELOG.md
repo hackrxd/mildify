@@ -22,6 +22,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   now and then.
 - The DJ repeats itself less: each line starts a different way from the two before, and it remembers more of what it
   said.
+- When the DJ talks from a template, it has a few for each moment and never uses the same one twice in a row. On Normal
+  and Chatty, it says why the song is here.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
 

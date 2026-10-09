@@ -121,11 +121,13 @@ What it says shows up as captions: in the player bar where the current lyric lin
 lyrics view. Each word lights up as it's spoken (without a voice, at about the pace it would be), the same way synced
 lyrics do. The DJ page keeps a list of everything it said this session.
 
-If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template
-("That was … Up next, …"). If the voice fails, it plays on without talking, shows what it would have said as
-captions, and says why. The DJ page marks lines that came from a template, and why. When the model fails in a way
-you can fix, such as a cloud provider refusing your key or your account running out of credit, the DJ says so once
-and plays on from templates. Removing the key the DJ is using stops it.
+If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template. It
+has a few for each moment (the opening, after a set, after a set you skipped, your request, a song you liked), never
+uses the same one twice in a row, and on Normal and Chatty says why the first song is here. If the voice fails, it
+plays on without talking, shows what it would have said as captions, and says why. The DJ page marks lines that came
+from a template, and why. When the model fails in a way you can fix, such as a cloud provider refusing your key or
+your account running out of credit, the DJ says so once and plays on from templates. Removing the key the DJ is
+using stops it.
 
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.
