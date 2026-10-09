@@ -1001,6 +1001,28 @@ describe("settings", () => {
     await dj.configure({ model: "qwen3-4b" });
     expect(dj.phase).toBe("off");
   });
+
+  it("asks for lines as long as the listener wants them", async () => {
+    dj.setTalk("chatty");
+    expect(localStorage.getItem("nativify:djTalk")).toBe("chatty");
+    await started();
+    const [messages, schema, maxTokens] = backend.djGenerate.mock.calls.at(-1) as unknown as [
+      { content: string }[],
+      { properties: { talk: { maxLength: number } } },
+      number,
+    ];
+    expect(messages[0].content).toContain("under 80 words");
+    expect([schema.properties.talk.maxLength, maxTokens]).toEqual([700, 400]);
+    dj.setTalk("normal");
+    expect(localStorage.getItem("nativify:djTalk")).toBeNull();
+  });
+
+  it("reads how much it talks back, and only a setting it knows", () => {
+    localStorage.setItem("nativify:djTalk", "brief");
+    expect(new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>).talk).toBe("brief");
+    localStorage.setItem("nativify:djTalk", "shouty");
+    expect(new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>).talk).toBe("normal");
+  });
 });
 
 describe("starting", () => {
@@ -1144,6 +1166,29 @@ describe("starting", () => {
     expect(dj.said[0].talk).toMatch(/^Hey Sam, it's your DJ\./);
   });
 
+  it("just plays: no voice, the music at once, and the line shown about as long as it would take to say", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    expect(backend.djSpeak).not.toHaveBeenCalled();
+    expect(voice.played).toHaveLength(0);
+    expect(player.playUris).toHaveBeenCalledWith(first.songs.map((s) => s.uri), 0, true);
+    expect(dj.onAir).toBeNull();
+    expect([dj.showing, dj.speaking]).toEqual([true, false]);
+    expect(dj.caption?.map((l) => l.text)).toEqual([first.talk]);
+    expect(dj.said.map((l) => [l.talk, l.spoken])).toEqual([[first.talk, false]]);
+    // Its captions run on a clock of their own.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(dj.speechNow()).toBe(1000);
+    const shownFor = Math.max(timing.SHOWN_MIN_MS, first.talk.length * timing.READ_MS_PER_CHAR);
+    await vi.advanceTimersByTimeAsync(shownFor - 1000 - mod.TICK_MS);
+    expect(dj.showing).toBe(true);
+    await vi.advanceTimersByTimeAsync(mod.TICK_MS * 2);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption).toBeNull();
+  });
+
   it("plays on without a voice when the voice fails, and says so once", async () => {
     backend.djSpeak.mockRejectedValue(new Error("The DJ's voice failed: no espeak data"));
     player.isPlaying = false;
@@ -1151,6 +1196,8 @@ describe("starting", () => {
     expect(voice.played).toHaveLength(0);
     // Shown, not read out.
     expect(dj.said.map((l) => l.spoken)).toEqual([false]);
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.said[0].talk]);
     expect(player.playUris).toHaveBeenCalledTimes(1);
     // The next set's line fails too: still one message.
     await playing(dj.upNext!.songs[0].uri, 0);
@@ -1458,6 +1505,90 @@ describe("between sets", () => {
     expect(dj.upNext?.request).toBe("something calm");
     await vi.advanceTimersByTimeAsync(speechMs / 2);
     expect(backend.device).toHaveBeenCalledWith({ action: "seek", position_ms: 0 });
+  });
+
+  it("just plays into the next set, its line shown as the set's last song ends", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    expect(next.speech).toBeNull();
+    const events = heard();
+    await lastSong(first);
+    backend.djDuck.mockClear();
+    player.pos = DURATION - 1000;
+    await tick();
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([next.talk]);
+    // Nothing waits for it: the music isn't turned down, silenced or held, and the next song follows on its own.
+    player.pos = DURATION - 300;
+    await tick();
+    expect(backend.djDuck).not.toHaveBeenCalled();
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current).toBe(next);
+    expect(dj.onAir).toBeNull();
+    expect(dj.showing).toBe(true);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+    expect(events.filter((e) => e.startsWith("line-"))).toEqual([`line-spoken ${next.name}`]);
+  });
+
+  it("speaks over a line still shown: the spoken one's captions take its place", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    // The second set's line can't be voiced: it's shown instead.
+    backend.djSpeak.mockRejectedValueOnce(new Error("no voice"));
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const second = dj.upNext!;
+    expect(second.speech).toBeNull();
+    await lastSong(first);
+    player.pos = DURATION - 1000;
+    await tick();
+    await playing(second.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.showing).toBe(true);
+    // Skipped while its line still shows: the next set's line is spoken, and its captions replace the shown ones.
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.speaking).toBe(true);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.upNext!.talk]);
+  });
+
+  it("takes back a shown line when the listener goes back in the song it was shown over", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    const events = heard();
+    await lastSong(first);
+    player.pos = DURATION - 1000;
+    await tick();
+    expect(dj.showing).toBe(true);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption).toBeNull();
+    expect(dj.said).toHaveLength(1);
+    player.pos = DURATION - 1000;
+    await tick();
+    await tick();
+    expect(dj.showing).toBe(true);
+    expect(events.filter((e) => e.startsWith("line-"))).toEqual([
+      `line-spoken ${next.name}`,
+      `line-withdrawn ${next.name}`,
+      `line-spoken ${next.name}`,
+    ]);
   });
 
   it("starts over when the listener goes back in the song it was talking over", async () => {

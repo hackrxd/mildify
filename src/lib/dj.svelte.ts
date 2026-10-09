@@ -25,8 +25,8 @@ import {
   type Segment,
   type SegmentId,
 } from "./djPicks";
-import { fallbackPick, INSTRUCTIONS_MAX, type Pick, type SegmentAsk } from "./djTalk";
-import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, volumeGain, type Vocals } from "./djTiming";
+import { fallbackPick, INSTRUCTIONS_MAX, isTalkStyle, sentences, type Pick, type SegmentAsk, type TalkStyle } from "./djTalk";
+import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
 import { askModel, GaveUp, songVocals } from "./djPicker";
@@ -48,6 +48,7 @@ const OVER_START_KEY = "nativify:djOverStart";
 const OVER_END_KEY = "nativify:djOverEnd";
 const LIVE_KEY = "nativify:djLive";
 const NAME_ALL_KEY = "nativify:djNameAll";
+const TALK_KEY = "nativify:djTalk";
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -175,6 +176,8 @@ class Dj {
   live = $state(load(LIVE_KEY, false, (raw) => raw === "true"));
   /** Settings → AI DJ: the DJ may name every song in the set, not just the first. */
   nameAll = $state(load(NAME_ALL_KEY, false, (raw) => raw === "true"));
+  /** Settings → AI DJ: how much the DJ talks; Just play ("silent") only shows its lines, and the music plays on. */
+  talk = $state<TalkStyle>(load(TALK_KEY, "normal", (raw) => (isTalkStyle(raw) ? raw : "normal")));
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
@@ -191,7 +194,9 @@ class Dj {
   /** What the listener asked the next set to be, until a set for it comes on. */
   requested = $state<string | null>(null);
   speaking = $state(false);
-  /** The line being spoken, as lyric lines timed from its start. */
+  /** A line shows without the voice (Just play, or the voice failed), for about as long as it would take to say. */
+  showing = $state(false);
+  /** The line being spoken or shown, as lyric lines timed from its start. */
   caption = $state.raw<LyricLine[] | null>(null);
   /** The DJ's item, from its first word until it's done and the song it leads into has come in. */
   onAir = $state.raw<OnAir | null>(null);
@@ -219,6 +224,8 @@ class Dj {
   #cues: Cue[] = [];
   /** Cues on the clock of the line being spoken. */
   #speechCues: Cue[] = [];
+  /** When the line showing without the voice came up, on performance.now()'s clock, and for how long. */
+  #shown: { since: number; forMs: number } | null = null;
   /** Brings the announced set's music in now. Its cue calls it, and so does skipping the talk. */
   #bringIn: (() => void) | null = null;
   /** The song a transition was planned on. */
@@ -401,9 +408,15 @@ class Dj {
     persist(NAME_ALL_KEY, on ? "true" : null);
   }
 
-  /** ms into the line the DJ is speaking, per frame, for captions. */
+  /** Applies from the next set the DJ picks. */
+  setTalk(style: TalkStyle) {
+    this.talk = style;
+    persist(TALK_KEY, style === "normal" ? null : style);
+  }
+
+  /** ms into the line the DJ is speaking or showing, per frame, for captions. */
   speechNow(): number {
-    return this.#voice.now();
+    return this.#shown ? performance.now() - this.#shown.since : this.#voice.now();
   }
 
   /** Play/pause while the DJ's item is up pauses the DJ, and any music under it. */
@@ -777,6 +790,8 @@ class Dj {
   #resetPlayback() {
     this.activity = null;
     this.speaking = false;
+    this.showing = false;
+    this.#shown = null;
     this.caption = null;
     this.onAir = null;
     this.paused = false;
@@ -896,6 +911,7 @@ class Dj {
       // A request's set grows only by songs it names: a mood isn't for the DJ's list to guess.
       topUp: segment.id === "request" ? choices.filter((c) => requestScore(request ?? "")(c) > 0) : undefined,
       skippedSet,
+      talk: this.talk,
     };
     const asked = await this.#askModel(ask, timeoutMs, stale);
     let pick = asked.pick;
@@ -911,7 +927,9 @@ class Dj {
     // Picking as it goes, only the first song is certain; the rest of the plan stays up for grabs.
     const songs = live ? pick.songs.slice(0, 1) : pick.songs;
     for (const s of songs) this.#played.add(s.uri);
-    const [speech, firstVocals] = await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
+    // Just play has no voice, and so no talk to time around the song's vocals.
+    const [speech, firstVocals] =
+      ask.talk === "silent" ? [null, null] : await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
     if (stale()) {
       // A new session has its own.
       if (run === this.#run) this.#unplayed(songs);
@@ -1103,12 +1121,38 @@ class Dj {
     // The request is on.
     if (set.request && this.requested === set.request) this.requested = null;
     if (set.speech) this.#talk(run, set, set.speech);
+    else this.#show(set.talk);
+  }
+
+  /** Shows a line without the voice, as the music plays on: captions timed as if it were read, up as long. */
+  #show(talk: string) {
+    const { lines, durationMs } = readLines(sentences(talk));
+    this.caption = lines;
+    this.showing = true;
+    this.#shown = { since: performance.now(), forMs: durationMs };
+  }
+
+  #unshow() {
+    if (!this.showing) return;
+    this.showing = false;
+    this.caption = null;
+    this.#shown = null;
+  }
+
+  /** Stops the line the DJ is saying or showing, and takes its captions down. */
+  #hush() {
+    this.#voice.stop();
+    this.speaking = false;
+    this.showing = false;
+    this.#shown = null;
+    this.caption = null;
   }
 
   #talk(run: number, set: DjSet, speech: Spoken) {
     if (run !== this.#run) return;
     // Music under the voice goes down; music held back, or going silent at a song's end, is left to that.
     if (!this.#heldMusic && !this.#muteAtEnd && this.#level !== DUCK_LEVEL) this.#duck(0);
+    this.#unshow();
     this.speaking = true;
     this.paused = false;
     this.talkMs = 0;
@@ -1204,13 +1248,14 @@ class Dj {
     rule(!this.#cues.length || !!this.#plannedOn, "hand-over cues with no plan");
     rule(!this.#holdFor || !!this.#plannedOn, "a hold left over from a dropped plan");
     rule(!this.#queueFor || this.#queueFor === this.upNext || this.#queueFor === this.current, "queueing a set let go of");
+    rule(!this.showing || (!this.speaking && !!this.caption && !!this.#shown), "a line shown without captions, or spoken");
     if (this.phase === "off") {
       rule(
-        !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.#preparing &&
-          !this.#rush && this.#queued === "no" && !this.#cues.length && !this.#speechCues.length && !this.#bringIn &&
-          !this.#plannedOn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet && !this.#holdFor &&
-          !this.#muteAtEnd && !this.#queueFor && !this.#leftSet && !this.#setSkipped && !this.#lining &&
-          !this.#setEnds && !this.#heading && !this.requested,
+        !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.showing &&
+          !this.#preparing && !this.#rush && this.#queued === "no" && !this.#cues.length && !this.#speechCues.length &&
+          !this.#bringIn && !this.#plannedOn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet &&
+          !this.#holdFor && !this.#muteAtEnd && !this.#queueFor && !this.#leftSet && !this.#setSkipped &&
+          !this.#lining && !this.#setEnds && !this.#heading && !this.requested,
         "stopped with playback state left",
       );
     }
@@ -1231,6 +1276,7 @@ class Dj {
     const pos = player.positionNow();
     if (this.#watchDevice(now)) return;
     this.#watchVoice(run);
+    if (this.#shown && now - this.#shown.since >= this.#shown.forMs) this.#unshow();
     if (this.#watchMusic(now, uri)) return;
     this.#watchTrack(run, t, uri, pos, now);
     if (this.#watchForeign(now)) return;
@@ -1588,9 +1634,7 @@ class Dj {
    * of the line fits over its intro. */
   #talkFirst(run: number, set: DjSet) {
     // Cut short whatever the DJ was still saying.
-    this.#voice.stop();
-    this.speaking = false;
-    this.caption = null;
+    this.#hush();
     this.#speechCues = [];
     if (set.speech) {
       const plan = this.#planFor(set.speech, set.firstVocals, null, 0, 0);
@@ -1623,10 +1667,8 @@ class Dj {
   /** The listener went back in the song the DJ was about to talk after: forget the plan (and any talk already
    * under way over its end), and plan again from where the song is now. */
   #replan() {
-    if (this.speaking && this.upNext && this.announced === this.upNext && !this.#heldMusic) {
-      this.#voice.stop();
-      this.speaking = false;
-      this.caption = null;
+    if ((this.speaking || this.showing) && this.upNext && this.announced === this.upNext && !this.#heldMusic) {
+      this.#hush();
       this.onAir = null;
       this.paused = false;
       const line = this.said.at(-1);
