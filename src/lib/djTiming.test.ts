@@ -6,6 +6,9 @@ import {
   MIN_OVER_INTRO_MS,
   MIN_OVER_OUTRO_MS,
   planTalk,
+  READ_MS_PER_CHAR,
+  readLines,
+  SHOWN_MIN_MS,
   UNKNOWN_OUTRO_MS,
   vocals,
   VOCAL_GAP_MS,
@@ -141,6 +144,22 @@ describe("captionLines", () => {
 
   it("skips empty sentences", () => {
     expect(captionLines([{ text: "  ", start_ms: 0, end_ms: 10 }])).toEqual([]);
+  });
+});
+
+describe("readLines", () => {
+  it("times a line without a voice as if it were read, a sentence at a time", () => {
+    const { lines, durationMs } = readLines(["Hello there.", "Here's Midnight City by M83, on repeat all week."]);
+    const second = 12 * READ_MS_PER_CHAR + 300;
+    expect(lines.map((l) => [l.text, l.start, l.end])).toEqual([
+      ["Hello there.", 0, 12 * READ_MS_PER_CHAR],
+      ["Here's Midnight City by M83, on repeat all week.", second, second + 48 * READ_MS_PER_CHAR],
+    ]);
+    expect(durationMs).toBe(second + 48 * READ_MS_PER_CHAR);
+  });
+
+  it("keeps a short line up long enough to read", () => {
+    expect(readLines(["Hi."]).durationMs).toBe(SHOWN_MIN_MS);
   });
 });
 

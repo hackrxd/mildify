@@ -206,7 +206,7 @@
         <h2>What your DJ said</h2>
         <ul class="said">
           {#each said as line, i (said.length - i)}
-            <li class:live={i === 0 && dj.speaking} in:rise={{ y: -8, delay: 60 }} animate:settle={{ duration: 320 }}>
+            <li class:live={i === 0 && (dj.speaking || dj.showing)} in:rise={{ y: -8, delay: 60 }} animate:settle={{ duration: 320 }}>
               <span class="segment">{line.name}</span>
               <p>{line.talk}</p>
               {#if !line.byModel}<span class="muted small">From a template: {line.why ?? "the model didn't answer in time"}.</span>{/if}

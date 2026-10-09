@@ -93,9 +93,15 @@ output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voic
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
 segments from top tracks, recent plays and liked songs (read by `djListening.ts`), and `djTalk.ts` asks for
 `{name, songs, talk}` against a JSON schema
-(llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates. Later
-sets are told their number and what was said before, so they don't greet again, and only the first song is named
-unless `dj.nameAll`. When `DjStatus.tools` says the model can call tools, a first request offers `look_up_songs`;
+(llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates
+(`fallbackPick`: a bank per moment, never the last one used). Later sets are told their number, what was said lately
+(`earlierLines`: 3 lines for a model on this computer, 6 and how they started for a cloud one) and a way to lead
+(`pickAngle`, never one of the last two), so they don't greet again or repeat themselves; only the first song is
+named unless `dj.nameAll`, and never in a live set. `readAnswer` starts the set with the song the line brings in and
+ends the line on a whole sentence, within `dj.talk`'s length (`TALK_STYLES`, kept by `fitTalk`, since cloud models
+lose the schema's `maxLength`). The listener's name (`dj.callMe`, else the account's first name when `listenerName`
+says it looks like one; none without `dj.useName`) comes at the opening, then every fourth set on Normal and Chatty
+(`saysName`). When `DjStatus.tools` says the model can call tools, a first request offers `look_up_songs`;
 `dj_song_info` (`songinfo.rs`: librespot metadata through the device's session, Web API artist genres, MusicBrainz
 at 1 request/s, kept a month) answers, and the facts go into the JSON request as plain text, the same for every
 provider;
@@ -108,7 +114,9 @@ the music right at the song's end. Spotify's queued song is caught as it comes u
 start by a cue on the line's clock (`Voice.now()`, kept in the page between the backend's reports, which stands still
 while paused). While it talks, `dj_duck` lowers
 the music in the sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again
-every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. With `dj.live` (Settings: "Pick songs
+every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. A line with no speech (Just play,
+`dj.talk` "silent", or a voice that failed) is only shown (`dj.showing`), on a clock of its own, for as long as
+`readLines` says it takes to read, while the music plays on. With `dj.live` (Settings: "Pick songs
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is

@@ -1,5 +1,6 @@
 // The model's round for a set: what it looks up first, what it picks, and why there's no pick when there isn't.
 import {
+  answerOptions,
   lookUpMessages,
   lookUpsAsked,
   lookUpTool,
@@ -7,6 +8,7 @@ import {
   segmentMessages,
   segmentSchema,
   songFacts,
+  talkLength,
   type Pick,
   type SegmentAsk,
 } from "./djTalk";
@@ -76,10 +78,11 @@ export async function askModel(
         const looked = opts.tools ? await lookUp(ask) : null;
         if (gaveUp || opts.stale()) throw new GaveUp("given up");
         if (looked) found = looked.found;
-        return backend.djGenerate(segmentMessages({ ...ask, lookedUp: looked?.lines }), segmentSchema(ask.choices.length), 300);
+        const messages = segmentMessages({ ...ask, lookedUp: looked?.lines });
+        return backend.djGenerate(messages, segmentSchema(ask.choices.length, ask.talk), talkLength(ask.talk).maxTokens);
       })(),
     );
-    const pick = readAnswer(answer, ask.choices, ask.segment);
+    const pick = readAnswer(answer, ask.choices, ask.segment, answerOptions(ask));
     if (pick) return { pick, why: null, trouble: null, found };
     console.warn("DJ: the model's answer wasn't usable", answer);
     return { pick: null, why: "the model's answer wasn't usable", trouble: null, found };

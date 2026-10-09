@@ -5,15 +5,34 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ## Unreleased
 
+### Added
+
+- "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
+  straight through and what the DJ would say shows only as captions.
+- "What your DJ calls you" and "Use my name", in Settings → AI DJ.
+
 ### Changed
 
 - Asking the DJ for a set understands short artist names like U2, decades in words ("the eighties") and single
   years, and "but" both ways: "no Drake, but Future", "Drake but also Future".
 - Picking another voice for the DJ no longer stops the music: the set carries on, and the DJ switches to the new
   voice after any line it already has ready. Only a voice that still has to download ends the session.
+- When the DJ's voice fails, what it would have said shows as captions while the music plays on.
+- The DJ no longer calls you by a username from your Spotify account, and after its greeting it says your name only
+  now and then.
+- The DJ repeats itself less: each line starts a different way from the two before, and it remembers more of what it
+  said.
+- When the DJ talks from a template, it has a few for each moment and never uses the same one twice in a row. On Normal
+  and Chatty, it says why the song is here.
+- A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
+  the song.
 
 ### Fixed
 
+- With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
+  rest aren't picked yet. Settings says so, and keeps your choice for when it picks whole sets.
+- The DJ's set starts with the song its line introduces, and a line the model left unfinished ends at its last
+  whole sentence instead of mid-word.
 - The DJ's Qwen3 4B model now downloads from a fixed version with a checked hash, like everything else it
   downloads, so a later change to the file can't slip in.
 - Quote marks in what you tell the DJ, or ask it for, can no longer get mixed up with its own instructions.

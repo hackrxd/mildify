@@ -3,7 +3,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
   import { dj } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX } from "../lib/djTalk";
+  import { INSTRUCTIONS_MAX, isTalkStyle, listenerName, NAME_MAX } from "../lib/djTalk";
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
@@ -87,6 +87,15 @@
     if (serverUrl.trim() !== djSettings?.server_url || serverModel.trim() !== djSettings?.server_model) {
       dj.configure({ server_url: serverUrl.trim(), server_model: serverModel.trim() });
     }
+  }
+
+  let callMe = $state(dj.callMe);
+  /** The first name on the Spotify account, when it looks like a name: what the DJ calls the listener by default. */
+  const accountName = $derived(listenerName(session.user?.display_name));
+
+  function saveCallMe() {
+    dj.setCallMe(callMe);
+    callMe = dj.callMe;
   }
 
   const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
@@ -576,8 +585,9 @@
         {/if}
         <div class="row">
           <span class="muted small">
-            With {CLOUD_NAMES[cloud]}, what the DJ is asked goes to {CLOUD_NAMES[cloud]}: your first name, the songs it's
-            choosing from with when you played or liked them, what it looked up about them, and your instructions below.
+            With {CLOUD_NAMES[cloud]}, what the DJ is asked goes to {CLOUD_NAMES[cloud]}: the name it calls you, the songs
+            it's choosing from with when you played or liked them, what it looked up about them, and your instructions
+            below.
           </span>
         </div>
       {/if}
@@ -659,6 +669,55 @@
 
       <label class="row">
         <span>
+          <span class="label">How much your DJ talks</span>
+          <span class="muted small">
+            Just play has no voice: the music plays straight through, and what the DJ would say shows as captions.
+            Applies from its next set.
+          </span>
+        </span>
+        <select class="field" value={dj.talk} onchange={(e) => isTalkStyle(e.currentTarget.value) && dj.setTalk(e.currentTarget.value)}>
+          <option value="silent">Just play</option>
+          <option value="brief">Brief</option>
+          <option value="normal">Normal</option>
+          <option value="chatty">Chatty</option>
+        </select>
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">Use my name</span>
+          <span class="muted small">
+            The DJ greets you by name, and says it again now and then: every fourth set on Normal and Chatty. Off, it
+            never does.
+          </span>
+        </span>
+        <input type="checkbox" class="switch" checked={dj.useName} onchange={(e) => dj.setUseName(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">What your DJ calls you</span>
+          <span class="muted small">
+            {#if accountName}
+              Empty, it calls you {accountName}, from your Spotify account.
+            {:else}
+              Empty, it uses no name: the one on your Spotify account doesn't look like one.
+            {/if}
+          </span>
+        </span>
+        <input
+          class="field"
+          maxlength={NAME_MAX}
+          placeholder={accountName ?? "Your name"}
+          disabled={!dj.useName}
+          bind:value={callMe}
+          onblur={saveCallMe}
+          onkeydown={(e) => e.key === "Enter" && saveCallMe()}
+        />
+      </label>
+
+      <label class="row">
+        <span>
           <span class="label">Pick songs as it goes</span>
           <span class="muted small">
             The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
@@ -672,9 +731,21 @@
       <label class="row">
         <span>
           <span class="label">Let the DJ name every song in a set</span>
-          <span class="muted small">Off, it introduces only the first song and lets the rest of the set speak for itself.</span>
+          <span class="muted small">
+            {#if dj.live}
+              While it picks songs as it goes, it introduces only the first song: it hasn't picked the rest yet.
+            {:else}
+              Off, it introduces only the first song and lets the rest of the set speak for itself.
+            {/if}
+          </span>
         </span>
-        <input type="checkbox" class="switch" checked={dj.nameAll} onchange={(e) => dj.setNameAll(e.currentTarget.checked)} />
+        <input
+          type="checkbox"
+          class="switch"
+          checked={dj.nameAll}
+          disabled={dj.live}
+          onchange={(e) => dj.setNameAll(e.currentTarget.checked)}
+        />
       </label>
 
       <label class="row stacked">

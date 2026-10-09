@@ -283,8 +283,9 @@
     </form>
   {/if}
 
-  {#if dj.speaking}
-    <!-- The DJ's words over the lyrics, which wait for it: it never talks over a singer. -->
+  {#if dj.speaking || dj.showing}
+    <!-- The DJ's words over the lyrics: spoken, the lyrics wait for it, as it never talks over a singer; only shown
+         (Just play), they sit over the song. -->
     <div class="dj-over" transition:fade={{ duration: 200 }}><DjCaption stage /></div>
   {/if}
 

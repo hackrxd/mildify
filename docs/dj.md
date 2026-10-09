@@ -39,7 +39,8 @@ you do changes what comes next:
   seconds before the one playing ends, when the player starts loading it.
 - **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
-  last one, so it can mention it.
+  last one, so it can mention it. It introduces only the set's first song, even with **Let the DJ name every song in
+  a set** on: the rest aren't picked yet.
 - **Previous** goes back to the set's song before, as it would in an album, and that doesn't count as a skip. On a
   set's first song, it starts the song again.
 
@@ -75,9 +76,26 @@ under it), and next skips the rest of what it's saying. The queue lists it befor
 the DJ fades out whatever was playing, so its greeting is an item of its own too.
 
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
-what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
-introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
-in a set** (Settings → AI DJ) lets it mention them all.
+what it said lately, so it carries on instead of welcoming you again, and doesn't repeat itself. A model on your
+computer is reminded of its last three lines, a cloud model of its last six and how they started. Each line leads
+a different way from the two before: why the song is here, what ties the set together, how it follows the song
+that's ending, the time of day, or your request.
+
+It introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every
+song in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with
+the song its line brings in, whatever order the model gave, and a line the model left unfinished ends at its last
+whole sentence.
+
+**How much your DJ talks** (Settings → AI DJ) sets how long its lines are: **Brief** is a sentence or two,
+**Normal** (the default) up to three, and **Chatty** up to four. A line that runs well past that is cut to whole
+sentences, keeping the one that brings in the song. With **Just play** the DJ has no voice: the music plays straight through
+from song to song, and what it would have said shows as captions for about as long as it would take to say. A change
+applies from its next set.
+
+The DJ greets you by the first name on your Spotify account, when it looks like a name rather than a username, or by
+what you put under **What your DJ calls you** (Settings → AI DJ). After the opening it says your name only now and
+then: every fourth set on Normal and Chatty, and never again on Brief or Just play. With **Use my name** off, it
+never does.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.
@@ -100,14 +118,16 @@ Your volume and other Spotify apps see no change. The voice plays on this comput
 does, and follows the volume slider, so it sits at the same loudness as the music.
 
 What it says shows up as captions: in the player bar where the current lyric line usually is, and over the
-lyrics view. Each word lights up as it's spoken, the same way synced lyrics do. The DJ page keeps a list of
-everything it said this session.
+lyrics view. Each word lights up as it's spoken (without a voice, at about the pace it would be), the same way synced
+lyrics do. The DJ page keeps a list of everything it said this session.
 
-If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template
-("That was … Up next, …"). If the voice fails, it plays on without talking, and says why. The DJ page marks lines
-that came from a template, and why. When the model fails in a way you can fix, such as a cloud provider refusing
-your key or your account running out of credit, the DJ says so once and plays on from templates. Removing the key
-the DJ is using stops it.
+If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template. It
+has a few for each moment (the opening, after a set, after a set you skipped, your request, a song you liked), never
+uses the same one twice in a row, and on Normal and Chatty says why the first song is here. If the voice fails, it
+plays on without talking, shows what it would have said as captions, and says why. The DJ page marks lines that came
+from a template, and why. When the model fails in a way you can fix, such as a cloud provider refusing your key or
+your account running out of credit, the DJ says so once and plays on from templates. Removing the key the DJ is
+using stops it.
 
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.
@@ -216,8 +236,9 @@ the DJ says never leave it, except to a model server you set up yourself. The lo
 127.0.0.1 only, behind a random key, and is started with `--offline`. The app talks to it, and to a model server of
 your own on this computer, directly, never through a proxy set for your system.
 
-With a cloud model, what the DJ is asked goes to that provider: your first name, the songs it's choosing from
-with when you played or liked them, what it looked up about them, what it said before, and your instructions.
+With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
+off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
+before, and your instructions.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ## Platforms

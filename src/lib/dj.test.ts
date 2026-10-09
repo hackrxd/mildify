@@ -297,6 +297,38 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("calls the listener by the first name on their account, or by what they asked to be called", async () => {
+    const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
+    await started();
+    expect(openingPrompt()).toContain("The listener's name is Sam.");
+    dj.stop();
+    dj.setCallMe('  "Sammy"  ');
+    expect(localStorage.getItem("nativify:djName")).toBe("Sammy");
+    backend.djGenerate.mockClear();
+    await started();
+    expect(openingPrompt()).toContain("The listener's name is Sammy.");
+    dj.setCallMe(" ");
+    expect(localStorage.getItem("nativify:djName")).toBeNull();
+  });
+
+  it("doesn't call the listener by a username, nor by any name once they'd rather it didn't", async () => {
+    const { session } = await import("./session.svelte");
+    session.user!.display_name = "hackr8027";
+    // From a template too.
+    backend.djGenerate.mockRejectedValue(new Error("no model"));
+    await started();
+    expect(dj.said[0].byModel).toBe(false);
+    expect(dj.said[0].talk).not.toMatch(/hackr/i);
+    dj.stop();
+    session.user!.display_name = "Sam Smith";
+    dj.setUseName(false);
+    expect(localStorage.getItem("nativify:djUseName")).toBe("false");
+    backend.djGenerate.mockClear();
+    await started();
+    expect(dj.said[0].talk).not.toContain("Sam");
+    expect((backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content).not.toContain("name is");
+  });
+
   it("counts its sets from the start of each session", async () => {
     await started();
     dj.stop();
@@ -352,6 +384,15 @@ describe("what the DJ is asked", () => {
     expect(localStorage.getItem("nativify:djNameAll")).toBe("true");
     await started();
     expect(lastPrompt()[0].content).not.toContain("Name only that first song");
+  });
+
+  it("names only the first song while it picks songs as it goes, and keeps the setting for when it doesn't", async () => {
+    dj.setNameAll(true);
+    dj.setLive(true);
+    player.isPlaying = false;
+    await dj.start();
+    expect(lastPrompt()[0].content).toContain("Name only that first song: you pick the rest as the listener goes");
+    expect(dj.nameAll).toBe(true);
   });
 
   describe("with a model that can look songs up", () => {
@@ -464,6 +505,29 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.upNext?.request).toBe("something calm");
     expect(dj.upNext!.songs.map((s) => s.uri).sort()).toEqual(old.songs.map((s) => s.uri).sort());
     expect(dj.upNext!.songs.some((s) => first.songs.some((f) => f.uri === s.uri))).toBe(false);
+  });
+
+  it("tops a requested set up only with songs the request names", async () => {
+    const radiohead = { id: "rh", name: "Radiohead", uri: "spotify:artist:rh" };
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items:
+        offset > 0 ? [] : range === "short_term" ? Array.from({ length: 12 }, (_, i) => song(i + 1)) : range === "long_term" ? [1, 2, 3, 4].map((i) => ({ ...song(100 + i), artists: [radiohead] })) : [],
+      next: null,
+      total: 12,
+      offset,
+      limit: 20,
+    }));
+    backend.djGenerate.mockImplementation(async (messages: { content: string }[]) => {
+      answers++;
+      // Two songs for the request, and a line that names none of them.
+      const asked = messages[1].content.includes('"""\nRadiohead\n"""');
+      return { name: `Set ${answers}`, songs: asked ? [1, 2] : [1, 2, 3], talk: asked ? "Your request, right here." : `Here's set number ${answers}, nice and easy.` };
+    });
+    await started();
+    dj.request("Radiohead");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("Radiohead");
+    expect(dj.upNext!.songs.map((s) => s.artists[0])).toEqual(["Radiohead", "Radiohead", "Radiohead"]);
   });
 
   it("does nothing with a request while it's off, or an empty one", async () => {
@@ -595,6 +659,8 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.onAir).toBeNull();
     await vi.advanceTimersByTimeAsync(200);
     expect(dj.said.at(-1)?.byModel).toBe(false);
+    // A template for after a skipped set.
+    expect(dj.said.at(-1)?.talk).toMatch(/^(Not feeling that set\?|Something else, then:|Let's go another way)/);
     expect(dj.onAir).not.toBeNull();
   });
 
@@ -652,6 +718,7 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.upNext?.segment).toBe("request");
     expect(dj.upNext!.songs.length).toBeGreaterThan(0);
     expect(dj.upNext!.songs.every((s) => s.artists.includes("Radiohead"))).toBe(true);
+    expect(dj.upNext!.talk).toMatch(/^(Your request is on|Here's what you asked for|As requested)/);
   });
 
   it("doesn't skip what it's already left: a set the player is past, or one a Next is leaving", async () => {
@@ -969,6 +1036,34 @@ describe("settings", () => {
     await dj.configure({ model: "qwen3-4b" });
     expect(dj.phase).toBe("off");
   });
+
+  it("asks for lines as long as the listener wants them", async () => {
+    dj.setTalk("chatty");
+    expect(localStorage.getItem("nativify:djTalk")).toBe("chatty");
+    await started();
+    const [messages, schema, maxTokens] = backend.djGenerate.mock.calls.at(-1) as unknown as [
+      { content: string }[],
+      { properties: { talk: { maxLength: number } } },
+      number,
+    ];
+    expect(messages[0].content).toContain("under 80 words");
+    expect([schema.properties.talk.maxLength, maxTokens]).toEqual([700, 400]);
+    dj.setTalk("normal");
+    expect(localStorage.getItem("nativify:djTalk")).toBeNull();
+  });
+
+  it("reads how much it talks, and what it calls the listener, back", () => {
+    const fresh = () => new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>);
+    localStorage.setItem("nativify:djTalk", "brief");
+    localStorage.setItem("nativify:djName", ' "Sammy" ');
+    localStorage.setItem("nativify:djUseName", "false");
+    expect([fresh().talk, fresh().callMe, fresh().useName]).toEqual(["brief", "Sammy", false]);
+    // Only a setting it knows.
+    localStorage.setItem("nativify:djTalk", "shouty");
+    expect(fresh().talk).toBe("normal");
+    localStorage.clear();
+    expect([fresh().talk, fresh().callMe, fresh().useName]).toEqual(["normal", "", true]);
+  });
 });
 
 describe("starting", () => {
@@ -1093,11 +1188,57 @@ describe("starting", () => {
     expect(player.playUris).toHaveBeenCalledTimes(1);
   });
 
+  it("starts a set with the song its talk brings in", async () => {
+    let names: string[] = [];
+    backend.djGenerate.mockImplementation(async (messages: { content: string }[]) => {
+      answers++;
+      names = [1, 2, 3].map((n) => messages[1].content.match(new RegExp(`^${n}\\. (.+?) by `, "m"))![1]);
+      return { name: `Set ${answers}`, songs: [1, 2], talk: `Here's ${names[2]}, one you've had on repeat.` };
+    });
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.upNext!.songs.map((s) => s.name)).toEqual([names[2], names[0], names[1]]);
+  });
+
   it("talks from a template when the model doesn't answer", async () => {
     backend.djGenerate.mockRejectedValue(new Error("no model"));
     await dj.start();
     expect(dj.said[0].byModel).toBe(false);
-    expect(dj.said[0].talk).toMatch(/^Hey Sam, it's your DJ\./);
+    expect(dj.said[0].talk).toContain("Sam");
+  });
+
+  it("says why the song is here in a template only when it talks enough for it", async () => {
+    backend.djGenerate.mockRejectedValue(new Error("no model"));
+    await dj.start();
+    expect(dj.said[0].talk).toContain("You've had it on repeat lately.");
+    dj.stop();
+    dj.setTalk("brief");
+    await dj.start();
+    expect(dj.said[0].byModel).toBe(false);
+    expect(dj.said[0].talk).not.toContain("You've had it");
+  });
+
+  it("just plays: no voice, the music at once, and the line shown about as long as it would take to say", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    expect(backend.djSpeak).not.toHaveBeenCalled();
+    expect(voice.played).toHaveLength(0);
+    expect(player.playUris).toHaveBeenCalledWith(first.songs.map((s) => s.uri), 0, true);
+    expect(dj.onAir).toBeNull();
+    expect([dj.showing, dj.speaking]).toEqual([true, false]);
+    expect(dj.caption?.map((l) => l.text)).toEqual([first.talk]);
+    expect(dj.said.map((l) => [l.talk, l.spoken])).toEqual([[first.talk, false]]);
+    // Its captions run on a clock of their own.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(dj.speechNow()).toBe(1000);
+    const shownFor = Math.max(timing.SHOWN_MIN_MS, first.talk.length * timing.READ_MS_PER_CHAR);
+    await vi.advanceTimersByTimeAsync(shownFor - 1000 - mod.TICK_MS);
+    expect(dj.showing).toBe(true);
+    await vi.advanceTimersByTimeAsync(mod.TICK_MS * 2);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption).toBeNull();
   });
 
   it("plays on without a voice when the voice fails, and says so once", async () => {
@@ -1107,6 +1248,8 @@ describe("starting", () => {
     expect(voice.played).toHaveLength(0);
     // Shown, not read out.
     expect(dj.said.map((l) => l.spoken)).toEqual([false]);
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.said[0].talk]);
     expect(player.playUris).toHaveBeenCalledTimes(1);
     // The next set's line fails too: still one message.
     await playing(dj.upNext!.songs[0].uri, 0);
@@ -1123,6 +1266,9 @@ describe("starting", () => {
     voice.end("No audio output device");
     expect(player.playUris).toHaveBeenCalled();
     expect(dj.speaking).toBe(false);
+    // What it couldn't say shows instead.
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.said[0].talk]);
     expect(toasts.show).toHaveBeenCalledWith(expect.stringContaining("No audio output device"), "error", 8000);
   });
 
@@ -1416,6 +1562,90 @@ describe("between sets", () => {
     expect(backend.device).toHaveBeenCalledWith({ action: "seek", position_ms: 0 });
   });
 
+  it("just plays into the next set, its line shown as the set's last song ends", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    expect(next.speech).toBeNull();
+    const events = heard();
+    await lastSong(first);
+    backend.djDuck.mockClear();
+    player.pos = DURATION - 1000;
+    await tick();
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([next.talk]);
+    // Nothing waits for it: the music isn't turned down, silenced or held, and the next song follows on its own.
+    player.pos = DURATION - 300;
+    await tick();
+    expect(backend.djDuck).not.toHaveBeenCalled();
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current).toBe(next);
+    expect(dj.onAir).toBeNull();
+    expect(dj.showing).toBe(true);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+    expect(events.filter((e) => e.startsWith("line-"))).toEqual([`line-spoken ${next.name}`]);
+  });
+
+  it("speaks over a line still shown: the spoken one's captions take its place", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    // The second set's line can't be voiced: it's shown instead.
+    backend.djSpeak.mockRejectedValueOnce(new Error("no voice"));
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const second = dj.upNext!;
+    expect(second.speech).toBeNull();
+    await lastSong(first);
+    player.pos = DURATION - 1000;
+    await tick();
+    await playing(second.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.showing).toBe(true);
+    // Skipped while its line still shows: the next set's line is spoken, and its captions replace the shown ones.
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.speaking).toBe(true);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.upNext!.talk]);
+  });
+
+  it("takes back a shown line when the listener goes back in the song it was shown over", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    const events = heard();
+    await lastSong(first);
+    player.pos = DURATION - 1000;
+    await tick();
+    expect(dj.showing).toBe(true);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    expect(dj.showing).toBe(false);
+    expect(dj.caption).toBeNull();
+    expect(dj.said).toHaveLength(1);
+    player.pos = DURATION - 1000;
+    await tick();
+    await tick();
+    expect(dj.showing).toBe(true);
+    expect(events.filter((e) => e.startsWith("line-"))).toEqual([
+      `line-spoken ${next.name}`,
+      `line-withdrawn ${next.name}`,
+      `line-spoken ${next.name}`,
+    ]);
+  });
+
   it("starts over when the listener goes back in the song it was talking over", async () => {
     const first = await started();
     const next = dj.upNext!;
@@ -1617,6 +1847,22 @@ describe("picking as it goes", () => {
     expect(artistOf(queued()[1]!)).toBe(artistOf(first));
     expect(dj.current?.songs[1].uri).toBe(queued()[1]);
     expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
+  });
+
+  it("talks from a template about a song the listener liked, when the model doesn't answer", async () => {
+    twins();
+    const set = await liveStarted();
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    backend.djGenerate.mockRejectedValue(new Error("no model"));
+    await untilNextSet();
+    expect(dj.upNext!.byModel).toBe(false);
+    expect(dj.upNext!.talk).toMatch(new RegExp(`^(Thanks for liking|Glad you liked) ${set.songs[0].name} by`));
+    // Said once: the set after doesn't thank them for it again.
+    await nextSet();
+    await untilNextSet();
+    expect(dj.upNext!.byModel).toBe(false);
+    expect(dj.upNext!.talk).not.toMatch(/Thanks for liking|Glad you liked/);
   });
 
   it("keeps what's lined up once the player may have started loading it", async () => {
@@ -2266,6 +2512,15 @@ describe("a second session", () => {
     await tick();
   }
 
+  /** Plays `set` to its last song, then on into the next set, which picks the one after. */
+  async function intoNextSet(set: { songs: { uri: string }[] }) {
+    const next = dj.upNext!;
+    await toLastSong(set);
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current?.id).toBe(next.id);
+  }
+
   it("plays, queues and talks as the first did", async () => {
     const before = await started();
     await toLastSong(before);
@@ -2280,6 +2535,51 @@ describe("a second session", () => {
     await toLastSong(first);
     expect(sp.addToQueue.mock.calls.map((c) => c[0])).toEqual(next.songs.map((s) => s.uri));
     expect(dj.said.map((l) => l.name)).toEqual([first.name]);
+  });
+
+  it("starts each line another way than the last two did, and afresh each session", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const lead = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0][1].content.match(/Lead with [^:.]*/)?.[0];
+    const first = await started();
+    expect(lead()).toBe("Lead with why the first song is here for them");
+    await intoNextSet(first);
+    expect(lead()).toBe("Lead with what this segment is about");
+    dj.stop();
+    // A new session starts afresh, and a set the model didn't write doesn't count how its line led.
+    const answer = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate.mockImplementationOnce(answer).mockRejectedValueOnce(new Error("no model"));
+    const again = await started();
+    expect(lead()).toBe("Lead with why the first song is here for them");
+    await intoNextSet(again);
+    expect(lead()).toBe("Lead with why the first song is here for them");
+  });
+
+  it("talks from another template than the one before, and afresh each session", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const answer = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate.mockRejectedValue(new Error("no model"));
+    const first = await started();
+    expect(first.talk).toMatch(/^Hey Sam, it's your DJ\./);
+    expect(dj.upNext!.talk).toMatch(/^That was /);
+    dj.stop();
+    // The model writes the next session's opening, so its first template follows none.
+    backend.djGenerate.mockImplementationOnce(answer);
+    const again = await started();
+    expect(again.byModel).toBe(true);
+    expect(dj.upNext!.talk).toMatch(/^That was /);
+    await intoNextSet(again);
+    expect(dj.upNext!.talk).toMatch(/^You just heard /);
+  });
+
+  it("remembers more of what it said for a cloud model, and how its lines started", async () => {
+    const prompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0][1].content;
+    await started();
+    expect(prompt()).toContain("What you said before:");
+    expect(prompt()).not.toContain("Openings you've used");
+    dj.stop();
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    await started();
+    expect(prompt()).toContain("Openings you've used: \"Here's set number…\"");
   });
 
   it("takes a request made while it's starting as the set after the opening one", async () => {
