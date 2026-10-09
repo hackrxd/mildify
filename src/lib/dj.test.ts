@@ -1266,6 +1266,9 @@ describe("starting", () => {
     voice.end("No audio output device");
     expect(player.playUris).toHaveBeenCalled();
     expect(dj.speaking).toBe(false);
+    // What it couldn't say shows instead.
+    expect(dj.showing).toBe(true);
+    expect(dj.caption?.map((l) => l.text)).toEqual([dj.said[0].talk]);
     expect(toasts.show).toHaveBeenCalledWith(expect.stringContaining("No audio output device"), "error", 8000);
   });
 

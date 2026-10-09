@@ -1222,6 +1222,8 @@ class Dj {
     this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
       if (error) this.#voiceTrouble(error);
       this.#talkEnded(run);
+      // What it couldn't say shows instead, as a line with no voice does.
+      if (error && run === this.#run) this.#show(set.talk);
     });
   }
 
