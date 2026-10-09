@@ -3,7 +3,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
   import { dj } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX } from "../lib/djTalk";
+  import { INSTRUCTIONS_MAX, isTalkStyle } from "../lib/djTalk";
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
@@ -655,6 +655,22 @@
           </span>
         </span>
         <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
+      </label>
+
+      <label class="row">
+        <span>
+          <span class="label">How much your DJ talks</span>
+          <span class="muted small">
+            Just play has no voice: the music plays straight through, and what the DJ would say shows as captions.
+            Applies from its next set.
+          </span>
+        </span>
+        <select class="field" value={dj.talk} onchange={(e) => isTalkStyle(e.currentTarget.value) && dj.setTalk(e.currentTarget.value)}>
+          <option value="silent">Just play</option>
+          <option value="brief">Brief</option>
+          <option value="normal">Normal</option>
+          <option value="chatty">Chatty</option>
+        </select>
       </label>
 
       <label class="row">
