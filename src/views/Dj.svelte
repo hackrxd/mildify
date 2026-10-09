@@ -102,7 +102,7 @@
             </p>
             <div class="actions">
               <button class="btn primary" onclick={() => dj.setEnabled(true)}><Icon name="dj" size={18} /> Turn on the DJ</button>
-              <button class="btn quiet" onclick={() => router.go({ name: "settings" })}>Choose a model and voice</button>
+              <button class="btn quiet" onclick={() => router.go({ name: "settings", section: "dj" })}>Choose a model and voice</button>
             </div>
           </section>
         {:else if missing.length && install?.running}
@@ -134,7 +134,7 @@
               The DJ is set to use {providerName(status.settings)}, and it isn't set up yet:
               {lowerFirst(status.setup)}.
             </p>
-            <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
+            <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings", section: "dj" })}>Set it up in Settings</button></div>
           </section>
         {:else}
           <section class="card start" in:rise>
