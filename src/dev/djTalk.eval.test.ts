@@ -2,17 +2,30 @@
 // How the DJ's talk comes out of a real model, for comparing prompt changes. Skipped unless DJ_EVAL_URL names an
 // OpenAI-compatible server: llama-server running the downloaded model, Ollama's, or the like.
 //   DJ_EVAL_URL=http://127.0.0.1:8080 npx vitest run src/dev/djTalk.eval.test.ts --silent=false
-// DJ_EVAL_MODEL names the model (default "dj", as the app's own server calls it), DJ_EVAL_KEY its key if it has one.
+// DJ_EVAL_MODEL names the model (default "dj", as the app's own server calls it), DJ_EVAL_KEY its key if it has one,
+// and DJ_EVAL_TALK how much the DJ talks (silent, brief, normal or chatty; normal by default).
 // Run it before and after a change and compare what it prints.
 import { describe, expect, it } from "vitest";
 import { SEGMENTS, type Candidate } from "../lib/djPicks";
-import { readAnswer, segmentMessages, segmentSchema, type Pick, type SegmentAsk } from "../lib/djTalk";
+import {
+  answerOptions,
+  isTalkStyle,
+  readAnswer,
+  segmentMessages,
+  segmentSchema,
+  talkLength,
+  type Pick,
+  type SegmentAsk,
+  type TalkStyle,
+} from "../lib/djTalk";
 
 // The app's types leave Node out; this file runs in it.
 declare const process: { env: Record<string, string | undefined> };
 
 const URL = process.env.DJ_EVAL_URL?.replace(/\/+$/, "");
 const SETS = 8;
+const talkSetting = process.env.DJ_EVAL_TALK ?? "normal";
+const TALK: TalkStyle = isTalkStyle(talkSetting) ? talkSetting : "normal";
 
 const ARTISTS = ["M83", "Phoenix", "Beach House", "Röyksopp", "Air", "Justice", "Tame Impala", "Caribou", "Washed Out", "Chvrches"];
 const TITLES = ["Midnight City", "Lisztomania", "Space Song", "Eple", "La Femme d'Argent", "D.A.N.C.E.", "Let It Happen", "Odessa"];
@@ -43,8 +56,8 @@ async function ask(a: SegmentAsk): Promise<unknown> {
       messages: segmentMessages(a),
       stream: false,
       temperature: 0.8,
-      max_tokens: 300,
-      response_format: { type: "json_schema", json_schema: { name: "dj_segment", strict: true, schema: segmentSchema(a.choices.length) } },
+      max_tokens: talkLength(a.talk).maxTokens,
+      response_format: { type: "json_schema", json_schema: { name: "dj_segment", strict: true, schema: segmentSchema(a.choices.length, a.talk) } },
       chat_template_kwargs: { enable_thinking: false },
     }),
   });
@@ -71,18 +84,23 @@ describe.skipIf(!URL)("the DJ's talk, from a model server", () => {
         opening: set === 1,
         setNumber: set,
         earlier: said.map((s) => s.pick?.talk ?? "").filter(Boolean),
+        talk: TALK,
       };
       const raw = await ask(a);
-      const pick = readAnswer(raw, a.choices, a.segment);
+      const pick = readAnswer(raw, a.choices, a.segment, answerOptions(a));
       said.push({ set, pick, raw });
       previous = pick?.songs.at(-1) ?? null;
     }
     const talks = said.flatMap((s) => (s.pick ? [s.pick] : []));
     const counts = talks.map((p) => words(p.talk));
+    const length = talkLength(TALK);
+    const written = said.map((s) => (s.raw as { talk?: unknown } | null)?.talk).filter((t): t is string => typeof t === "string");
     const report = {
+      talk: TALK,
       usable: `${talks.length} of ${SETS}`,
       "words per talk": counts.length ? `${Math.min(...counts)}–${Math.max(...counts)}, ${(counts.reduce((a, b) => a + b, 0) / counts.length).toFixed(1)} on average` : "-",
-      "over 50 words": counts.filter((n) => n > 50).length,
+      [`over ${length.words} words`]: counts.filter((n) => n > length.words).length,
+      [`written over ${length.maxChars} characters`]: written.filter((t) => t.length > length.maxChars).length,
       "name the first song": talks.filter((p) => p.talk.toLowerCase().includes(p.songs[0].name.toLowerCase())).length,
       "different openings": new Set(talks.map((p) => opening(p.talk))).size,
       "greet after the opening": said.filter((s) => s.set > 1 && s.pick && GREETING.test(s.pick.talk)).length,
