@@ -78,8 +78,15 @@ the DJ fades out whatever was playing, so its greeting is an item of its own too
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
 what it said before, so it carries on ("next up…") instead of welcoming you again, and doesn't repeat itself. It
 introduces the set's first song and lets the rest play without reading out the list; **Let the DJ name every song
-in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with the song its line brings in, whatever
-order the model gave, and a line the model left unfinished ends at its last whole sentence.
+in a set** (Settings → AI DJ) lets it mention them all, unless it picks songs as it goes. The set starts with the
+song its line brings in, whatever order the model gave, and a line the model left unfinished ends at its last whole
+sentence.
+
+**How much your DJ talks** (Settings → AI DJ) sets how long its lines are: **Brief** is a sentence or two,
+**Normal** (the default) up to three, and **Chatty** up to four. A line longer than that is cut to whole sentences,
+keeping the one that brings in the song. With **Just play** the DJ has no voice: the music plays straight through
+from song to song, and what it would have said shows as captions for about as long as it would take to say. A change
+applies from its next set.
 
 At its edges, the DJ's item can overlap the songs. It times this with the songs' **lyrics**: a synced lyric's
 first line is where the next song's singer comes in, and its last line is where the finishing song's singer stops.
@@ -102,14 +109,14 @@ Your volume and other Spotify apps see no change. The voice plays on this comput
 does, and follows the volume slider, so it sits at the same loudness as the music.
 
 What it says shows up as captions: in the player bar where the current lyric line usually is, and over the
-lyrics view. Each word lights up as it's spoken, the same way synced lyrics do. The DJ page keeps a list of
-everything it said this session.
+lyrics view. Each word lights up as it's spoken (without a voice, at about the pace it would be), the same way synced
+lyrics do. The DJ page keeps a list of everything it said this session.
 
 If the model is too slow or its answer isn't usable, the DJ picks the songs itself and talks from a template
-("That was … Up next, …"). If the voice fails, it plays on without talking, and says why. The DJ page marks lines
-that came from a template, and why. When the model fails in a way you can fix, such as a cloud provider refusing
-your key or your account running out of credit, the DJ says so once and plays on from templates. Removing the key
-the DJ is using stops it.
+("That was … Up next, …"). If the voice fails, it plays on without talking, shows what it would have said as
+captions, and says why. The DJ page marks lines that came from a template, and why. When the model fails in a way
+you can fix, such as a cloud provider refusing your key or your account running out of credit, the DJ says so once
+and plays on from templates. Removing the key the DJ is using stops it.
 
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.
