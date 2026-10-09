@@ -269,6 +269,12 @@ async function started() {
   return first;
 }
 
+/** Has the next set picked again, as a request does. */
+async function askAgain() {
+  dj.request("something calm");
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 /** An event as its type and what it's about: "set-picked Set 2". */
 function describeEvent(e: DjEvent): string {
   const what = "set" in e && e.set ? e.set.name : "song" in e ? e.song.name : "line" in e ? e.line.name : "";
@@ -358,6 +364,47 @@ describe("what the DJ is asked", () => {
     expect(dj.said[0].why).toContain("didn't accept your API key");
     await vi.advanceTimersByTimeAsync(0);
     expect(toasts.show.mock.calls.filter(([m]) => String(m).includes("talking from templates"))).toHaveLength(1);
+  });
+
+  it("keeps the model's trouble through stopping and starting, until the model answers again", async () => {
+    const answers = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+    await started();
+    dj.stop();
+    expect(dj.modelTrouble).toBe("OpenAI didn't accept your API key");
+    backend.djGenerate.mockImplementation(answers);
+    player.isPlaying = false;
+    const starting = dj.start();
+    expect(dj.modelTrouble).toBe("OpenAI didn't accept your API key");
+    await starting;
+    expect(dj.said.at(-1)?.byModel ?? dj.upNext?.byModel).toBe(true);
+    expect(dj.modelTrouble).toBeNull();
+  });
+
+  it("forgets the model's trouble when its settings change, and says it again if it's still there", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    backend.djSetKey.mockImplementation(async () => dj.status);
+    backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+    const told = () => toasts.show.mock.calls.filter(([m]) => String(m).includes("talking from templates")).length;
+    await started();
+    expect(told()).toBe(1);
+    // A key for a provider the DJ isn't using fixes nothing.
+    await dj.setKey("anthropic", "sk-ant-1");
+    expect(dj.modelTrouble).not.toBeNull();
+    await dj.setKey("openai", "sk-2");
+    expect(dj.modelTrouble).toBeNull();
+    await askAgain();
+    expect(dj.modelTrouble).not.toBeNull();
+    expect(told()).toBe(2);
+    await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    expect(dj.modelTrouble).toBeNull();
+    // Nor does a change that leaves the model as it was, or one that fails.
+    await askAgain();
+    await dj.configure({ musicbrainz: false });
+    expect(dj.modelTrouble).not.toBeNull();
+    backend.djConfigure.mockRejectedValueOnce({ kind: "other", message: "Couldn't save" });
+    await dj.configure({ server_url: "http://127.0.0.1:11434" });
+    expect(dj.modelTrouble).not.toBeNull();
   });
 
   it("doesn't blame the model for the music not waiting", async () => {
@@ -1257,6 +1304,39 @@ describe("starting", () => {
     expect(dj.upNext).not.toBeNull();
     const told = toasts.show.mock.calls.filter(([m]) => String(m).includes("lost its voice"));
     expect(told).toEqual([[expect.stringContaining("no espeak data"), "error", 8000]]);
+  });
+
+  it("keeps the voice's trouble, through stopping and starting, until a line plays through", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    voice.end("No audio output device");
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    dj.stop();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    // Skipped, not played through: that says nothing about the voice.
+    dj.skipTalk();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    dj.stop();
+    player.isPlaying = false;
+    await dj.start();
+    voice.end();
+    expect(dj.voiceTrouble).toBeNull();
+  });
+
+  it("forgets the voice's trouble when another voice is picked, and says it again if it's still there", async () => {
+    backend.djSpeak.mockRejectedValue(new Error("The DJ's voice failed: no espeak data"));
+    const told = () => toasts.show.mock.calls.filter(([m]) => String(m).includes("lost its voice")).length;
+    await started();
+    expect(dj.voiceTrouble).toContain("no espeak data");
+    expect(told()).toBe(1);
+    await dj.configure({ voice: "emma" });
+    expect(dj.voiceTrouble).toBeNull();
+    await askAgain();
+    expect(dj.voiceTrouble).toContain("no espeak data");
+    expect(told()).toBe(2);
   });
 
   it("hands over to the music when a line can't be played", async () => {

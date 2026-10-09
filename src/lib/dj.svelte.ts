@@ -44,6 +44,7 @@ import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
 import { askModel, GaveUp, songVocals } from "./djPicker";
 import { SessionTaste } from "./djTaste";
+import { modelNote, voiceNote } from "./djView";
 import { Voice, type Spoken } from "./djVoice";
 import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
 import type { LyricLine } from "./lyricLines";
@@ -64,6 +65,8 @@ const NAME_ALL_KEY = "nativify:djNameAll";
 const TALK_KEY = "nativify:djTalk";
 const NAME_KEY = "nativify:djName";
 const USE_NAME_KEY = "nativify:djUseName";
+/** The settings that pick the model, or say how to reach it: changing any may fix what was wrong with it. */
+const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "server_url", "server_model", "own_tools", "api_models"];
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -208,8 +211,11 @@ class Dj {
   announced = $state.raw<DjSet | null>(null);
   /** What the DJ has said this session, oldest first. */
   said = $state.raw<SaidLine[]>([]);
-  /** The model's last failure this session that the listener can do something about (a refused key, no credit). */
+  /** The model's last failure that the listener can do something about (a refused key, no credit), for the DJ page:
+   * kept until the model answers again or its settings change, through stopping and starting. */
   modelTrouble = $state<string | null>(null);
+  /** Why the DJ's voice last failed, for the DJ page: kept until a line plays through or another voice is picked. */
+  voiceTrouble = $state<string | null>(null);
   /** What the listener asked the next set to be, until a set for it comes on. */
   requested = $state<string | null>(null);
   speaking = $state(false);
@@ -349,25 +355,33 @@ class Dj {
     // to download first.
     const switching = patch.provider !== undefined || patch.model !== undefined;
     if (patch.enabled === false || switching) this.stop();
+    let saved = true;
     try {
       this.status = await backend.djConfigure(patch);
     } catch (e) {
+      saved = false;
       toasts.error(e);
     }
     if (patch.voice !== undefined && !this.ready) this.stop();
+    if (!saved) return;
+    // A change that may have fixed the model or the voice: what was wrong is forgotten, and said again if it isn't.
+    if (MODEL_SETTINGS.some((k) => patch[k] !== undefined)) this.#forgetModelTrouble();
+    if (patch.voice !== undefined) this.#forgetVoiceTrouble();
   }
 
   /** Saves a cloud provider's API key in the system keychain, or removes it with null. Removing the key the DJ is
    * using stops it. */
   async setKey(provider: DjCloud, key: string | null) {
-    if (key === null && provider === this.status?.settings.provider) this.stop();
+    const inUse = provider === this.status?.settings.provider;
+    if (key === null && inUse) this.stop();
     try {
       this.status = await backend.djSetKey(provider, key);
-      return true;
     } catch (e) {
       toasts.error(e);
       return false;
     }
+    if (inUse) this.#forgetModelTrouble();
+    return true;
   }
 
   /** The models a cloud provider offers with the saved key. */
@@ -812,12 +826,12 @@ class Dj {
   }
 
   /** What a session remembers about its show: what was said and played, liked and skipped, and what it's warned
-   * about. A new session starts it afresh; stopping keeps it, for the DJ page to show. */
+   * about. A new session starts it afresh; stopping keeps it, for the DJ page to show. The model's and voice's
+   * trouble outlast it: they're kept until they're fixed. */
   #resetShow() {
     this.#invariantsBroken.clear();
     this.#voiceWarned = false;
     this.#modelWarned = false;
-    this.modelTrouble = null;
     this.#setsThisSession = 0;
     this.#angles = [];
     this.#lastTemplate = null;
@@ -1039,7 +1053,8 @@ class Dj {
       wait: (p) => this.#rushable(p, timeoutMs),
       stale,
     });
-    if (round.trouble) this.#modelTroubled(round.trouble);
+    if (round.pick) this.modelTrouble = null;
+    else if (round.trouble) this.#modelTroubled(round.trouble);
     return round;
   }
 
@@ -1080,7 +1095,13 @@ class Dj {
     this.modelTrouble = why;
     if (this.#modelWarned) return;
     this.#modelWarned = true;
-    toasts.show(`Your DJ is talking from templates: ${why}`, "error", 8000);
+    toasts.show(modelNote(why, true), "error", 8000);
+  }
+
+  /** The model's settings changed: its trouble is forgotten, and told again if it comes back. */
+  #forgetModelTrouble() {
+    this.modelTrouble = null;
+    this.#modelWarned = false;
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
@@ -1102,17 +1123,24 @@ class Dj {
       const s = await backend.djSpeak(text);
       return { id: s.id, durationMs: s.duration_ms, lines: captionLines(s.sentences) };
     } catch (e) {
-      this.#voiceTrouble(errorMessage(e));
+      this.#voiceFailed(errorMessage(e));
       return null;
     }
   }
 
-  /** The DJ plays on without its voice, and says why, once a session. */
-  #voiceTrouble(why: string) {
+  /** The DJ plays on without its voice, its lines shown instead, and says why, once a session. */
+  #voiceFailed(why: string) {
     console.warn("DJ: no voice:", why);
+    this.voiceTrouble = why;
     if (this.#voiceWarned) return;
     this.#voiceWarned = true;
-    toasts.show(`Your DJ lost its voice, so it plays on without talking. ${why}`, "error", 8000);
+    toasts.show(voiceNote(why, true), "error", 8000);
+  }
+
+  /** Another voice was picked: the old one's trouble is forgotten, and told again if it comes back. */
+  #forgetVoiceTrouble() {
+    this.voiceTrouble = null;
+    this.#voiceWarned = false;
   }
 
   /** Starts a set with a play request: the opening, or after a song that had to wait. The DJ's item comes
@@ -1220,7 +1248,9 @@ class Dj {
     this.caption = speech.lines;
     this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0] };
     this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
-      if (error) this.#voiceTrouble(error);
+      if (error) this.#voiceFailed(error);
+      // A line that played through: the voice works.
+      else this.voiceTrouble = null;
       this.#talkEnded(run);
       // What it couldn't say shows instead, as a line with no voice does.
       if (error && run === this.#run) this.#show(set.talk);
