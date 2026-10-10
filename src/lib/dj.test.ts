@@ -407,6 +407,21 @@ describe("what the DJ is asked", () => {
     expect(dj.modelTrouble).not.toBeNull();
   });
 
+  it("doesn't bring back trouble from a round asked before the settings changed", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    await started();
+    let fail!: (e: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)));
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    fail({ kind: "other", message: "OpenAI didn't accept your API key" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.byModel).toBe(false);
+    expect(dj.modelTrouble).toBeNull();
+    expect(toasts.show).not.toHaveBeenCalledWith(expect.stringContaining("talking from templates"), "error", 8000);
+  });
+
   it("doesn't blame the model for the music not waiting", async () => {
     player.isPlaying = false;
     backend.djGenerate.mockImplementation(() => new Promise(() => {}));

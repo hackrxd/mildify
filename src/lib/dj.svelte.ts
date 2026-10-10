@@ -312,6 +312,8 @@ class Dj {
   #leftSet = $state.raw<DjSet | null>(null);
   /** The listener has been told the model isn't answering, this session. */
   #modelWarned = false;
+  /** Bumped by a change to the model's settings: a round asked before it reports no trouble. */
+  #modelSettings = 0;
   /** For the set playing, picked as it goes: songs skipped, whether it ends with the song playing, whether the
    * song lined up next should be picked again, and a queue change on its way to the player. */
   #setSkips = 0;
@@ -1071,13 +1073,15 @@ class Dj {
   /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
    * time or was given up on. A failure the listener can fix is said once a session. */
   async #askModel(ask: SegmentAsk, timeoutMs: number, stale: () => boolean): Promise<ModelRound> {
+    const settings = this.#modelSettings;
     const round = await askModel(ask, {
       tools: !!this.status?.tools,
       wait: (p) => this.#rushable(p, timeoutMs),
       stale,
     });
     if (round.pick) this.modelTrouble = null;
-    else if (round.trouble) this.#modelTroubled(round.trouble);
+    // Trouble with settings changed since is no news: the change may have fixed it, and the next round tells.
+    else if (round.trouble && settings === this.#modelSettings) this.#modelTroubled(round.trouble);
     return round;
   }
 
@@ -1125,6 +1129,7 @@ class Dj {
   #forgetModelTrouble() {
     this.modelTrouble = null;
     this.#modelWarned = false;
+    this.#modelSettings++;
   }
 
   /** Waits for the model, until the timeout or until the music can't wait any longer. */
