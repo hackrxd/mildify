@@ -10,6 +10,13 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
+- Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
+  and before removing the DJ's files.
+- Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
+- Each set on the DJ page has a menu, from its "…" button or a right-click on its name: skip it, or copy its song
+  list. Its "Skip this set" button shows only while the set can be skipped.
+- Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
+  menu.
 
 ### Changed
 
@@ -31,14 +38,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
   DJ's settings, instead of only in a notice that goes away.
-- Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
-  and before removing the DJ's files.
 - The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
-- Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
-- Each set on the DJ page has a menu, from its "…" button or a right-click on its name: skip it, or copy its song
-  list. "Skip this set" shows only while the set can be skipped.
-- Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
-  menu.
 
 ### Fixed
 
