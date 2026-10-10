@@ -427,6 +427,13 @@ export function requestScore(request: string): (c: Candidate) => number {
   };
 }
 
+/** Whether `request` asks for `artist` by name: "more Radiohead" does; "no Radiohead" and "the 90s" don't. */
+export function asksFor(request: string): (artist: string) => boolean {
+  const score = requestScore(request);
+  const nothingElse = { uri: "", name: "", album: "", year: null, durationMs: 0, explicit: false, reasons: [], likedAt: null, playedAt: null };
+  return (artist) => score({ ...nothingElse, artists: [artist] }) > 0;
+}
+
 /** The decade a word names ("90s", "1980s", "2010s", "eighties"), as its first year. */
 function decadeOf(word: string): number | null {
   // Its own words only: `in` would also find "constructor" on every object.

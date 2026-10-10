@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  asksFor,
   buildPool,
   choicesFor,
   kinship,
@@ -238,6 +239,14 @@ describe("requests", () => {
     expect(score("I can't stand Radiohead", "spotify:track:rh1")).toBeLessThan(0);
     expect(score("nothing but Radiohead", "spotify:track:rh1")).toBeGreaterThan(0);
     expect(score("anything but Radiohead", "spotify:track:rh1")).toBeLessThan(0);
+  });
+
+  it("tells which artists a request asks for by name", () => {
+    expect(asksFor("more Radiohead please")("Radiohead")).toBe(true);
+    expect(asksFor("some U2")("U2")).toBe(true);
+    expect(asksFor("Radiohead")("Band")).toBe(false);
+    expect(asksFor("no Radiohead")("Radiohead")).toBe(false);
+    expect(asksFor("the 90s")("Radiohead")).toBe(false);
   });
 
   it("doesn't match songs on the words around what's asked for", () => {
