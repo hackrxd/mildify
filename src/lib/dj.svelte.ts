@@ -273,8 +273,9 @@ class Dj {
   #lastDuration = 0;
   #foreignSince: number | null = null;
   #remoteSince: number | null = null;
-  /** A set started with a play request, whose first song hasn't come up yet. */
-  #awaiting: DjSet | null = null;
+  /** A set started with a play request, whose first song hasn't come up yet. Reactive, as are `#waitingForSet` and
+   * `#leftSet`, for `canSkipSet`. */
+  #awaiting = $state.raw<DjSet | null>(null);
   /** The DJ paused the music to talk on its own. */
   #heldMusic = false;
   /** The DJ asked for music that isn't reported playing yet. */
@@ -291,7 +292,7 @@ class Dj {
   #repausedAt = -Infinity;
   #stalledSince: number | null = null;
   /** The set's last song is paused at its end because the next set isn't ready yet. */
-  #waitingForSet = false;
+  #waitingForSet = $state(false);
   /** The listener's pause stopped music that was playing under the voice. */
   #pausedMusic = false;
   #outOfSongs = false;
@@ -306,7 +307,7 @@ class Dj {
   #prepareGen = 0;
   /** The set the listener skipped the rest of, for the next prompt; and its songs, which leaving isn't a skip of. */
   #setSkipped: string | null = null;
-  #leftSet: DjSet | null = null;
+  #leftSet = $state.raw<DjSet | null>(null);
   /** The listener has been told the model isn't answering, this session. */
   #modelWarned = false;
   /** For the set playing, picked as it goes: songs skipped, whether it ends with the song playing, whether the
@@ -615,9 +616,16 @@ class Dj {
     return this.#step(() => this.#skipSetNow());
   }
 
+  /** Whether `set` can be skipped now: it's the set playing (there's none unless the DJ is on), the DJ isn't talking
+   * or bringing a set in, the music plays on this computer, and no skip is under way. The page's Skip buttons and
+   * `skipSet()` go by it. */
+  canSkipSet(set: DjSet | null): boolean {
+    return !!set && set.id === this.current?.id && !this.onAir && !this.#awaiting && player.isLocal && !this.#skipping();
+  }
+
   async #skipSetNow() {
     const cur = this.current;
-    if (this.phase !== "on" || !cur || this.onAir || this.#awaiting || !player.isLocal) return;
+    if (!cur || !this.canSkipSet(cur)) return;
     const run = this.#run;
     // A song on its way into the player's queue lands before the queue is cleared.
     await Promise.all([this.#linedUpDone, this.#queuing]);

@@ -704,6 +704,62 @@ describe("asking for a set, and skipping one", () => {
     expect(lastPrompt()[1].content).not.toContain("skipped the rest of the set");
   });
 
+  it("can skip only the set playing, while the DJ isn't talking, and from this computer", async () => {
+    speechMs = 20_000;
+    const first = await started();
+    expect(dj.canSkipSet(first)).toBe(true);
+    expect(dj.canSkipSet(dj.upNext)).toBe(false);
+    expect(dj.canSkipSet(null)).toBe(false);
+    player.isLocal = false;
+    expect(dj.canSkipSet(first)).toBe(false);
+    backend.device.mockClear();
+    await dj.skipSet();
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "clear_queue" });
+    player.isLocal = true;
+    // Talking over the end of the set, into the next one.
+    await lastSong2(first);
+    expect(dj.onAir).not.toBeNull();
+    expect(dj.canSkipSet(first)).toBe(false);
+  });
+
+  it("can't skip the set it's leaving while the next one comes in, with no talk to wait for", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 30_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.canSkipSet(first)).toBe(true);
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(0);
+    // The set picked instead started with a play request, and its first song hasn't come up.
+    const next = dj.upNext!;
+    expect(player.playUris).toHaveBeenLastCalledWith(next.songs.map((s) => s.uri), 0, true);
+    expect([dj.current, dj.onAir]).toEqual([first, null]);
+    expect(dj.canSkipSet(first)).toBe(false);
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current).toBe(next);
+    expect(dj.canSkipSet(next)).toBe(true);
+  });
+
+  it("can't skip a set again while it picks something else, nor once it's stopped", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await playing(first.songs[0].uri, 30_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.canSkipSet(first)).toBe(true);
+    await dj.skipSet();
+    expect(dj.activity).toContain("something else");
+    expect(dj.canSkipSet(first)).toBe(false);
+    dj.stop();
+    expect(dj.canSkipSet(first)).toBe(false);
+  });
+
   it("waits only a few seconds for a set to be picked after a skip, then talks from a template", async () => {
     player.isPlaying = false;
     await dj.start();
