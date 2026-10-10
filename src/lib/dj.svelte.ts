@@ -27,6 +27,7 @@ import {
 } from "./djPicks";
 import {
   cleanName,
+  daypart,
   fallbackPick,
   INSTRUCTIONS_MAX,
   isTalkStyle,
@@ -40,7 +41,7 @@ import {
 } from "./djTalk";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
-import { load, persist, playedLately, rememberPlayed } from "./djMemory";
+import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, voiceNote } from "./djView";
@@ -74,6 +75,8 @@ const NAME_ALL_KEY = "nativify:djNameAll";
 const TALK_KEY = "nativify:djTalk";
 const NAME_KEY = "nativify:djName";
 const USE_NAME_KEY = "nativify:djUseName";
+/** How many of its latest openings a local model hears before opening a session. */
+const OPENINGS_REMEMBERED = 3;
 /** The settings that pick the model, or say how to reach it: changing any may fix what was wrong with it. */
 const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "server_url", "server_model", "own_tools", "api_models"];
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
@@ -256,6 +259,10 @@ class Dj {
   #played = new Set<string>();
   /** What the listener liked and skipped this session. */
   #taste = new SessionTaste();
+  /** What the DJ remembers from one session to the next. */
+  #memory = new DjMemory();
+  /** When this session started: with a set's id, what its memory is kept under. */
+  #sessionStart = 0;
   #preparing: Promise<void> | null = null;
   #rush: (() => void) | null = null;
   #queued: "no" | "pending" | "done" | "failed" = "no";
@@ -343,6 +350,7 @@ class Dj {
 
   constructor(voice?: Voice) {
     if (voice) this.#voice = voice;
+    this.on((e) => this.#remember(e));
   }
 
   async init() {
@@ -789,6 +797,7 @@ class Dj {
     const run = ++this.#run;
     // Playback is at rest already: there's no session to start from but a stopped one.
     this.#resetShow();
+    this.#sessionStart = Date.now();
     this.phase = "starting";
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
@@ -797,7 +806,7 @@ class Dj {
     try {
       this.#pool = buildPool(await loadListening({ user: session.user?.id }));
       if (run !== this.#run) return;
-      this.#played = new Set(playedLately().keys());
+      this.#played = this.#memory.playedWithin(PLAYED_MEMORY_MS);
       this.activity = "Picking your first songs…";
       const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS, true);
       if (run !== this.#run) return;
@@ -916,6 +925,55 @@ class Dj {
   #listeners = new Set<(event: DjEvent) => void>();
 
   /** Calls `fn` with each thing that happens in a session, as it happens; returns a function that stops it. */
+  /** Forgets what the DJ remembers from earlier sessions: what it played, what was skipped and liked while it
+   * played, how its sets went and what it said. This session carries on as it is. */
+  forget() {
+    this.#memory.forget();
+  }
+
+  /** What the DJ keeps for later sessions, from what happens in this one. */
+  #remember(e: DjEvent) {
+    const memory = this.#memory;
+    const key = (set: DjSet) => `${this.#sessionStart}:${set.id}`;
+    // A song's skip or like counts toward the set playing, when it's that set's.
+    const setOf = (song: Candidate) => (this.current?.songs.some((s) => s.uri === song.uri) ? this.current : null);
+    const note = (song: Candidate, what: SetNote) => {
+      const set = setOf(song);
+      if (set) memory.noteSet(key(set), what);
+    };
+    switch (e.type) {
+      case "set-started":
+        memory.setStarted(key(e.set), { segment: e.set.segment, part: daypart(new Date()), request: !!e.set.request });
+        break;
+      case "set-skipped":
+        memory.noteSet(key(e.set), "skipped");
+        break;
+      case "song-started":
+        memory.played(e.song.uri);
+        if (e.set) memory.noteSet(key(e.set), "song");
+        break;
+      case "song-skipped":
+        memory.skipped(e.song);
+        note(e.song, "skip");
+        break;
+      case "song-unskipped":
+        memory.unskipped(e.song);
+        note(e.song, "unskip");
+        break;
+      case "song-liked":
+        memory.liked(e.song);
+        note(e.song, "like");
+        break;
+      case "line-spoken":
+        // The session's first line opened it.
+        memory.said({ ...e.line, opening: this.said.length === 1 });
+        break;
+      case "line-withdrawn":
+        memory.unsaid(e.line.talk);
+        break;
+    }
+  }
+
   on(fn: (event: DjEvent) => void): () => void {
     this.#listeners.add(fn);
     return () => void this.#listeners.delete(fn);
@@ -975,6 +1033,8 @@ class Dj {
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     const live = this.live;
     const reactions = live ? this.#taste.news() : undefined;
+    // A model on this computer, or the listener's own, has less room than a cloud one.
+    const local = this.status?.settings.provider === "local" || this.status?.settings.provider === "own";
     const ask: SegmentAsk = {
       segment,
       choices,
@@ -983,9 +1043,8 @@ class Dj {
       instructions: this.instructions,
       opening,
       setNumber: this.#setsThisSession + 1,
-      earlier: this.#earlier(),
-      // A model on this computer, or the listener's own, has less room than a cloud one.
-      compact: this.status?.settings.provider === "local" || this.status?.settings.provider === "own",
+      earlier: this.#earlier(local),
+      compact: local,
       nameAll: this.nameAll,
       live,
       reactions,
@@ -1108,11 +1167,14 @@ class Dj {
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
-   * held for its talk), and what it's about to say comes last. */
-  #earlier(): string[] {
+   * held for its talk), and what it's about to say comes last. Before it's said anything this session, a model on
+   * this computer or the listener's own server hears how the DJ opened lately, so it opens some other way; a cloud
+   * model hears nothing from earlier sessions. */
+  #earlier(local: boolean): string[] {
     const spoken = this.said.map((s) => s.talk);
     const cur = this.current;
     if (cur && this.announced !== cur && !spoken.includes(cur.talk)) spoken.push(cur.talk);
+    if (!spoken.length && local) return this.#memory.lastOpenings(OPENINGS_REMEMBERED).map((s) => s.talk);
     return spoken;
   }
 
@@ -1684,7 +1746,6 @@ class Dj {
       return;
     }
     this.#foreignSince = null;
-    rememberPlayed(uri);
     const next = this.upNext;
     if (next && next.songs.some((s) => s.uri === uri)) this.#advance(run, next);
     this.#emit({ type: "song-started", song, set: this.current?.songs.some((s) => s.uri === uri) ? this.current : null });

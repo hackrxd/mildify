@@ -1,9 +1,9 @@
-// What the DJ keeps in localStorage: its settings, and the songs it played lately.
+// What the DJ keeps in localStorage: its settings, and its memory across sessions.
 
+/** Where the songs the DJ played were kept before it had a memory: read once, into it. */
 export const PLAYED_KEY = "nativify:djPlayed";
 /** Songs the DJ played this recently aren't picked again in a new session. */
 export const PLAYED_MEMORY_MS = 3 * 24 * 60 * 60 * 1000;
-export const PLAYED_KEPT = 400;
 
 export function load<T>(key: string, fallback: T, read: (raw: string) => T): T {
   try {
@@ -23,24 +23,16 @@ export function persist(key: string, value: string | null) {
   }
 }
 
-/** Songs the DJ played lately, by URI, so a new session doesn't start with the same ones. */
-export function playedLately(now = Date.now()): Map<string, number> {
+/** The songs kept under PLAYED_KEY, by URI, that are recent enough to remember. */
+function oldPlayed(now: number): Map<string, number> {
   const raw = load<unknown>(PLAYED_KEY, {}, JSON.parse);
   const out = new Map<string, number>();
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     for (const [uri, at] of Object.entries(raw)) {
-      if (typeof at === "number" && now - at < PLAYED_MEMORY_MS) out.set(uri, at);
+      if (typeof at === "number" && now - at < KEEP.played.ms) out.set(uri, at);
     }
   }
   return out;
-}
-
-export function rememberPlayed(uri: string, now = Date.now()) {
-  const played = playedLately(now);
-  played.delete(uri);
-  played.set(uri, now);
-  const kept = [...played].slice(-PLAYED_KEPT);
-  persist(PLAYED_KEY, JSON.stringify(Object.fromEntries(kept)));
 }
 
 /** The DJ's memory across sessions, under one key: what it played, which songs were skipped and liked while it
@@ -92,10 +84,12 @@ export interface SaidRecord {
   at: number;
   talk: string;
   byModel: boolean;
+  /** The first line of its session. */
+  opening: boolean;
 }
 
-/** What a set's record notes as the set goes. */
-export type SetNote = "song" | "skip" | "like" | "skipped";
+/** What a set's record notes as the set goes; "unskip" takes a skip back. */
+export type SetNote = "song" | "skip" | "unskip" | "like" | "skipped";
 
 const isTime = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x) && x > 0;
 const isText = (x: unknown): x is string => typeof x === "string" && x.length > 0;
@@ -121,7 +115,10 @@ const isSet = (v: unknown): v is SetRecord => {
 };
 const isSaid = (v: unknown): v is SaidRecord => {
   const r = v as Partial<SaidRecord> | null;
-  return typeof r === "object" && r !== null && isTime(r.at) && isText(r.talk) && typeof r.byModel === "boolean";
+  return (
+    typeof r === "object" && r !== null && isTime(r.at) && isText(r.talk) && typeof r.byModel === "boolean" &&
+    typeof r.opening === "boolean"
+  );
 };
 
 /** Halves every `halfLife`: 1 for now, 0.5 a half-life ago. */
@@ -152,12 +149,11 @@ export class DjMemory {
       this.#sets = new Map(entries(doc.sets, isSet));
       this.#said = Array.isArray(doc.said) ? doc.said.filter(isSaid) : [];
     }
-    const before = playedLately(now);
-    if (before.size) {
-      for (const [uri, at] of before) if (at > (this.#played.get(uri) ?? 0)) this.#played.set(uri, at);
-      this.#played = new Map([...this.#played].sort((a, b) => a[1] - b[1]));
-      persist(PLAYED_KEY, null);
-    }
+    const before = oldPlayed(now);
+    for (const [uri, at] of before) if (at > (this.#played.get(uri) ?? 0)) this.#played.set(uri, at);
+    this.#played = new Map([...this.#played].sort((a, b) => a[1] - b[1]));
+    // Read once, whatever it held.
+    if (load(PLAYED_KEY, null, (raw) => raw) !== null) persist(PLAYED_KEY, null);
     this.#prune(now);
     if (doc || before.size) this.#save(now);
   }
@@ -245,6 +241,7 @@ export class DjMemory {
     if (!r) return;
     if (what === "song") r.songs++;
     else if (what === "skip") r.skips++;
+    else if (what === "unskip") r.skips = Math.max(0, r.skips - 1);
     else if (what === "like") r.likes++;
     else r.skipped = true;
     this.#save();
@@ -255,9 +252,9 @@ export class DjMemory {
     return [...this.#sets.values()].filter((r) => now - r.at < KEEP.sets.ms).map((r) => ({ ...r }));
   }
 
-  /** The DJ said `line`. */
-  said(line: { talk: string; byModel: boolean }, now = Date.now()) {
-    this.#said = [...this.#said, { at: now, talk: line.talk, byModel: line.byModel }];
+  /** The DJ said `line`; `opening` when it was the first of its session. */
+  said(line: { talk: string; byModel: boolean; opening: boolean }, now = Date.now()) {
+    this.#said = [...this.#said, { at: now, talk: line.talk, byModel: line.byModel, opening: line.opening }];
     this.#save(now);
   }
 
@@ -272,6 +269,11 @@ export class DjMemory {
   /** The last `n` lines the DJ said, oldest first. */
   lastSaid(n: number, now = Date.now()): SaidRecord[] {
     return this.#said.filter((s) => now - s.at < KEEP.said.ms).slice(-n);
+  }
+
+  /** How the last `n` sessions opened, oldest first. */
+  lastOpenings(n: number, now = Date.now()): SaidRecord[] {
+    return this.#said.filter((s) => s.opening && now - s.at < KEEP.said.ms).slice(-n);
   }
 
   /** Forgets all of it. */

@@ -9,11 +9,7 @@ import {
   MEMORY_KEY,
   MEMORY_MAX_BYTES,
   persist,
-  PLAYED_KEPT,
   PLAYED_KEY,
-  PLAYED_MEMORY_MS,
-  playedLately,
-  rememberPlayed,
   SONG_SKIP_HALF_LIFE,
 } from "./djMemory";
 
@@ -36,42 +32,6 @@ describe("settings in localStorage", () => {
       throw new Error("full");
     });
     expect(() => persist("nativify:y", "1")).not.toThrow();
-  });
-});
-
-describe("songs played lately", () => {
-  const now = 1_800_000_000_000;
-
-  it("remembers each song with when it played, newest last", () => {
-    rememberPlayed("spotify:track:a", now - 2000);
-    rememberPlayed("spotify:track:b", now - 1000);
-    rememberPlayed("spotify:track:a", now);
-    expect([...playedLately(now)]).toEqual([
-      ["spotify:track:b", now - 1000],
-      ["spotify:track:a", now],
-    ]);
-  });
-
-  it("forgets songs played longer ago than it keeps them", () => {
-    rememberPlayed("spotify:track:old", now - PLAYED_MEMORY_MS - 1);
-    rememberPlayed("spotify:track:new", now - 1);
-    expect([...playedLately(now).keys()]).toEqual(["spotify:track:new"]);
-  });
-
-  it("keeps only so many, the newest", () => {
-    for (let i = 0; i < PLAYED_KEPT + 5; i++) rememberPlayed(`spotify:track:${i}`, now - PLAYED_KEPT - 5 + i);
-    const kept = [...playedLately(now).keys()];
-    expect(kept).toHaveLength(PLAYED_KEPT);
-    expect(kept[0]).toBe("spotify:track:5");
-  });
-
-  it("ignores what it can't read", () => {
-    localStorage.setItem(PLAYED_KEY, "[1,2,3]");
-    expect(playedLately(now).size).toBe(0);
-    localStorage.setItem(PLAYED_KEY, JSON.stringify({ "spotify:track:a": "yesterday", "spotify:track:b": now }));
-    expect([...playedLately(now).keys()]).toEqual(["spotify:track:b"]);
-    localStorage.setItem(PLAYED_KEY, "{oops");
-    expect(playedLately(now).size).toBe(0);
   });
 });
 
@@ -147,13 +107,15 @@ describe("DjMemory", () => {
 
   it("remembers what the DJ said lately, and forgets a line it withdrew", () => {
     const m = new DjMemory(now);
-    m.said({ talk: "Hello there.", byModel: true }, now - 15 * DAY);
-    m.said({ talk: "First.", byModel: true }, now - 2000);
-    m.said({ talk: "Second.", byModel: false }, now - 1000);
-    m.said({ talk: "Withdrawn.", byModel: true }, now);
+    m.said({ talk: "Hello there.", byModel: true, opening: true }, now - 15 * DAY);
+    m.said({ talk: "First.", byModel: true, opening: true }, now - 2000);
+    m.said({ talk: "Second.", byModel: false, opening: false }, now - 1000);
+    m.said({ talk: "Withdrawn.", byModel: true, opening: false }, now);
     m.unsaid("Withdrawn.");
     expect(new DjMemory(now).lastSaid(5, now).map((s) => s.talk)).toEqual(["First.", "Second."]);
     expect(m.lastSaid(1, now).map((s) => [s.talk, s.byModel])).toEqual([["Second.", false]]);
+    // How sessions opened, lately.
+    expect(m.lastOpenings(5, now).map((s) => s.talk)).toEqual(["First."]);
     // Gone stale while the app stayed open.
     expect(m.lastSaid(5, now + 15 * DAY)).toEqual([]);
   });
@@ -194,7 +156,7 @@ describe("DjMemory", () => {
         artistSkips: [["__proto__", [[now - 1, 1]]], ["Bad", [[now - 1, -1]]]],
         likes: [["spotify:track:a", { at: now - 1, artists: ["Main"] }], ["spotify:track:b", { at: now - 1 }]],
         sets: [["s:1", { segment: "fresh", at: now - 1, part: "night", songs: 1, skips: 0, likes: 0, skipped: false, request: false }], ["s:2", { segment: "" }]],
-        said: [{ at: now - 1, talk: "Hi.", byModel: true }, { at: now - 1, talk: 7 }],
+        said: [{ at: now - 1, talk: "Hi.", byModel: true, opening: true }, { at: now - 1, talk: 7 }, { at: now - 1, talk: "No opening flag.", byModel: true }],
       }),
     );
     const m = new DjMemory(now);
@@ -212,11 +174,20 @@ describe("DjMemory", () => {
   });
 
   it("takes in the songs remembered before it had this memory, once", () => {
-    localStorage.setItem(PLAYED_KEY, JSON.stringify({ "spotify:track:a": now - 2000, "spotify:track:b": now - 1000 }));
+    localStorage.setItem(
+      PLAYED_KEY,
+      JSON.stringify({ "spotify:track:b": now - 1000, "spotify:track:a": now - 2000, "spotify:track:c": "yesterday", "spotify:track:old": now - KEEP.played.ms }),
+    );
     const m = new DjMemory(now);
-    expect([...m.playedWithin(DAY, now)]).toEqual(["spotify:track:a", "spotify:track:b"]);
+    expect([...m.playedWithin(KEEP.played.ms, now)]).toEqual(["spotify:track:a", "spotify:track:b"]);
     expect(localStorage.getItem(PLAYED_KEY)).toBeNull();
     expect([...new DjMemory(now).playedWithin(DAY, now)]).toEqual(["spotify:track:a", "spotify:track:b"]);
+    // What it can't read is left behind.
+    for (const junk of ["[1,2,3]", "{oops"]) {
+      localStorage.setItem(PLAYED_KEY, junk);
+      expect(new DjMemory(now).playedWithin(DAY, now).size).toBe(2);
+      expect(localStorage.getItem(PLAYED_KEY)).toBeNull();
+    }
   });
 
   it("forgets everything", () => {
@@ -225,7 +196,7 @@ describe("DjMemory", () => {
     m.skipped(song("spotify:track:a", "Main"), now);
     m.liked(song("spotify:track:b", "Main"), now);
     m.setStarted("s:1", { segment: "fresh", part: "night", request: false }, now);
-    m.said({ talk: "Hi.", byModel: true }, now);
+    m.said({ talk: "Hi.", byModel: true, opening: true }, now);
     m.forget();
     expect(localStorage.getItem(MEMORY_KEY)).toBeNull();
     expect([m.playedWithin(DAY, now).size, m.songSkip("spotify:track:a", now), m.artistLove("Main", now), m.sets(now).length, m.lastSaid(5, now).length]).toEqual([0, 0, 0, 0, 0]);

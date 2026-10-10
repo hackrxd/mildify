@@ -91,6 +91,7 @@ const likedState = vi.hoisted(() => ({ saved: new Map<string, boolean>() }));
 vi.mock("./liked.svelte", () => ({ liked: { has: (uri: string) => likedState.saved.get(uri), ensure: () => {} } }));
 
 let mod: typeof import("./dj.svelte");
+let memoryModule: typeof import("./djMemory");
 let timing: typeof import("./djTiming");
 
 /** A voice whose lines take real (fake-timer) time, and can be paused. */
@@ -230,6 +231,7 @@ beforeEach(async () => {
   backend.lyrics.mockImplementation(async () => sync(3000, 150_000));
   backend.djConfigure.mockImplementation(async () => readyStatus);
   mod = await import("./dj.svelte");
+  memoryModule = await import("./djMemory");
   timing = await import("./djTiming");
   voice = new FakeVoice();
   dj = new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>);
@@ -2660,8 +2662,13 @@ describe("stepping out", () => {
 
   it("remembers what it played, so the next session starts somewhere else", async () => {
     const first = await started();
-    const played = JSON.parse(localStorage.getItem("nativify:djPlayed") ?? "{}");
-    expect(Object.keys(played)).toContain(first.songs[0].uri);
+    expect(new memoryModule.DjMemory().playedAgo(first.songs[0].uri)).toBe(0);
+    dj.stop();
+    backend.djGenerate.mockClear();
+    player.isPlaying = false;
+    await dj.start();
+    const [, user] = (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0];
+    expect(user.content).not.toContain(`"${first.songs[0].name}"`);
   });
 
   it("stopping lifts a duck and frees the model", async () => {
@@ -2670,6 +2677,98 @@ describe("stepping out", () => {
     expect(backend.djDuck).toHaveBeenLastCalledWith(1, 0, timing.DUCK_UP_MS);
     expect(backend.djRelease).toHaveBeenCalled();
     expect(voice.stop).toHaveBeenCalled();
+  });
+});
+
+describe("what it remembers", () => {
+  const memory = () => new memoryModule.DjMemory();
+  const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
+
+  /** Starts a session that picks songs as it goes, with its first song playing and the second lined up. */
+  async function liveSession() {
+    dj.setLive(true);
+    player.isPlaying = false;
+    await dj.start();
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    const set = dj.upNext!;
+    await playing(set.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    return set;
+  }
+
+  it("remembers skips, likes and how each set went", async () => {
+    const set = await liveSession();
+    const [a, b] = dj.current!.songs;
+    likedState.saved.set(b.uri, false);
+    await tick();
+    // The listener leaves the first song early, likes the second as it plays, then skips the rest of the set.
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    likedState.saved.set(b.uri, true);
+    await tick();
+    await dj.skipSet();
+    const m = memory();
+    expect(m.songSkip(a.uri)).toBeCloseTo(1);
+    expect(m.artistSkip(a.artists[0])).toBeCloseTo(1);
+    expect(m.artistLove(b.artists[0])).toBeCloseTo(1);
+    expect(m.sets().map((r) => [r.segment, r.songs, r.skips, r.likes, r.skipped, r.request])).toEqual([
+      [set.segment, 2, 1, 1, true, false],
+    ]);
+  });
+
+  it("takes back a skip the listener took back", async () => {
+    await liveSession();
+    const [, b] = dj.current!.songs;
+    // Next leaves the second song early, and Previous comes straight back to it.
+    player.pos = DURATION - 300;
+    await tick();
+    await playing(b.uri, 1000);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    dj.skipTalk();
+    void dj.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    await playing(c.uri, 0);
+    expect(memory().songSkip(b.uri)).toBeCloseTo(1);
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(memory().songSkip(b.uri)).toBe(0);
+    expect(memory().sets()[0].skips).toBe(0);
+  });
+
+  it("remembers what it said, and tells a model on this computer how it opened last time", async () => {
+    speechMs = 20_000;
+    const talks = ["Good evening Sam, here's the first set.", "Now for something else entirely."];
+    backend.djGenerate.mockImplementation(async () => {
+      answers++;
+      return { name: `Set ${answers}`, songs: [1, 2, 3], talk: talks[answers - 1] ?? `Set number ${answers}, nice and easy.` };
+    });
+    const before = await started();
+    const next = dj.upNext!;
+    // The next set's line, over the end of this one: said, but not how the session opened.
+    await lastSong2(before);
+    expect(memory().lastSaid(5).map((l) => l.talk)).toEqual([before.talk, next.talk]);
+    dj.stop();
+    backend.djGenerate.mockClear();
+    await started();
+    expect(openingPrompt()).toContain('How you opened lately: "Good evening Sam…". Greet them some other way.');
+  });
+
+  it("doesn't tell a cloud model anything from earlier sessions", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    await started();
+    dj.stop();
+    backend.djGenerate.mockClear();
+    await started();
+    expect(openingPrompt()).not.toContain("How you opened lately");
+  });
+
+  it("forgets it all when asked", async () => {
+    const first = await started();
+    dj.forget();
+    expect(memory().playedAgo(first.songs[0].uri)).toBeNull();
+    expect(memory().lastSaid(5)).toEqual([]);
   });
 });
 
