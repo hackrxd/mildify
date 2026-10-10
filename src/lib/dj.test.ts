@@ -2765,7 +2765,7 @@ describe("stepping out", () => {
 
   it("remembers what it played, so the next session starts somewhere else", async () => {
     const first = await started();
-    expect(new memoryModule.DjMemory().playedAgo(first.songs[0].uri)).toBe(0);
+    expect(new memoryModule.DjMemory({ user: "u" }).playedAgo(first.songs[0].uri)).toBe(0);
     dj.stop();
     backend.djGenerate.mockClear();
     player.isPlaying = false;
@@ -2784,7 +2784,8 @@ describe("stepping out", () => {
 });
 
 describe("what it remembers", () => {
-  const memory = () => new memoryModule.DjMemory();
+  /** What it remembers of the account signed in. */
+  const memory = () => new memoryModule.DjMemory({ user: "u" });
   const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
 
   /** Starts a session that picks songs as it goes, with its first song playing and the second lined up. */
@@ -2851,7 +2852,7 @@ describe("what it remembers", () => {
     expect(memory().sets()[0].skips).toBe(0);
   });
 
-  it("remembers what it said, and tells a model on this computer how it opened last time", async () => {
+  it("remembers how it opened, without the listener's name, and tells a model on this computer", async () => {
     speechMs = 20_000;
     const talks = ["Good evening Sam, here's the first set.", "Now for something else entirely."];
     backend.djGenerate.mockImplementation(async () => {
@@ -2860,13 +2861,30 @@ describe("what it remembers", () => {
     });
     const before = await started();
     const next = dj.upNext!;
-    // The next set's line, over the end of this one: said, but not how the session opened.
+    // The next set's line, over the end of this one, isn't how the session opened.
     await lastSong2(before);
-    expect(memory().lastSaid(5).map((l) => l.talk)).toEqual([before.talk, next.talk]);
+    expect(dj.said.map((l) => l.talk)).toEqual([before.talk, next.talk]);
+    expect(memory().lastOpenings(5).map((l) => l.talk)).toEqual(["Good evening, here's the first set."]);
     dj.stop();
     backend.djGenerate.mockClear();
     await started();
-    expect(openingPrompt()).toContain('How you opened lately: "Good evening Sam…". Greet them some other way.');
+    expect(openingPrompt()).toContain(`How you opened lately: "Good evening, here's…". Greet them some other way.`);
+    expect(openingPrompt()).not.toContain("Good evening Sam");
+  });
+
+  it("keeps what it remembers apart for each account", async () => {
+    const { session } = await import("./session.svelte");
+    const first = await started();
+    dj.stop();
+    session.user!.id = "v";
+    backend.djGenerate.mockClear();
+    await started();
+    expect(openingPrompt()).not.toContain("How you opened lately");
+    expect(new memoryModule.DjMemory({ user: "v" }).playedAgo(first.songs[0].uri)).toBeNull();
+    expect(memory().playedAgo(first.songs[0].uri)).not.toBeNull();
+    // Forgetting is for the account signed in.
+    dj.forget();
+    expect(memory().lastOpenings(5)).toHaveLength(1);
   });
 
   it("doesn't tell a cloud model anything from earlier sessions", async () => {
@@ -2882,7 +2900,7 @@ describe("what it remembers", () => {
     const first = await started();
     dj.forget();
     expect(memory().playedAgo(first.songs[0].uri)).toBeNull();
-    expect(memory().lastSaid(5)).toEqual([]);
+    expect(memory().lastOpenings(5)).toEqual([]);
   });
 });
 

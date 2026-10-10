@@ -107,8 +107,8 @@ export interface SegmentAsk {
   opening?: boolean;
   /** Which set of the show this is, counting from 1. */
   setNumber?: number;
-  /** What the DJ said before these, most recent last, so it doesn't say it again. */
-  /** What the DJ said this session; at its opening, how it opened its last sessions. */
+  /** What the DJ said this session, most recent last, so it doesn't say it again; at its opening, how it opened its
+   * last sessions. */
   earlier?: string[];
   /** A small model's prompt: less of what was said before, so it has room to think. */
   compact?: boolean;
@@ -206,6 +206,22 @@ export function earlierLines(earlier: string[], compact: boolean): string[] {
   const openings = [...new Set(said.slice(-OPENINGS_SHOWN).map(openingOf))];
   if (!compact) out.push(`Openings you've used: ${openings.map((o) => `"${o}…"`).join(", ")}. Start some other way.`);
   return out;
+}
+
+/** `line` with `name` taken out, and the commas and spaces it leaves behind tidied: how it's remembered, so a
+ * later session doesn't hear a name it may no longer use. */
+export function withoutName(line: string, name: string | null): string {
+  const who = name?.trim();
+  if (!who) return line;
+  const escaped = who.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return line
+    .replace(new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?:['\u2019]s)?(?![\\p{L}\\p{N}])`, "giu"), "$1")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/[,;:]+(?=[,.!?;:])/g, "")
+    .replace(/[,;:]\s+(?=[\u2013\u2014])/g, " ")
+    .replace(/^[\s,.!?;:\u2013\u2014-]+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 /** How the DJ opened its last sessions, for it to greet the listener some other way this time. */

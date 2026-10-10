@@ -26,6 +26,7 @@ import {
   sentences,
   openedLately,
   popularityWord,
+  withoutName,
   songFacts,
   type Angle,
   type SegmentAsk,
@@ -640,6 +641,21 @@ describe("popularityWord", () => {
       "a deep cut",
       "a deep cut",
     ]);
+  });
+});
+
+describe("withoutName", () => {
+  it("takes the listener's name out of a line, and tidies what it leaves", () => {
+    expect(withoutName("Good evening, Sam, here's the first set.", "Sam")).toBe("Good evening, here's the first set.");
+    expect(withoutName("Hey Sam, it's your DJ.", "Sam")).toBe("Hey, it's your DJ.");
+    expect(withoutName("Sam! Welcome back.", "Sam")).toBe("Welcome back.");
+    expect(withoutName("Good evening sam.", "Sam")).toBe("Good evening.");
+    expect(withoutName("Samantha's here, Sam.", "Sam")).toBe("Samantha's here.");
+    expect(withoutName("Sam's favourites tonight.", "Sam")).toBe("favourites tonight.");
+    expect(withoutName("Hi Mary Ann, let's go.", "Mary Ann")).toBe("Hi, let's go.");
+    expect(withoutName("Evening, Sam \u2014 ready?", "Sam")).toBe("Evening \u2014 ready?");
+    expect(withoutName("Morning, D.J. here.", "D.J.")).toBe("Morning, here.");
+    expect(withoutName("Hello there.", null)).toBe("Hello there.");
   });
 });
 

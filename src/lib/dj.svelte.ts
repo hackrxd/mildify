@@ -36,6 +36,7 @@ import {
   listenerName,
   pickAngle,
   sentences,
+  withoutName,
   type Angle,
   type SegmentAsk,
   type TalkStyle,
@@ -262,7 +263,7 @@ class Dj {
   /** What the listener liked and skipped this session. */
   #taste = new SessionTaste();
   /** What the DJ remembers from one session to the next. */
-  #memory = new DjMemory();
+  #memoryOf: { user: string | null; memory: DjMemory } | null = null;
   /** When this session started: with a set's id, what its memory is kept under. */
   #sessionStart = 0;
   #preparing: Promise<void> | null = null;
@@ -934,11 +935,17 @@ class Dj {
 
   #listeners = new Set<(event: DjEvent) => void>();
 
-  /** Calls `fn` with each thing that happens in a session, as it happens; returns a function that stops it. */
-  /** Forgets what the DJ remembers from earlier sessions: what it played, what was skipped and liked while it
-   * played, how its sets went and what it said. This session carries on as it is. */
+  /** Forgets what the DJ remembers of the account signed in: what it played, what was skipped and liked while it
+   * played, how its sets went and how it opened. This session carries on as it is. */
   forget() {
     this.#memory.forget();
+  }
+
+  /** What the DJ remembers of the account signed in, read when it's first wanted. */
+  get #memory(): DjMemory {
+    const user = session.user?.id ?? null;
+    if (this.#memoryOf?.user !== user) this.#memoryOf = { user, memory: new DjMemory({ user }) };
+    return this.#memoryOf.memory;
   }
 
   /** What the DJ keeps for later sessions, from what happens in this one. */
@@ -975,15 +982,14 @@ class Dj {
         note(e.song, "like");
         break;
       case "line-spoken":
-        // The session's first line opened it.
-        memory.said({ ...e.line, opening: this.said.length === 1 });
-        break;
-      case "line-withdrawn":
-        memory.unsaid(e.line.talk);
+        // The session's first line opened it: remembered without the name it called the listener, which they may
+        // not want used next time.
+        if (this.said.length === 1) memory.opened({ talk: withoutName(e.line.talk, this.#listener()), byModel: e.line.byModel });
         break;
     }
   }
 
+  /** Calls `fn` with each thing that happens in a session, as it happens; returns a function that stops it. */
   on(fn: (event: DjEvent) => void): () => void {
     this.#listeners.add(fn);
     return () => void this.#listeners.delete(fn);
