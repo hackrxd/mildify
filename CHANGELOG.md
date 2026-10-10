@@ -38,6 +38,11 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
 - The DJ reads your top tracks 50 at a time, digs up different old likes each session, and doesn't read your
   listening again when it's started within half an hour of the last time.
+- When you skip a DJ song, its artist sits out the next two sets, or the rest of the session once you've skipped them
+  twice, instead of always the rest of the session; asking for them by name brings them back. A song you skip stays
+  out for three weeks.
+- The DJ offers more of what you're likely to want: more by artists you liked while it played, less of what you
+  skipped or it played lately.
 - The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
