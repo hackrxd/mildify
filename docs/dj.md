@@ -170,7 +170,11 @@ ordinary set while your request waits for the next one.
 **Skip this set**, beside the set playing, stops the music and has the model pick the next set again, from the song
 you skipped: it hears that you skipped the set, so it goes somewhere else. The music waits up to 8 seconds for it
 before the DJ talks from a template. A next set whose introduction has already started plays as it is. Leaving the
-set doesn't count as skipping the song that was playing.
+set doesn't count as skipping the song that was playing. The button shows only while the set can be skipped: not
+while the DJ talks or brings the next set in, nor while the music plays on another device.
+
+Each set's **…** button, or a right-click on its name, opens its menu: **Skip this set** for the set playing, and
+**Copy the song list**, which copies the set's name and its songs, numbered, to paste anywhere.
 
 ## Telling it what to do
 
