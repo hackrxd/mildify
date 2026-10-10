@@ -17,6 +17,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   list. Its "Skip this set" button shows only while the set can be skipped.
 - Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
   menu.
+- Your DJ remembers, on this computer, what it played and what you skipped and liked while it played, and greets you
+  some other way than it did lately. Settings → AI DJ can forget it all.
 
 ### Changed
 
