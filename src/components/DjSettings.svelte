@@ -12,6 +12,8 @@
     firstCloudModel,
     isCloud,
     modelChoiceOf,
+    speedWords,
+    VOICE_SPEED,
     type DjChange,
     type Question,
   } from "../lib/djView";
@@ -45,6 +47,17 @@
     if (serverUrl.trim() !== djSettings?.server_url || serverModel.trim() !== djSettings?.server_model) {
       dj.configure({ server_url: serverUrl.trim(), server_model: serverModel.trim() });
     }
+  }
+
+  /** The speed slider's value while it's dragged, until it's saved. */
+  let draggedSpeed = $state<number | null>(null);
+  const shownSpeed = $derived(draggedSpeed ?? djSettings?.voice_speed ?? 1);
+
+  async function saveSpeed(speed: number) {
+    draggedSpeed = speed;
+    await dj.configure({ voice_speed: speed });
+    // Dragged on while it saved: that's the one to show.
+    if (draggedSpeed === speed) draggedSpeed = null;
   }
 
   let callMe = $state(dj.callMe);
@@ -384,6 +397,35 @@
           <option value={v.id}>{v.label}</option>
         {/each}
       </select>
+    </label>
+
+    <label class="row">
+      <span>
+        <span class="label">Speaking speed</span>
+        <span class="muted small">{speedWords(shownSpeed)}. A line the DJ already has ready keeps its speed.</span>
+      </span>
+      <span class="slider">
+        <span class="muted small">Slower</span>
+        <input
+          type="range"
+          min={VOICE_SPEED.min}
+          max={VOICE_SPEED.max}
+          step={VOICE_SPEED.step}
+          value={shownSpeed}
+          oninput={(e) => (draggedSpeed = Number(e.currentTarget.value))}
+          onchange={(e) => saveSpeed(Number(e.currentTarget.value))}
+          aria-label="How fast the DJ speaks"
+        />
+        <span class="muted small">Faster</span>
+        <!-- Always laid out: appearing mid-drag would shift the slider under the pointer. -->
+        <button
+          class="btn quiet"
+          class:hidden={shownSpeed === 1}
+          type="button"
+          disabled={shownSpeed === 1}
+          onclick={() => saveSpeed(1)}>Reset</button
+        >
+      </span>
     </label>
 
     {#if dj.enabled}
