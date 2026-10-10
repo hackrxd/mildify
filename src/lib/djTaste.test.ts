@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate } from "./djPicks";
-import { SessionTaste } from "./djTaste";
+import { SessionTaste, SIT_OUT_SETS } from "./djTaste";
 
 const song = (id: string, artists = [`Artist ${id}`]): Candidate => ({
   uri: `spotify:track:${id}`,
@@ -28,18 +28,34 @@ describe("SessionTaste", () => {
     expect(taste.skippedSongs.map((s) => s.name)).toEqual(["a", "b"]);
   });
 
-  it("benches a skipped song's artists until every skip of theirs is taken back", () => {
+  it("sits a skipped song's main artist out for the next two sets, not a featured one", () => {
     const taste = new SessionTaste();
-    const one = song("one", ["Ann", "Bo"]);
+    taste.skipped(song("one", ["Ann", "Bo"]), 3);
+    expect([...taste.sittingOut(3)]).toEqual(["Ann"]);
+    expect([...taste.sittingOut(4)]).toEqual(["Ann"]);
+    expect(taste.sittingOut(5).size).toBe(0);
+  });
+
+  it("sits an artist out for the rest of the session once they're skipped twice", () => {
+    const taste = new SessionTaste();
+    taste.skipped(song("one", ["Ann"]), 1);
+    taste.skipped(song("two", ["Ann"]), 1);
+    expect([...taste.sittingOut(SIT_OUT_SETS + 50)]).toEqual(["Ann"]);
+  });
+
+  it("takes back a skip, and its artist's latest", () => {
+    const taste = new SessionTaste();
+    const one = song("one", ["Ann"]);
     const two = song("two", ["Ann"]);
-    taste.skipped(one);
-    taste.skipped(two);
-    expect([...taste.skippedArtists].sort()).toEqual(["Ann", "Bo"]);
-    expect(taste.forgive(one)).toBe(true);
-    expect([...taste.skippedArtists]).toEqual(["Ann"]);
-    expect(taste.forgive(one)).toBe(false);
-    taste.forgive(two);
-    expect(taste.skippedArtists.size).toBe(0);
+    taste.skipped(one, 1);
+    taste.skipped(two, 2);
+    expect(taste.forgive(two)).toBe(true);
+    // One skip left: out until two sets after it.
+    expect([...taste.sittingOut(2)]).toEqual(["Ann"]);
+    expect(taste.sittingOut(3).size).toBe(0);
+    expect(taste.forgive(two)).toBe(false);
+    taste.forgive(one);
+    expect(taste.sittingOut(1).size).toBe(0);
   });
 
   it("keeps the ten most recent skips and likes", () => {

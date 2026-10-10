@@ -12,6 +12,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import {
+  asksFor,
   buildPool,
   choicesFor,
   MIN_CHOICES,
@@ -1123,7 +1124,7 @@ class Dj {
    * choose from for it, or the next of the usual segments. None when the listening has nothing left. */
   #chooseSegment(request: string | null): { segment: Segment; choices: Candidate[] } | null {
     if (request) {
-      const choices = requestChoices(request, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists });
+      const choices = requestChoices(request, this.#pool, this.#avoid(request), Math.random, this.#memory);
       if (choices.length >= MIN_CHOICES) return { segment: requestSegment(request), choices };
     }
     return this.#ordinarySegment();
@@ -1153,17 +1154,31 @@ class Dj {
     return this.#ordinarySegment();
   }
 
-  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. */
+  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. When
+   * everything's been played, it starts over, leaving out only what's playing now and what's skipped; when that
+   * leaves too little, only what's playing now. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
-    const avoid = { played: this.#played, skippedArtists: this.#taste.skippedArtists };
-    let segment = nextSegment(this.#segments, this.#pool, avoid);
-    if (!segment && this.#played.size) {
-      // Everything's been played: start over, leaving out only what's playing now.
-      this.#played = new Set(this.current?.songs.map((s) => s.uri) ?? []);
-      segment = nextSegment(this.#segments, this.#pool, { ...avoid, played: this.#played });
+    const playing = new Set(this.current?.songs.map((s) => s.uri) ?? []);
+    const ways = [this.#avoid(), this.#avoid(null, playing), { played: playing, skippedArtists: new Set<string>() }];
+    for (const avoid of ways) {
+      const segment = nextSegment(this.#segments, this.#pool, avoid);
+      if (!segment) continue;
+      if (avoid !== ways[0]) this.#played = new Set(playing);
+      return { segment, choices: choicesFor(segment, this.#pool, avoid, Math.random, this.#memory) };
     }
-    if (!segment) return null;
-    return { segment, choices: choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists }) };
+    return null;
+  }
+
+  /** What a set leaves out: songs `played` (lately, by default), songs and artists skipped too much lately
+   * (`DjMemory.leftOutSongs`, `leftOutArtists`), and artists sitting out after a skip this session
+   * (`SessionTaste.sittingOut`); but not an artist the set's `request` asks for by name. */
+  #avoid(request: string | null = null, played = this.#played): { played: Set<string>; skippedArtists: Set<string> } {
+    const asked = request ? asksFor(request) : () => false;
+    const out = [...this.#taste.sittingOut(this.#setsThisSession), ...this.#memory.leftOutArtists()];
+    return {
+      played: new Set([...played, ...this.#memory.leftOutSongs()]),
+      skippedArtists: new Set(out.filter((a) => !asked(a))),
+    };
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
@@ -1625,8 +1640,8 @@ class Dj {
       choices: cur.choices,
       pool: this.#pool,
       sofar,
-      played,
-      skippedArtists: this.#taste.skippedArtists,
+      played: new Set([...played, ...this.#memory.leftOutSongs()]),
+      skippedArtists: this.#avoid(cur.request).skippedArtists,
       reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
       skips: this.#setSkips,
     });
@@ -1754,7 +1769,7 @@ class Dj {
   /** The listener skipped `song`: once per song left, however many ways its leaving is seen (a Next past a set's
    * end, then the track change it makes). A skip in the set playing counts toward changing direction. */
   #countSkip(song: Candidate) {
-    if (!this.#taste.skipped(song)) return;
+    if (!this.#taste.skipped(song, this.#setsThisSession)) return;
     if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips++;
     this.#emit({ type: "song-skipped", song });
   }

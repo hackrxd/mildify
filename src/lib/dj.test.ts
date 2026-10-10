@@ -1926,6 +1926,23 @@ describe("between sets", () => {
   });
 });
 
+/** Ann sings t1 to t4; t5 onwards are one song each by `others` other artists. In order, with Math.random at 0, the
+ * first set is t1, t5 and t6, and the one after t2, t7 and t8. */
+function annAnd(others: number) {
+  const ann = { id: "ann", name: "Ann", uri: "spotify:artist:ann" };
+  sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+    items:
+      range === "short_term" && offset === 0
+        ? Array.from({ length: 4 + others }, (_, i) => (i < 4 ? { ...song(i + 1), artists: [ann] } : song(i + 1)))
+        : [],
+    next: null,
+    total: 4 + others,
+    offset,
+    limit: 50,
+  }));
+  vi.spyOn(Math, "random").mockReturnValue(0);
+}
+
 describe("picking as it goes", () => {
   const queued = () =>
     backend.device.mock.calls.map(([c]) => c as { action: string; uri?: string }).filter((c) => c.action === "queue").map((c) => c.uri);
@@ -2015,6 +2032,42 @@ describe("picking as it goes", () => {
     expect(artistOf(queued()[1]!)).toBe(artistOf(first));
     expect(dj.current?.songs[1].uri).toBe(queued()[1]);
     expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
+  });
+
+  it("lines up nothing skipped lately, even by an artist the listener likes", async () => {
+    twins();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const before = await liveStarted();
+    const skipped = before.songs[0];
+    await playing(before.plan[1].uri, 0);
+    dj.stop();
+    // Days later, the set opens with another song by the artist skipped, and the listener likes it.
+    vi.setSystemTime(Date.now() + 4 * 24 * 60 * 60 * 1000);
+    backend.djGenerate.mockImplementationOnce(async (messages: { content: string }[]) => {
+      const n = Number(messages[1].content.match(/^(\d+)\. Song 101 by/m)![1]);
+      return { name: "Again", songs: [n, 2, 3], talk: "Here we go again, nice and easy." };
+    });
+    const set = await liveStarted();
+    expect(artistOf(set.songs[0].uri)).toBe(artistOf(skipped.uri));
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    expect(queued().at(-1)).toBe(set.plan[1].uri);
+    expect(queued()).not.toContain(skipped.uri);
+  });
+
+  it("lines up an artist sitting out in a set asked for by name", async () => {
+    annAnd(20);
+    const set = await liveStarted();
+    await playing(set.plan[1].uri, 0);
+    dj.request("more Ann please");
+    // The set asked for opens with another artist's song, then Ann's.
+    backend.djGenerate.mockImplementationOnce(async () => ({ name: "Ann", songs: [4, 1, 2], talk: "Here's more Ann, as you asked." }));
+    await untilNextSet();
+    const asked = await nextSet();
+    expect(asked.request).toBe("more Ann please");
+    expect(asked.songs[0].artists).not.toEqual(["Ann"]);
+    expect(asked.plan[1].artists).toEqual(["Ann"]);
+    expect(queued().at(-1)).toBe(asked.plan[1].uri);
   });
 
   it("talks from a template about a song the listener liked, when the model doesn't answer", async () => {
@@ -2769,6 +2822,217 @@ describe("what it remembers", () => {
     dj.forget();
     expect(memory().playedAgo(first.songs[0].uri)).toBeNull();
     expect(memory().lastSaid(5)).toEqual([]);
+  });
+});
+
+describe("what it picks from", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const prompt = (call = -1) => (backend.djGenerate.mock.calls.at(call) as unknown as [{ content: string }[]])[0][1].content;
+  /** Whether the latest prompt offers any of Ann's songs. */
+  const offersAnn = () => / by Ann\b/.test(prompt());
+
+  /** `n` songs, t1 onwards, each by an artist of its own; with Math.random at 0, sets take them in order. */
+  function distinct(n: number) {
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items: range === "short_term" && offset === 0 ? Array.from({ length: n }, (_, i) => song(i + 1)) : [],
+      next: null,
+      total: n,
+      offset,
+      limit: 50,
+    }));
+    vi.spyOn(Math, "random").mockReturnValue(0);
+  }
+
+  /** Leaves the song playing past half way, so moving on from it isn't a skip. */
+  async function pastHalf() {
+    player.pos = DURATION / 2;
+    await tick();
+  }
+
+  /** Plays the set on to the next, without skipping a song, and lets its talk end; the set after that is picked as
+   * it starts. */
+  async function playOn() {
+    const set = dj.current!;
+    const next = dj.upNext!;
+    const at = set.songs.findIndex((s) => s.uri === player.track?.uri);
+    for (const s of set.songs.slice(at + 1)) {
+      await pastHalf();
+      await playing(s.uri, 0);
+    }
+    await pastHalf();
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await tick();
+    expect(dj.current?.id).toBe(next.id);
+    expect(dj.onAir).toBeNull();
+  }
+
+  /** Skips the song playing, an Ann song, for the set's next. */
+  async function skipAnn() {
+    const songs = dj.current!.songs;
+    const at = songs.findIndex((s) => s.uri === player.track?.uri);
+    expect(songs[at].artists).toEqual(["Ann"]);
+    await playing(songs[at + 1].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("leaves a skipped artist out of the next two sets it picks", async () => {
+    annAnd(20);
+    await started();
+    expect(offersAnn()).toBe(true);
+    await skipAnn();
+    // The set after this one was picked before the skip, with Ann in it; the two picked after go without.
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(true);
+  });
+
+  it("leaves an artist skipped twice out for the rest of the session", async () => {
+    annAnd(20);
+    await started();
+    await skipAnn();
+    await playOn();
+    await skipAnn();
+    // Two days on, what it remembers no longer keeps Ann out: the session does.
+    vi.setSystemTime(Date.now() + 2 * DAY);
+    for (let i = 0; i < 3; i++) {
+      await playOn();
+      expect(offersAnn()).toBe(false);
+    }
+  });
+
+  it("leaves out an artist skipped twice for a day, and a skipped song for weeks, in the sessions after", async () => {
+    annAnd(8);
+    await started();
+    await skipAnn();
+    await playOn();
+    await skipAnn();
+    dj.stop();
+    backend.djGenerate.mockClear();
+    player.isPlaying = false;
+    await dj.start();
+    expect(offersAnn()).toBe(false);
+    dj.stop();
+    // Days later, Ann is back, but not the songs skipped, while one only played is.
+    vi.setSystemTime(Date.now() + 4 * DAY);
+    backend.djGenerate.mockClear();
+    await dj.start();
+    expect(prompt()).toContain("Song 3 by Ann");
+    expect(prompt()).not.toContain("Song 1 by Ann");
+    expect(prompt()).not.toContain("Song 2 by Ann");
+    expect(prompt()).toContain("Song 5 by Artist 5");
+  });
+
+  it("plays songs skipped lately again, rather than stop, once nothing else is left", async () => {
+    distinct(7);
+    const [one, two, three] = (await started()).songs;
+    await playing(two.uri, 0);
+    await playing(three.uri, 0);
+    dj.stop();
+    // Days later, the two songs skipped are left out: the first set takes three of the other five, and the next
+    // has only two left without them.
+    vi.setSystemTime(Date.now() + 4 * DAY);
+    const first = await started();
+    expect(first.songs.map((s) => s.uri)).not.toContain(one.uri);
+    expect(dj.upNext!.songs.map((s) => s.uri)).toContain(one.uri);
+  });
+
+  it("starts over without the set playing, still leaving out an artist sitting out while there's enough else", async () => {
+    annAnd(6);
+    await started();
+    await skipAnn();
+    // Sitting Ann out leaves two songs not played yet: too few for a set, so it starts over.
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    expect(dj.upNext!.songs.map((s) => s.uri)).toEqual(["spotify:track:t9", "spotify:track:t10", "spotify:track:t5"]);
+  });
+
+  it("starts over leaving out songs skipped lately, while there's enough else", async () => {
+    distinct(9);
+    const [, two, three] = (await started()).songs;
+    await playing(two.uri, 0);
+    await playing(three.uri, 0);
+    dj.stop();
+    vi.setSystemTime(Date.now() + 4 * DAY);
+    await started();
+    // Three songs were played in the opening and three are in the set after: one is left, and two were skipped.
+    await playOn();
+    expect(prompt()).toMatch(/^1\. Song 3 by Artist 3\b/m);
+    expect(prompt()).not.toContain("Song 1 by");
+    expect(prompt()).not.toContain("Song 2 by");
+  });
+
+  it("after starting over, goes through the rest before coming back to what it played since", async () => {
+    distinct(10);
+    await started();
+    await playOn();
+    // The fourth set starts over, with the one song left and the oldest played.
+    await playOn();
+    expect(dj.upNext!.songs.map((s) => s.name)).toEqual(["Song 10", "Song 1", "Song 2"]);
+    await playOn();
+    expect(prompt()).not.toContain("Song 7 by");
+    expect(dj.upNext!.songs.map((s) => s.name)).toEqual(["Song 3", "Song 4", "Song 5"]);
+  });
+
+  it("plays an artist sitting out rather than stop, once nothing else is left", async () => {
+    annAnd(4);
+    await started();
+    await skipAnn();
+    await playOn();
+    expect(dj.upNext!.songs.some((s) => s.artists.includes("Ann"))).toBe(true);
+  });
+
+  it("starts a session with songs skipped lately when nothing else is left", async () => {
+    distinct(6);
+    const [one, two, three] = (await started()).songs;
+    await playing(two.uri, 0);
+    await playing(three.uri, 0);
+    await playOn();
+    const [, five, six] = dj.current!.songs;
+    await playing(five.uri, 0);
+    await playing(six.uri, 0);
+    dj.stop();
+    // Days later, only two songs weren't skipped: the opening has to take some of those that were.
+    vi.setSystemTime(Date.now() + 4 * DAY);
+    const opening = await started();
+    expect(opening.songs.map((s) => s.uri)).toEqual([three.uri, six.uri, one.uri]);
+  });
+
+  it("offers songs it played days ago after the others, in a segment and in a request", async () => {
+    distinct(12);
+    const first = await started();
+    for (const s of first.songs.slice(1)) {
+      await pastHalf();
+      await playing(s.uri, 0);
+    }
+    dj.stop();
+    vi.setSystemTime(Date.now() + 4 * DAY);
+    backend.djGenerate.mockClear();
+    await started();
+    expect(prompt(0)).toMatch(/^1\. Song 4 by Artist 4\b/m);
+    expect(prompt(0)).toMatch(/^12\. Song 3 by Artist 3\b/m);
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prompt()).toContain("something calm");
+    expect(prompt()).toMatch(/^1\. Song 7 by Artist 7\b/m);
+  });
+
+  it("brings an artist sitting out back for a request that names them", async () => {
+    annAnd(20);
+    await started();
+    await skipAnn();
+    dj.request("more Ann please");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("more Ann please");
+    expect(offersAnn()).toBe(true);
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("something calm");
+    expect(offersAnn()).toBe(false);
   });
 });
 
