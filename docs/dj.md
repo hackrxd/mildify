@@ -10,8 +10,9 @@ language model and voice, so only what you picked downloads. Turning it off stop
 model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once you've said so under the button.
 
 Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
-shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it. A voice
-from a package that isn't downloaded yet does stop it, without asking first, while it downloads.
+shows the model it's asking about until you answer. A new voice or speaking speed doesn't stop it: it comes in after
+any line the DJ already has ready. A voice from a package that isn't downloaded yet does stop it, without asking
+first, while it downloads.
 
 ## What it plays
 
@@ -208,6 +209,12 @@ Call me Captain.
 
 Instructions can change how it talks and which of the offered songs it picks, but not where its songs come
 from. The voices speak English, so a DJ told to speak another language will read it with an English accent.
+
+## Its voice
+
+Settings → AI DJ → **Voice** picks who reads the DJ's lines out, and **Speaking speed** how fast: from 20% slower
+to 30% faster than the voice's own pace. Like a new voice, a new speed comes in after any line the DJ already has
+ready, and the music plays on.
 
 ## What it downloads
 

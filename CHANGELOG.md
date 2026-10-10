@@ -10,6 +10,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
+- "Speaking speed", in Settings → AI DJ: the DJ's voice can talk up to 20% slower or 30% faster.
 - Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
   and before removing the DJ's files.
 - Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
