@@ -196,7 +196,7 @@
           {/if}
         </div>
         {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
-        <DjSongs songs={b.set.songs} />
+        <DjSongs set={b.set} />
         {#if b.set.live}
           <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>
         {/if}

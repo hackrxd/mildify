@@ -1,9 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { Candidate } from "../lib/djPicks";
+  import { SvelteSet } from "svelte/reactivity";
+  import type { DjSet } from "../lib/dj.svelte";
+  import { songWhy } from "../lib/djView";
   import { liked } from "../lib/liked.svelte";
   import { contextMenu } from "../lib/menu.svelte";
-  import { pop } from "../lib/motion";
+  import { pop, rise } from "../lib/motion";
   import { player } from "../lib/player.svelte";
   import { reveal } from "../lib/reveal";
   import { router } from "../lib/router.svelte";
@@ -16,8 +18,12 @@
   // A DJ set's songs, as on the DJ page: the rows cue up as they arrive, and a brass highlight glides down to
   // the song playing, like a needle finding the next groove. Songs already played fall back behind it. Each has
   // its cover, its artists, a heart and the usual menu, but no Add to queue: a song queued here would play in the
-  // middle of the DJ's set, and a set picked as it goes clears the queue.
-  let { songs }: { songs: Candidate[] } = $props();
+  // middle of the DJ's set, and a set picked as it goes clears the queue. Its info button says why it's here.
+  let { set }: { set: DjSet } = $props();
+
+  const songs = $derived(set.songs);
+  /** The songs whose "why" is open, by URI. */
+  const open = new SvelteSet<string>();
 
   let list: HTMLOListElement | undefined = $state();
   let needle = $state({ y: 0, h: 0 });
@@ -25,12 +31,27 @@
   let placed = $state(false);
   const at = $derived(songs.findIndex((s) => s.uri === player.track?.uri));
 
+  /** Bumped when the list changes size, as a song's "why" opens or closes: the needle measures again. */
+  let resized = $state(0);
   $effect(() => {
+    if (!list || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => resized++);
+    watch.observe(list);
+    return () => watch.disconnect();
+  });
+
+  $effect(() => {
+    void resized;
     const row = at >= 0 ? (list?.children[at] as HTMLElement | undefined) : undefined;
     if (!row) return;
     needle = { y: row.offsetTop, h: row.offsetHeight };
     if (!untrack(() => placed)) requestAnimationFrame(() => (placed = true));
   });
+
+  function toggleWhy(uri: string) {
+    if (open.has(uri)) open.delete(uri);
+    else open.add(uri);
+  }
 
   $effect(() => {
     liked.ensure(songs.map((s) => s.uri));
@@ -50,6 +71,7 @@
     {@const album = s.track?.album}
     {@const cover = pickImage(album?.images, 64)}
     {@const saved = liked.has(s.uri)}
+    {@const showing = open.has(s.uri)}
     <li
       class:playing={i === at}
       class:played={at > 0 && i < at}
@@ -78,6 +100,16 @@
           {/if}
         </span>
       </span>
+      <button
+        class="icon-btn why-btn"
+        class:on={showing}
+        aria-expanded={showing}
+        aria-controls="why-{set.id}-{i}"
+        onclick={() => toggleWhy(s.uri)}
+        title="Why it's here"
+      >
+        <Icon name="info" size={17} />
+      </button>
       {#if saved !== undefined}
         <button
           class="icon-btn heart"
@@ -88,6 +120,19 @@
         >
           <Pop key={saved}><Icon name="heart" size={17} filled={saved} /></Pop>
         </button>
+      {:else}
+        <span></span>
+      {/if}
+      {#if showing}
+        {@const why = songWhy(s, set.lookedUp.get(s.uri))}
+        <div class="why" id="why-{set.id}-{i}" in:rise={{ y: -4, duration: 220 }}>
+          <ul class="pills" aria-label="Why it's here">
+            {#each why.yours as reason (reason)}<li>{reason}</li>{/each}
+            {#each why.found as fact (fact)}<li class="found">{fact}</li>{/each}
+          </ul>
+          {#if why.bio}<p class="bio">{why.bio}</p>{/if}
+          {#if !why.yours.length && !why.found.length && !why.bio}<p class="bio">It's from your listening.</p>{/if}
+        </div>
       {/if}
     </li>
   {/each}
@@ -124,10 +169,10 @@
   .songs.lit::before {
     opacity: 1;
   }
-  .songs li {
+  .songs > li {
     position: relative;
     display: grid;
-    grid-template-columns: 20px 40px minmax(0, 1fr) 32px;
+    grid-template-columns: 20px 40px minmax(0, 1fr) 32px 32px;
     align-items: center;
     gap: 12px;
     padding: 6px 10px;
@@ -135,8 +180,8 @@
     font-size: var(--t-md);
     transition: background 100ms;
   }
-  .songs li:hover,
-  .songs li:focus-within {
+  .songs > li:hover,
+  .songs > li:focus-within {
     background: color-mix(in srgb, var(--text) 5%, transparent);
   }
   .cover {
@@ -182,11 +227,51 @@
   .eq {
     display: inline-flex;
   }
-  .heart.hidden {
+  .heart.hidden,
+  .why-btn:not(.on) {
     opacity: 0;
   }
-  li:hover .heart.hidden,
-  .heart.hidden:focus-visible {
+  .songs > li:hover > :is(.heart.hidden, .why-btn),
+  :is(.heart.hidden, .why-btn):focus-visible {
     opacity: 1;
+  }
+  /* Why it's here: under the song's name, quiet. */
+  .why {
+    grid-column: 3 / -1;
+    display: grid;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+  .pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .pills li {
+    display: block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--highlight) 12%, transparent);
+    color: color-mix(in srgb, var(--highlight) 75%, var(--text));
+    font-size: var(--t-xs);
+    font-weight: 600;
+  }
+  .pills li.found {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+    color: var(--text-muted);
+  }
+  .bio {
+    display: -webkit-box;
+    max-width: 66ch;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    color: var(--text-muted);
+    font-size: var(--t-sm);
+    line-height: 1.45;
   }
 </style>
