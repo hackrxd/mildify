@@ -60,8 +60,11 @@ commits to one song at a time: while a song plays, it picks the next and lines i
 you do changes what comes next:
 
 - **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it for the rest of
-  the set: more by that artist, or from that album, even from outside the set. It can change the song it lined up until about 35
+  the set: more by that artist, or from that album, even from outside the set. Each like can run the set a song
+  longer, up to two, while there's more like it to play. It can change the song it lined up until about 35
   seconds before the one playing ends, when the player starts loading it.
+- The DJ doesn't play an artist twice running, counting everyone a song credits, unless you liked or asked for
+  more of them.
 - **Skip a song** before halfway and its artist sits out the rest of the set, and the next two. Skip two in a set
   and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
