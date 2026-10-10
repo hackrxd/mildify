@@ -55,6 +55,8 @@ pub struct DjConfig {
     pub voice: String,
     /// How fast the voice speaks, against its own pace: `voice::SPEED_MIN` to `voice::SPEED_MAX`.
     pub voice_speed: f32,
+    /// The downloaded model runs on the graphics card, when llama.cpp finds one it can use.
+    pub gpu: bool,
     /// The user's own OpenAI-compatible server (Ollama, LM Studio, llama.cpp…), the `"own"` provider.
     pub server_url: String,
     /// The model name that server knows.
@@ -95,6 +97,7 @@ impl Default for DjConfig {
             model: manifest::DEFAULT_MODEL.into(),
             voice: manifest::DEFAULT_VOICE.into(),
             voice_speed: 1.0,
+            gpu: true,
             server_url: "http://127.0.0.1:11434".into(),
             server_model: String::new(),
             own_tools: false,
@@ -113,6 +116,7 @@ pub struct DjSettingsInput {
     pub model: Option<String>,
     pub voice: Option<String>,
     pub voice_speed: Option<f32>,
+    pub gpu: Option<bool>,
     pub server_url: Option<String>,
     pub server_model: Option<String>,
     pub own_tools: Option<bool>,
@@ -165,6 +169,9 @@ impl DjConfig {
         if let Some(speed) = input.voice_speed {
             self.voice_speed = speed;
         }
+        if let Some(on) = input.gpu {
+            self.gpu = on;
+        }
         if let Some(url) = input.server_url {
             self.server_url = url.trim().to_owned();
         }
@@ -207,9 +214,15 @@ impl DjConfig {
     }
 
     /// Whether a change from `old` to these settings leaves a loaded model running: only while the DJ stays on with
-    /// the same local model. A new voice, the own server's address or a cloud model pick don't unload it.
+    /// the same local model, on the same kind of device. A new voice, the own server's address or a cloud model pick
+    /// don't unload it.
     pub fn keeps_model(&self, old: &DjConfig) -> bool {
-        self.enabled && old.enabled && self.api() == Api::Local && old.api() == Api::Local && self.model == old.model
+        self.enabled
+            && old.enabled
+            && self.api() == Api::Local
+            && old.api() == Api::Local
+            && self.model == old.model
+            && self.gpu == old.gpu
     }
 
     /// The model picked for the cloud provider in use.
@@ -292,6 +305,8 @@ pub struct DjStatus {
     pub folder: PathBuf,
     pub models: Vec<Choice>,
     pub voices: Vec<Choice>,
+    /// Where the downloaded model runs, once it has loaded since the app started.
+    pub runs_on: Option<engine::RunsOn>,
 }
 
 /// Spoken lines kept for the UI to fetch; a session only ever needs the next one or two.
@@ -421,10 +436,21 @@ impl Dj {
                     group: Some(v.kind.group()),
                 })
                 .collect(),
+            runs_on: self.runs_on().filter(|_| cfg.api() == Api::Local),
         }
     }
 
-    fn emit_status(&self, app: &AppHandle, cfg: &DjConfig) {
+    /// Where the downloaded model runs, since it last loaded.
+    pub fn runs_on(&self) -> Option<engine::RunsOn> {
+        self.engine.runs_on()
+    }
+
+    /// Has the next load choose where the model runs anew, as the setting to use the graphics card changes.
+    pub fn reset_device(&self) {
+        self.engine.reset_device();
+    }
+
+    pub fn emit_status(&self, app: &AppHandle, cfg: &DjConfig) {
         let _ = app.emit("dj-status", self.status(cfg));
     }
 
@@ -579,7 +605,7 @@ impl Dj {
         let file = model.component.url.rsplit('/').next().unwrap_or_default();
         let weights = self.installed_dir(&model.component)?.join(file);
         tokio::fs::create_dir_all(&self.scratch).await?;
-        let target = self.engine.local(&server, &weights, &self.scratch.join("llama-server.log")).await?;
+        let target = self.engine.local(&server, &weights, &self.scratch.join("llama-server.log"), cfg.gpu).await?;
         Ok(Target { tools, ..target })
     }
 
@@ -1045,6 +1071,7 @@ mod tests {
     fn off_by_default_with_the_default_model_and_voice() {
         let c = DjConfig::default();
         assert!(!c.enabled);
+        assert!(c.gpu, "the graphics card is used where there's one");
         assert_eq!(c.model, manifest::DEFAULT_MODEL);
         assert_eq!(c.voice, manifest::DEFAULT_VOICE);
     }
@@ -1068,6 +1095,7 @@ mod tests {
             provider: Some(OWN_SERVER.into()),
             voice: Some("emma".into()),
             voice_speed: Some(1.3),
+            gpu: Some(false),
             server_url: Some(" http://localhost:1234 ".into()),
             server_model: Some(" qwen ".into()),
             own_tools: Some(true),
@@ -1075,7 +1103,7 @@ mod tests {
         })
         .unwrap();
         assert!(c.enabled && c.api() == Api::Own && c.own_tools);
-        assert_eq!((c.voice.as_str(), c.voice_speed), ("emma", 1.3));
+        assert_eq!((c.voice.as_str(), c.voice_speed, c.gpu), ("emma", 1.3, false));
         assert_eq!(c.server_url, "http://localhost:1234");
         assert_eq!(c.server_model, "qwen");
         // Picking a downloaded model goes back to running it here.
@@ -1217,6 +1245,8 @@ mod tests {
         assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.keeps_model(&old));
         assert!(!DjConfig { provider: OWN_SERVER.into(), ..old.clone() }.keeps_model(&old));
         assert!(!DjConfig { enabled: false, ..old.clone() }.keeps_model(&old));
+        // On the processor instead of the graphics card, or back.
+        assert!(!DjConfig { gpu: false, ..old.clone() }.keeps_model(&old));
     }
 
     #[test]
@@ -1227,11 +1257,25 @@ mod tests {
         assert!(d.same_downloads(&old, &DjConfig { voice: "emma".into(), ..old.clone() }));
         assert!(d.same_downloads(&old, &DjConfig { musicbrainz: false, ..old.clone() }));
         assert!(d.same_downloads(&old, &DjConfig { voice_speed: 0.9, ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { gpu: false, ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { voice: "light-male".into(), ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { model: "qwen3-4b".into(), ..old.clone() }));
         // A cloud model needs neither the model nor its runtime.
         assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
+    }
+
+    #[test]
+    fn says_where_the_downloaded_model_runs_only_while_its_the_one_in_use() {
+        let d = dj();
+        assert_eq!(d.status(&DjConfig::default()).runs_on, None, "not loaded yet");
+        let on_card = engine::RunsOn { card: Some("Test Card".into()), card_failed: None };
+        d.engine.ran_on(on_card.clone());
+        assert_eq!(d.status(&DjConfig::default()).runs_on, Some(on_card));
+        assert_eq!(d.status(&DjConfig { provider: "anthropic".into(), ..DjConfig::default() }).runs_on, None);
+        assert_eq!(d.status(&own()).runs_on, None);
+        d.reset_device();
+        assert_eq!(d.status(&DjConfig::default()).runs_on, None);
     }
 
     #[test]
@@ -1349,7 +1393,6 @@ mod tests {
     /// line, in the `asked.txt` it returns, and reads every line as a second of a quiet tone.
     #[cfg(unix)]
     fn fake_voice(d: &Dj, voice: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         const PROGRAM: &str = r#"#!/bin/sh
 here=$(dirname "$0")
 printf '%s\n' "$@" > "$here/asked.txt"
@@ -1362,20 +1405,74 @@ cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
         std::fs::create_dir_all(pkg.join("pkg")).unwrap();
         std::fs::write(pkg.join("pkg").join(v.kind.model_file()), "").unwrap();
         std::fs::write(bin.join("line.wav"), quiet_line(1000)).unwrap();
-        let program = bin.join(manifest::TTS_PROGRAM);
-        std::fs::write(&program, PROGRAM).unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        executable(&bin.join(manifest::TTS_PROGRAM), PROGRAM);
         for dir in [bin.parent().unwrap(), &pkg] {
             std::fs::write(dir.join(install::COMPLETE), "").unwrap();
         }
+        bin.join("asked.txt")
+    }
+
+    /// Writes `script` to `path` as a program, once it can be run.
+    #[cfg(unix)]
+    fn executable(path: &Path, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         // A process another test starts may hold the program open for writing a moment longer: wait until it runs.
         for _ in 0..100 {
-            match std::process::Command::new(&program).output() {
+            match std::process::Command::new(path).arg("--version").output() {
                 Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
                 _ => break,
             }
         }
+    }
+
+    /// The model runtime and the default model, as downloaded: a `llama-server` that lists one graphics card, writes
+    /// down how it's started in the `asked.txt` it returns, and stops before it loads anything.
+    #[cfg(unix)]
+    fn fake_model(d: &Dj) -> PathBuf {
+        const SERVER: &str = r#"#!/bin/sh
+here=$(dirname "$0")
+[ "$1" = "--version" ] && exit 0
+echo "$*" >> "$here/asked.txt"
+[ "$1" = "--list-devices" ] && printf 'Available devices:\n  Vulkan0: Test Card (100 MiB, 90 MiB free)\n' && exit 0
+echo "llama_model_load: error loading model"
+exit 1
+"#;
+        let (rt, model) = (d.runtime.unwrap(), manifest::model(manifest::DEFAULT_MODEL).unwrap());
+        let (bin, weights) = (install::component_dir(&d.root, &rt.llm).join("bin"), install::component_dir(&d.root, &model.component));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&weights).unwrap();
+        std::fs::write(weights.join(model.component.url.rsplit('/').next().unwrap()), "GGUF").unwrap();
+        executable(&bin.join(manifest::LLAMA_SERVER), SERVER);
+        for dir in [bin.parent().unwrap(), &weights] {
+            std::fs::write(dir.join(install::COMPLETE), "").unwrap();
+        }
         bin.join("asked.txt")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_the_model_on_the_graphics_card_only_when_the_settings_allow() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_model(&d);
+        let off = DjConfig { enabled: true, gpu: false, ..DjConfig::default() };
+        assert!(d.warm(&off).await.is_err());
+        let started = std::fs::read_to_string(&asked).unwrap();
+        assert_eq!(started.lines().count(), 1, "{started}");
+        assert!(started.contains("--device none"), "{started}");
+        std::fs::remove_file(&asked).unwrap();
+        // Allowed, the card it finds is tried first, then the processor.
+        let on = DjConfig { gpu: true, ..off };
+        let err = d.warm(&on).await.unwrap_err().to_string();
+        assert!(err.contains("graphics card") && err.contains("processor"), "{err}");
+        let started: Vec<String> = std::fs::read_to_string(&asked).unwrap().lines().map(str::to_owned).collect();
+        assert_eq!(started.len(), 3, "{started:?}");
+        assert_eq!(started[0], "--list-devices");
+        assert!(!started[1].contains("--device") && started[2].contains("--device none"), "{started:?}");
     }
 
     #[cfg(unix)]
