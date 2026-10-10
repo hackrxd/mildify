@@ -18,6 +18,7 @@
   import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
   import { router, SECTION_IDS } from "../lib/router.svelte";
   import { session } from "../lib/session.svelte";
+  import { toasts } from "../lib/toasts.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
   import ConfirmStrip from "./ConfirmStrip.svelte";
   import Icon from "./Icon.svelte";
@@ -91,7 +92,10 @@
     pending = null;
     if (c.kind === "model") pickModel(c.choice);
     else if (c.kind === "key") removeKey(c.provider);
-    else dj.remove();
+    else if (c.kind === "forget") {
+      dj.forget();
+      toasts.show("Your DJ forgot what it remembered");
+    } else dj.remove();
   }
 
   let apiKey = $state("");
@@ -513,6 +517,22 @@
       <button class="btn quiet danger" onclick={() => change({ kind: "files" })}>Remove the DJ's files</button>
     </div>
     {#if pending?.change.kind === "files"}
+      {@render asking(pending)}
+    {/if}
+  {/if}
+
+  {#if djStatus?.supported}
+    <div class="row">
+      <span>
+        <span class="label">What your DJ remembers</span>
+        <span class="muted small">
+          What it played, and what you skipped and liked while it played, kept on this computer for up to a year.
+          Removing its files doesn't forget it.
+        </span>
+      </span>
+      <button class="btn quiet danger" onclick={() => change({ kind: "forget" })}>Forget it</button>
+    </div>
+    {#if pending?.change.kind === "forget"}
       {@render asking(pending)}
     {/if}
   {/if}
