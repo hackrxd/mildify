@@ -267,8 +267,21 @@ your own on this computer, directly, never through a proxy set for your system.
 
 With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
 off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
-before, and your instructions.
+before in this session, and your instructions.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
+
+### What it remembers
+
+The DJ remembers, from one session to the next:
+- what it played, for a month;
+- what you skipped and liked while it played, for up to a year, fading as it goes;
+- how its sets went, for two months;
+- how it opened lately.
+
+It's kept in the app's own storage on this computer, at most 128 KB, and never sent anywhere. A model on your
+computer or your own server is told how the DJ opened lately, so it greets you some other way. A cloud model is
+told nothing from earlier sessions. Settings → AI DJ → **What your DJ remembers** → **Forget it** clears it all.
+Removing the DJ's files doesn't.
 
 ## Platforms
 
