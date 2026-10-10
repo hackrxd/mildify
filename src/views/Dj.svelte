@@ -200,6 +200,7 @@
             <button
               class="icon-btn"
               aria-haspopup="menu"
+              aria-expanded="false"
               aria-label="More for {b.set.name}"
               title="More for {b.set.name}"
               onclick={(e) => menu.showFor(e.currentTarget, setMenu(b.set))}

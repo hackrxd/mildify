@@ -17,9 +17,22 @@
         x: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
         y: Math.min(menu.y, window.innerHeight - r.height - 8),
       };
-      el.querySelector("button")?.focus();
+      el.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     });
   });
+
+  // The button it opened from says so while it's open.
+  $effect(() => {
+    const opener = menu.open ? menu.opener : null;
+    opener?.setAttribute("aria-expanded", "true");
+    return () => opener?.setAttribute("aria-expanded", "false");
+  });
+
+  /** A press outside closes the menu; on the button it opened from, that button's own click does. */
+  function pressed(e: PointerEvent) {
+    const at = e.target as Node;
+    if (menu.open && el && !el.contains(at) && !menu.opener?.contains(at)) menu.close();
+  }
 
   function onKey(e: KeyboardEvent) {
     if (!menu.open) return;
@@ -36,7 +49,7 @@
 
 <svelte:window
   onkeydown={onKey}
-  onpointerdown={(e) => menu.open && el && !el.contains(e.target as Node) && menu.close()}
+  onpointerdown={pressed}
   onblur={() => menu.close()}
   onresize={() => menu.close()}
 />

@@ -103,6 +103,32 @@ describe("ContextMenu", () => {
     width.mockRestore();
   });
 
+  it("focuses its first entry that can be used", async () => {
+    const buttons = open([
+      { label: "Skip this set", action: () => {}, disabled: true },
+      { label: "Copy the song list", action: () => {} },
+    ]);
+    await tick();
+    await tick();
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+
+  it("says on its button that it's open, and closes when that button is pressed again", () => {
+    const button = target.appendChild(document.createElement("button"));
+    const items = [{ label: "Copy the song list", action: () => {} }];
+    menu.showFor(button, items);
+    flushSync();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    // Pressing the button leaves the menu to the button's click, which closes it.
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    flushSync();
+    expect(menu.open).toBe(true);
+    menu.showFor(button, items);
+    flushSync();
+    expect(menu.open).toBe(false);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("leaves the focus alone when it's closed some other way", async () => {
     const button = target.appendChild(document.createElement("button"));
     const elsewhere = target.appendChild(document.createElement("input"));
