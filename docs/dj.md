@@ -17,9 +17,13 @@ from a package that isn't downloaded yet does stop it, without asking first, whi
 
 The DJ reads your listening through the Spotify Web API, the same way the rest of the app does:
 
-- your top tracks over the last few weeks, six months and all time,
+- your top tracks over the last few weeks, six months and all time, 50 of each,
 - what you played recently,
-- your liked songs: the newest, and two pages from further back.
+- your liked songs: the newest 50, and 50 from each half of the rest, from somewhere else each session.
+
+That's six requests in all. What it read serves a session started within half an hour, so stopping and starting
+the DJ doesn't read it again. If Spotify refuses 50 top tracks at a time, as it may for a development-mode app, the
+DJ reads them in pages of 20 instead.
 
 From these it builds segments, the way Spotify's DJ does: **On repeat**, **Your favorites lately**,
 **Throwbacks** (all-time favorites and songs you liked long ago), **Fresh in your library** and
