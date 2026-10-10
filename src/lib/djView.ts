@@ -1,7 +1,8 @@
 // What the DJ's pages say about it, and how its settings' choices map onto its config: who writes its talk and which
 // voice reads it out. Pure, so the wording is tested without a page.
-import type { TalkStyle } from "./djTalk";
-import type { DjCloud, DjConfig, DjModelChoice, DjStatus } from "./ipc";
+import { DAY_MS, type Candidate } from "./djPicks";
+import { monthYear, popularityWord, type TalkStyle } from "./djTalk";
+import type { DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
 import { formatBytes } from "./util";
 
 export const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
@@ -166,4 +167,67 @@ export function askBefore(change: DjChange, status: DjStatus, playing: boolean):
     confirm: "Remove and stop",
     cancel: "Keep playing",
   };
+}
+
+/** Why a song is in a set, in the listener's words. */
+export interface SongWhy {
+  /** From their own listening: on repeat, most played, when they played or liked it. */
+  yours: string[];
+  /** What the model looked up: its genres, when and where it came out, how well known it is, its language, and
+   * artists like it. */
+  found: string[];
+  /** The artist, as their biography has it. */
+  bio: string | null;
+}
+
+/** Genres past this many are left out. */
+const GENRES_SHOWN = 3;
+/** Languages that go without saying in an app that speaks English, or say nothing. */
+const UNSAID_LANGUAGES = new Set(["en", "eng", "und", "mul", "mis"]);
+
+function upperFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** What a song is sung in, when that's worth saying: a song with no words is instrumental. */
+function sungIn(languages: string[]): string | null {
+  if (languages.includes("zxx")) return "Instrumental";
+  const names = new Intl.DisplayNames(["en"], { type: "language" });
+  const named = languages
+    .filter((l) => !UNSAID_LANGUAGES.has(l.split("-")[0].toLowerCase()))
+    .map((l) => {
+      try {
+        const name = names.of(l);
+        return name && name !== l ? name : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((n): n is string => !!n);
+  return named.length ? `Sung in ${[...new Set(named)].slice(0, 2).join(" and ")}` : null;
+}
+
+/** Why `c` is here: what the listener's listening says, then what the model looked up about it (`info`), if it did. */
+export function songWhy(c: Candidate, info: DjSongInfo | undefined, now = new Date()): SongWhy {
+  const yours: string[] = [];
+  if (c.reasons.includes("onRepeat")) yours.push("On repeat lately");
+  else if (c.reasons.includes("favorite")) yours.push("A favorite these past months");
+  if (c.reasons.includes("allTime")) yours.push("One of your most played ever");
+  if (c.playedAt) {
+    const days = Math.floor((now.getTime() - c.playedAt.getTime()) / DAY_MS);
+    yours.push(days <= 0 ? "Played today" : days === 1 ? "Played yesterday" : `Played ${days} days ago`);
+  }
+  if (c.likedAt) yours.push(`Liked in ${monthYear(c.likedAt)}`);
+  const found: string[] = [];
+  if (info) {
+    const genres = [...info.genres, ...info.tags].map((g) => g.trim().toLowerCase()).filter(Boolean);
+    found.push(...[...new Set(genres)].slice(0, GENRES_SHOWN));
+    const year = /^\d{4}/.exec(info.released ?? "")?.[0];
+    if (year || info.label) found.push(`Released${year ? ` in ${year}` : ""}${info.label ? ` on ${info.label}` : ""}`);
+    if (info.popularity != null) found.push(upperFirst(popularityWord(info.popularity)));
+    const sung = sungIn(info.languages);
+    if (sung) found.push(sung);
+    if (info.related_artists.length) found.push(`For fans of ${info.related_artists.slice(0, 2).join(" and ")}`);
+  }
+  return { yours, found, bio: info?.artist_bio?.trim() || null };
 }

@@ -11,10 +11,12 @@ import {
   modelName,
   offNote,
   providerName,
+  songWhy,
   troubleNotes,
   voiceName,
 } from "./djView";
-import type { DjConfig, DjStatus } from "./ipc";
+import type { Candidate } from "./djPicks";
+import type { DjConfig, DjSongInfo, DjStatus } from "./ipc";
 
 const settings: DjConfig = {
   enabled: true,
@@ -197,5 +199,88 @@ describe("askBefore", () => {
     expect(askBefore({ kind: "files" }, files, true)?.text).toBe(
       "Remove the DJ's files, 1.3 GB? It stops playing and turns off, and they download again when you turn it back on.",
     );
+  });
+});
+
+describe("songWhy", () => {
+  const NOW = new Date("2026-10-09T12:00:00Z");
+  const song = (patch: Partial<Candidate> = {}): Candidate => ({
+    uri: "spotify:track:1",
+    name: "Midnight City",
+    artists: ["M83"],
+    album: "Hurry Up, We're Dreaming",
+    year: "2011",
+    durationMs: 1,
+    explicit: false,
+    reasons: [],
+    likedAt: null,
+    playedAt: null,
+    ...patch,
+  });
+  const found = (patch: Partial<DjSongInfo> = {}): DjSongInfo => ({
+    uri: "spotify:track:1",
+    genres: [],
+    tags: [],
+    released: null,
+    label: null,
+    album: null,
+    album_type: null,
+    popularity: null,
+    languages: [],
+    artist_bio: null,
+    artist_active: null,
+    related_artists: [],
+    ...patch,
+  });
+
+  it("says what the listener's own listening shows, in their words", () => {
+    const listened = song({
+      reasons: ["onRepeat", "favorite", "allTime"],
+      playedAt: new Date("2026-10-08T09:00:00Z"),
+      likedAt: new Date("2019-03-02T00:00:00Z"),
+    });
+    expect(songWhy(listened, undefined, NOW)).toEqual({
+      yours: ["On repeat lately", "One of your most played ever", "Played yesterday", "Liked in March 2019"],
+      found: [],
+      bio: null,
+    });
+    expect(songWhy(song({ reasons: ["favorite"], playedAt: NOW }), undefined, NOW).yours).toEqual(["A favorite these past months", "Played today"]);
+    expect(songWhy(song({ playedAt: new Date("2026-10-04T12:00:00Z") }), undefined, NOW).yours).toEqual(["Played 5 days ago"]);
+  });
+
+  it("adds what was looked up: genres, the release, how well known it is, its language, artists like it, the bio", () => {
+    const why = songWhy(
+      song(),
+      found({
+        genres: ["synth-pop", "Indie Pop"],
+        tags: ["indie pop", "electronic", "dream pop"],
+        released: "2011-10-18",
+        label: "Mute",
+        popularity: 15,
+        languages: ["es"],
+        related_artists: ["Washed Out", "Chromatics", "Neon Indian"],
+        artist_bio: "  A French band.  ",
+      }),
+      NOW,
+    );
+    expect(why.found).toEqual([
+      "synth-pop",
+      "indie pop",
+      "electronic",
+      "Released in 2011 on Mute",
+      "A deep cut",
+      "Sung in Spanish",
+      "For fans of Washed Out and Chromatics",
+    ]);
+    expect(why.bio).toBe("A French band.");
+  });
+
+  it("says what it can of a release, and nothing of a language that goes without saying", () => {
+    expect(songWhy(song(), found({ released: "2011" }), NOW).found).toEqual(["Released in 2011"]);
+    expect(songWhy(song(), found({ label: "Mute" }), NOW).found).toEqual(["Released on Mute"]);
+    expect(songWhy(song(), found({ languages: ["en", "und", "en-GB"] }), NOW).found).toEqual([]);
+    expect(songWhy(song(), found({ languages: ["zxx"] }), NOW).found).toEqual(["Instrumental"]);
+    expect(songWhy(song(), found({ languages: ["en", "ja", "xx"] }), NOW).found).toEqual(["Sung in Japanese"]);
+    expect(songWhy(song(), found({ artist_bio: "   " }), NOW).bio).toBeNull();
   });
 });
