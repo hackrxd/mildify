@@ -5,8 +5,13 @@ listening and talks between them. The voice is always made on your computer, and
 have a cloud model write it ([Cloud models](#cloud-models)).
 
 It's **off by default**, and nothing of it is installed with Mildify. Turning it on (Settings → AI DJ, or
-the DJ page) downloads what it runs on, once. Turning it off stops a download and unloads the model; Settings
-→ AI DJ → **Remove the DJ's files** deletes all of it.
+the DJ page in the sidebar) downloads what it runs on, once. Before that, Settings → AI DJ lets you pick its
+language model and voice, so only what you picked downloads. Turning it off stops a download and unloads the
+model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once you've said so under the button.
+
+Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
+shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it. A voice
+from a package that isn't downloaded yet does stop it, without asking first, while it downloads.
 
 ## What it plays
 
@@ -27,6 +32,15 @@ Songs the DJ played in the last three days aren't picked again at the start of a
 song before halfway, that artist sits out the rest of the session.
 
 The 2026 Web API has no recommendations, so the DJ plays only music you already listen to.
+
+The DJ page lists each set's songs with their covers, which go to the album, and their artists. A song's heart
+likes it, as anywhere in the app, and right-clicking it gives the menu songs have everywhere, apart from **Add to
+queue**: a song queued there would play in the middle of the DJ's set.
+
+A song's info button says why it's there: what your listening shows (on repeat lately, one of your most played,
+when you last played or liked it) and, for a song the model looked up, its genres, when and where it came out, how
+well known it is, what it's sung in, artists like it, and a few lines about the artist. A set from a template keeps
+what was looked up before the model gave out.
 
 ### Picking as it goes
 
@@ -72,8 +86,9 @@ voice reads it into audio ahead of time. During a set's last song, the next set 
 
 Between sets, the DJ's talk is an **item of its own**, as long as the line takes. The player bar shows it like a
 song: the segment's name, "Your DJ", its own progress bar and length. Play/pause pauses the DJ (and any music
-under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces. Starting
-the DJ fades out whatever was playing, so its greeting is an item of its own too.
+under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces, and a
+right-click on it there opens that set's menu. Starting the DJ fades out whatever was playing, so its greeting is
+an item of its own too.
 
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
 what it said lately, so it carries on instead of welcoming you again, and doesn't repeat itself. A model on your
@@ -129,6 +144,11 @@ from a template, and why. When the model fails in a way you can fix, such as a c
 your account running out of credit, the DJ says so once and plays on from templates. Removing the key the DJ is
 using stops it.
 
+The DJ page keeps saying what's wrong with the model or the voice until it's fixed, with a button to the DJ's
+settings, and through stopping and starting again. The model's note goes once the model answers again, or after you
+change its model, server or key; the voice's once a line plays through, or after you pick another voice. A change
+that doesn't fix it is told again.
+
 If you skip ahead into the next set before the DJ has introduced it, the DJ still talks first: the song waits at
 its start and comes in where the rest of the line fits.
 
@@ -152,7 +172,11 @@ ordinary set while your request waits for the next one.
 **Skip this set**, beside the set playing, stops the music and has the model pick the next set again, from the song
 you skipped: it hears that you skipped the set, so it goes somewhere else. The music waits up to 8 seconds for it
 before the DJ talks from a template. A next set whose introduction has already started plays as it is. Leaving the
-set doesn't count as skipping the song that was playing.
+set doesn't count as skipping the song that was playing. The button shows only while the set can be skipped: not
+while the DJ talks or brings the next set in, nor while the music plays on another device.
+
+Each set's **…** button, or a right-click on its name, opens its menu: **Skip this set** for the set playing, and
+**Copy the song list**, which copies the set's name and its songs, numbered, to paste anywhere.
 
 ## Telling it what to do
 
@@ -222,7 +246,8 @@ They usually write better than the downloaded models. You need your own API key 
 Paste the key and press Save. It's kept in your system's keychain (macOS Keychain, Windows Credential Manager, or
 the Secret Service on Linux, such as GNOME Keyring or KWallet). Where there's no keychain, it's kept in a file in
 the app's data folder that only you can read. The key is sent only to its provider, never shown again, and
-**Remove key** deletes it. Once a key is saved, Settings lists the models it can use, newest first.
+**Remove key** deletes it, asking first when the DJ is playing with it, since that stops it. Once a key is saved,
+Settings lists the models it can use, newest first.
 
 What the DJ uses is billed to your account with the provider; each set is one or two short requests. Nothing is
 downloaded for a cloud model, and the voice is still made on your computer. For Anthropic's newest models, the DJ

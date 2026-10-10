@@ -5,8 +5,14 @@ import { DAY_MS, REQUEST_MAX, SET_MAX, SET_MIN, type Candidate, type Reactions, 
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-function monthYear(d: Date): string {
+/** "March 2019": when a song was liked, as the DJ and its page say it. */
+export function monthYear(d: Date): string {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** How well known a song is, from Spotify's popularity of 0 to 100, as the DJ and its page say it. */
+export function popularityWord(popularity: number): string {
+  return popularity >= 70 ? "a big hit" : popularity >= 45 ? "well known" : popularity >= 20 ? "a lesser-known track" : "a deep cut";
 }
 
 /** What the model may say about a song: only things that are true. */
@@ -345,10 +351,7 @@ export function songFacts(n: number, c: Candidate, info: DjSongInfo): string {
   if (info.released) out.push(`released ${info.released}${on}`);
   else if (on) out.push(`released${on}`);
   if (info.album && info.album_type) out.push(`from the ${info.album_type} "${info.album}"`);
-  if (info.popularity != null) {
-    const how = info.popularity >= 70 ? "a big hit" : info.popularity >= 45 ? "well known" : info.popularity >= 20 ? "a lesser-known track" : "a deep cut";
-    out.push(`${how} (popularity ${info.popularity} of 100)`);
-  }
+  if (info.popularity != null) out.push(`${popularityWord(info.popularity)} (popularity ${info.popularity} of 100)`);
   if (info.languages.length) out.push(`sung in ${info.languages.join(", ")}`);
   if (info.artist_active) out.push(`artist active ${info.artist_active}`);
   if (info.related_artists.length) out.push(`for fans of ${info.related_artists.join(", ")}`);

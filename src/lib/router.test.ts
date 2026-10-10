@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let router: typeof import("./router.svelte").router;
+let sectionOf: typeof import("./router.svelte").sectionOf;
 
 beforeEach(async () => {
   // The router is a singleton; load a fresh one per test.
   vi.resetModules();
-  ({ router } = await import("./router.svelte"));
+  ({ router, sectionOf } = await import("./router.svelte"));
 });
 
 describe("router", () => {
@@ -104,6 +105,23 @@ describe("router", () => {
       router.openUri("spotify:show:abc");
       expect(router.current).toEqual({ name: "home" });
       expect(router.canBack).toBe(false);
+    });
+  });
+
+  describe("sections", () => {
+    it("opens Settings at the DJ's section, by the element's id", () => {
+      expect(sectionOf({ name: "settings", section: "dj" })).toBe("dj-settings");
+      expect(sectionOf({ name: "settings" })).toBeNull();
+      expect(sectionOf({ name: "dj" })).toBeNull();
+    });
+
+    it("goes to a section of the page it's on as a new page", () => {
+      router.go({ name: "settings" });
+      const v = router.version;
+      router.go({ name: "settings", section: "dj" });
+      expect(router.version).toBe(v + 1);
+      router.back();
+      expect(router.current).toEqual({ name: "settings" });
     });
   });
 });

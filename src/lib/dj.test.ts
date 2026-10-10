@@ -269,6 +269,12 @@ async function started() {
   return first;
 }
 
+/** Has the next set picked again, as a request does. */
+async function askAgain() {
+  dj.request("something calm");
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 /** An event as its type and what it's about: "set-picked Set 2". */
 function describeEvent(e: DjEvent): string {
   const what = "set" in e && e.set ? e.set.name : "song" in e ? e.song.name : "line" in e ? e.line.name : "";
@@ -360,6 +366,62 @@ describe("what the DJ is asked", () => {
     expect(toasts.show.mock.calls.filter(([m]) => String(m).includes("talking from templates"))).toHaveLength(1);
   });
 
+  it("keeps the model's trouble through stopping and starting, until the model answers again", async () => {
+    const answers = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+    await started();
+    dj.stop();
+    expect(dj.modelTrouble).toBe("OpenAI didn't accept your API key");
+    backend.djGenerate.mockImplementation(answers);
+    player.isPlaying = false;
+    const starting = dj.start();
+    expect(dj.modelTrouble).toBe("OpenAI didn't accept your API key");
+    await starting;
+    expect(dj.said.at(-1)?.byModel ?? dj.upNext?.byModel).toBe(true);
+    expect(dj.modelTrouble).toBeNull();
+  });
+
+  it("forgets the model's trouble when its settings change, and says it again if it's still there", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    backend.djSetKey.mockImplementation(async () => dj.status);
+    backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+    const told = () => toasts.show.mock.calls.filter(([m]) => String(m).includes("talking from templates")).length;
+    await started();
+    expect(told()).toBe(1);
+    // A key for a provider the DJ isn't using fixes nothing.
+    await dj.setKey("anthropic", "sk-ant-1");
+    expect(dj.modelTrouble).not.toBeNull();
+    await dj.setKey("openai", "sk-2");
+    expect(dj.modelTrouble).toBeNull();
+    await askAgain();
+    expect(dj.modelTrouble).not.toBeNull();
+    expect(told()).toBe(2);
+    await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    expect(dj.modelTrouble).toBeNull();
+    // Nor does a change that leaves the model as it was, or one that fails.
+    await askAgain();
+    await dj.configure({ musicbrainz: false });
+    expect(dj.modelTrouble).not.toBeNull();
+    backend.djConfigure.mockRejectedValueOnce({ kind: "other", message: "Couldn't save" });
+    await dj.configure({ server_url: "http://127.0.0.1:11434" });
+    expect(dj.modelTrouble).not.toBeNull();
+  });
+
+  it("doesn't bring back trouble from a round asked before the settings changed", async () => {
+    dj.status = { ...readyStatus, settings: { ...readyStatus.settings, provider: "openai" } };
+    await started();
+    let fail!: (e: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)));
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    fail({ kind: "other", message: "OpenAI didn't accept your API key" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.byModel).toBe(false);
+    expect(dj.modelTrouble).toBeNull();
+    expect(toasts.show).not.toHaveBeenCalledWith(expect.stringContaining("talking from templates"), "error", 8000);
+  });
+
   it("doesn't blame the model for the music not waiting", async () => {
     player.isPlaying = false;
     backend.djGenerate.mockImplementation(() => new Promise(() => {}));
@@ -438,6 +500,21 @@ describe("what the DJ is asked", () => {
       expect(backend.djSongInfo).not.toHaveBeenCalled();
       expect(lastPrompt()[1].content).not.toContain("What you looked up");
       expect(first.byModel).toBe(true);
+      expect(first.lookedUp.size).toBe(0);
+    });
+
+    it("keeps what it looked up with the set, for the DJ page", async () => {
+      const first = await started();
+      // The model asked about two of the songs.
+      expect([...first.lookedUp.keys()]).toHaveLength(2);
+      for (const [uri, facts] of first.lookedUp) expect(facts).toEqual(info(uri));
+    });
+
+    it("keeps what it looked up before the model failed, for a set from a template", async () => {
+      backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+      const first = await started();
+      expect(first.byModel).toBe(false);
+      expect([...first.lookedUp.keys()]).toHaveLength(2);
     });
 
     it("picks without look-ups when they fail", async () => {
@@ -640,6 +717,62 @@ describe("asking for a set, and skipping one", () => {
     // Said once.
     expect(backend.djGenerate.mock.calls.length).toBe(before + 1);
     expect(lastPrompt()[1].content).not.toContain("skipped the rest of the set");
+  });
+
+  it("can skip only the set playing, while the DJ isn't talking, and from this computer", async () => {
+    speechMs = 20_000;
+    const first = await started();
+    expect(dj.canSkipSet(first)).toBe(true);
+    expect(dj.canSkipSet(dj.upNext)).toBe(false);
+    expect(dj.canSkipSet(null)).toBe(false);
+    player.isLocal = false;
+    expect(dj.canSkipSet(first)).toBe(false);
+    backend.device.mockClear();
+    await dj.skipSet();
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "clear_queue" });
+    player.isLocal = true;
+    // Talking over the end of the set, into the next one.
+    await lastSong2(first);
+    expect(dj.onAir).not.toBeNull();
+    expect(dj.canSkipSet(first)).toBe(false);
+  });
+
+  it("can't skip the set it's leaving while the next one comes in, with no talk to wait for", async () => {
+    dj.setTalk("silent");
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    await playing(first.songs[0].uri, 30_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.canSkipSet(first)).toBe(true);
+    await dj.skipSet();
+    await vi.advanceTimersByTimeAsync(0);
+    // The set picked instead started with a play request, and its first song hasn't come up.
+    const next = dj.upNext!;
+    expect(player.playUris).toHaveBeenLastCalledWith(next.songs.map((s) => s.uri), 0, true);
+    expect([dj.current, dj.onAir]).toEqual([first, null]);
+    expect(dj.canSkipSet(first)).toBe(false);
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current).toBe(next);
+    expect(dj.canSkipSet(next)).toBe(true);
+  });
+
+  it("can't skip a set again while it picks something else, nor once it's stopped", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    const first = dj.upNext!;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await playing(first.songs[0].uri, 30_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.canSkipSet(first)).toBe(true);
+    await dj.skipSet();
+    expect(dj.activity).toContain("something else");
+    expect(dj.canSkipSet(first)).toBe(false);
+    dj.stop();
+    expect(dj.canSkipSet(first)).toBe(false);
   });
 
   it("waits only a few seconds for a set to be picked after a skip, then talks from a template", async () => {
@@ -1090,7 +1223,7 @@ describe("starting", () => {
     ]);
     expect(dj.caption?.[0].text).toBe("Here's set number 1, nice and easy.");
     const set = dj.upNext!;
-    expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0] });
+    expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0], set });
     // 6 s of talk, a 3 s intro: the song is asked for 3.7 s in, less the time it takes to start, so the DJ
     // is done 0.7 s before the singer.
     const wait = speechMs - (3000 - timing.VOCAL_GAP_MS) - mod.PLAY_LATENCY_MS;
@@ -1257,6 +1390,39 @@ describe("starting", () => {
     expect(dj.upNext).not.toBeNull();
     const told = toasts.show.mock.calls.filter(([m]) => String(m).includes("lost its voice"));
     expect(told).toEqual([[expect.stringContaining("no espeak data"), "error", 8000]]);
+  });
+
+  it("keeps the voice's trouble, through stopping and starting, until a line plays through", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    voice.end("No audio output device");
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    dj.stop();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    // Skipped, not played through: that says nothing about the voice.
+    dj.skipTalk();
+    expect(dj.voiceTrouble).toBe("No audio output device");
+    dj.stop();
+    player.isPlaying = false;
+    await dj.start();
+    voice.end();
+    expect(dj.voiceTrouble).toBeNull();
+  });
+
+  it("forgets the voice's trouble when another voice is picked, and says it again if it's still there", async () => {
+    backend.djSpeak.mockRejectedValue(new Error("The DJ's voice failed: no espeak data"));
+    const told = () => toasts.show.mock.calls.filter(([m]) => String(m).includes("lost its voice")).length;
+    await started();
+    expect(dj.voiceTrouble).toContain("no espeak data");
+    expect(told()).toBe(1);
+    await dj.configure({ voice: "emma" });
+    expect(dj.voiceTrouble).toBeNull();
+    await askAgain();
+    expect(dj.voiceTrouble).toContain("no espeak data");
+    expect(told()).toBe(2);
   });
 
   it("hands over to the music when a line can't be played", async () => {
@@ -2388,6 +2554,9 @@ describe("the DJ's item", () => {
     const first = await started();
     await lastSong2(first);
     expect(dj.speaking).toBe(true);
+    // The talk is the next set's, while the one ending is still the set playing.
+    expect(dj.onAir?.set).toBe(dj.upNext);
+    expect(dj.current).toBe(first);
     dj.skipTalk();
     expect(dj.speaking).toBe(false);
     expect(backend.device).toHaveBeenCalledWith({ action: "next" });

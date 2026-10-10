@@ -10,10 +10,10 @@
 <script lang="ts">
   import { liked } from "../lib/liked.svelte";
   import { menu } from "../lib/menu.svelte";
-  import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
   import { reveal } from "../lib/reveal";
   import { router } from "../lib/router.svelte";
+  import { trackMenu } from "../lib/trackMenu";
   import { formatDuration, pickImage } from "../lib/util";
   import Equalizer from "./Equalizer.svelte";
   import Icon from "./Icon.svelte";
@@ -44,25 +44,6 @@
   });
 
   const albumOf = (t: SimpleTrack | Track) => ("album" in t ? t.album : null);
-
-  function openMenu(e: MouseEvent, t: SimpleTrack | Track) {
-    const album = albumOf(t);
-    const saved = liked.has(t.uri);
-    menu.show(e, [
-      { label: "Add to queue", action: () => player.addToQueue(t.uri) },
-      {
-        label: saved ? "Remove from Liked Songs" : "Save to Liked Songs",
-        action: () => liked.toggle(t.uri),
-        disabled: saved === undefined,
-      },
-      ...(album ? [{ label: "Go to album", action: () => router.go({ name: "album", id: album.id }) }] : []),
-      ...t.artists.slice(0, 3).map((a) => ({
-        label: t.artists.length > 1 ? `Go to ${a.name}` : "Go to artist",
-        action: () => router.go({ name: "artist", id: a.id }),
-      })),
-      ...mods.trackMenu(t),
-    ]);
-  }
 </script>
 
 <div class="list" class:with-album={showAlbum} role="table" aria-label="Tracks">
@@ -90,7 +71,7 @@
       role="row"
       tabindex="-1"
       ondblclick={() => !unplayable && onplay(i)}
-      oncontextmenu={(e) => openMenu(e, t)}
+      oncontextmenu={(e) => menu.show(e, trackMenu(t))}
       {@attach reveal}
     >
       <span class="n num" role="cell">

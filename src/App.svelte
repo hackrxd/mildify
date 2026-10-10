@@ -11,7 +11,7 @@
   import { startDevtools } from "./lib/devtools";
   import { dj } from "./lib/dj.svelte";
   import { player } from "./lib/player.svelte";
-  import { router } from "./lib/router.svelte";
+  import { router, sectionOf } from "./lib/router.svelte";
   import { session } from "./lib/session.svelte";
   import { toasts } from "./lib/toasts.svelte";
   import { updater } from "./lib/updater.svelte";
@@ -70,10 +70,21 @@
     untrack(() => lyrics.trackChanged(uri));
   });
 
-  // New page, new scroll position.
+  /** How far down the main pane's content `el` is laid out: unlike its bounding box, not moved by a transform. */
+  function layoutTop(el: HTMLElement) {
+    let top = 0;
+    for (let e: Element | null = el; e instanceof HTMLElement && e !== main; e = e.offsetParent) top += e.offsetTop;
+    return top;
+  }
+
+  // New page, new scroll position: its top, or the part of it the route names, less that part's scroll margin. Here
+  // rather than in the view, which mounts before this runs, and by layout, as the view is still sliding in. The route
+  // is untracked: search replaces it as you type.
   $effect(() => {
     router.version;
-    main?.scrollTo({ top: 0 });
+    const section = untrack(() => sectionOf(router.current));
+    const at = section ? main?.querySelector<HTMLElement>(`#${section}`) : null;
+    main?.scrollTo({ top: at ? layoutTop(at) - (parseFloat(getComputedStyle(at).scrollMarginTop) || 0) : 0 });
   });
 
   const route = $derived(router.current);

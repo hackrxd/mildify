@@ -1,17 +1,14 @@
 <script lang="ts">
+  import DjSettings from "../components/DjSettings.svelte";
   import Icon from "../components/Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { audioFx, INTENSITY_MAX, INTENSITY_MIN, INTENSITY_STEP } from "../lib/audiofx.svelte";
-  import { dj } from "../lib/dj.svelte";
-  import { INSTRUCTIONS_MAX, isTalkStyle, listenerName, NAME_MAX } from "../lib/djTalk";
-  import { errorMessage, type DjCloud, type DjModelChoice } from "../lib/ipc";
-  import { router } from "../lib/router.svelte";
   import { lyrics, TEXT_SCALE_MAX, TEXT_SCALE_MIN, TEXT_SCALE_STEP, WARMUP_MAX } from "../lib/lyrics.svelte";
   import { mods } from "../lib/mods.svelte";
   import { session } from "../lib/session.svelte";
   import { updater } from "../lib/updater.svelte";
   import { whatsNew } from "../lib/whatsnew.svelte";
-  import { formatBytes, lowerFirst, plural } from "../lib/util";
+  import { plural } from "../lib/util";
   import { builtinThemes } from "../themes";
 
   const config = $derived(session.status?.config);
@@ -64,105 +61,6 @@
     { length: Math.round((TEXT_SCALE_MAX - TEXT_SCALE_MIN) / TEXT_SCALE_STEP) + 1 },
     (_, i) => Math.round((TEXT_SCALE_MIN + i * TEXT_SCALE_STEP) * 100) / 100,
   );
-
-  dj.refresh();
-  const djStatus = $derived(dj.status);
-  const djSettings = $derived(djStatus?.settings);
-  const djMissing = $derived(djStatus?.needed.filter((n) => !n.installed) ?? []);
-  const djToDownload = $derived(djMissing.reduce((n, c) => n + c.bytes, 0));
-  const djInstall = $derived(djStatus?.install);
-  let serverUrl = $state(dj.status?.settings.server_url ?? "");
-  let serverModel = $state(dj.status?.settings.server_model ?? "");
-  // Fill the fields once the status arrives, without overwriting what's being typed afterwards.
-  let serverLoaded = false;
-  $effect(() => {
-    if (djSettings && !serverLoaded) {
-      serverLoaded = true;
-      serverUrl = djSettings.server_url;
-      serverModel = djSettings.server_model;
-    }
-  });
-
-  function saveServer() {
-    if (serverUrl.trim() !== djSettings?.server_url || serverModel.trim() !== djSettings?.server_model) {
-      dj.configure({ server_url: serverUrl.trim(), server_model: serverModel.trim() });
-    }
-  }
-
-  let callMe = $state(dj.callMe);
-  /** The first name on the Spotify account, when it looks like a name: what the DJ calls the listener by default. */
-  const accountName = $derived(listenerName(session.user?.display_name));
-
-  function saveCallMe() {
-    dj.setCallMe(callMe);
-    callMe = dj.callMe;
-  }
-
-  const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
-  const DEFAULT_CLOUD_MODEL: Partial<Record<DjCloud, string>> = { anthropic: "claude-opus-5-5" };
-  /** The cloud provider in use, if any. */
-  const cloud = $derived(djSettings && djSettings.provider in CLOUD_NAMES ? (djSettings.provider as DjCloud) : null);
-  /** The model picker's value: a downloaded model, the own server, or a cloud provider. */
-  const modelChoice = $derived(!djSettings ? "" : djSettings.provider === "local" ? `local:${djSettings.model}` : djSettings.provider);
-  const cloudModel = $derived(cloud ? (djSettings?.api_models[cloud] ?? DEFAULT_CLOUD_MODEL[cloud] ?? "") : "");
-
-  function pickModel(value: string) {
-    // A key typed for one provider isn't the next one's.
-    apiKey = "";
-    if (value.startsWith("local:")) dj.configure({ provider: "local", model: value.slice("local:".length) });
-    else dj.configure({ provider: value as DjCloud | "own" });
-  }
-
-  let apiKey = $state("");
-  async function saveKey() {
-    const key = apiKey.trim();
-    if (!cloud || !key) return;
-    // The key's models are listed again once it's in: the status that says so brings the list's effect round.
-    forgetModels();
-    if (await dj.setKey(cloud, key)) apiKey = "";
-  }
-
-  function removeKey() {
-    if (!cloud) return;
-    forgetModels();
-    dj.setKey(cloud, null);
-  }
-
-  function forgetModels() {
-    modelsFor = null;
-    cloudModels = null;
-    modelsError = null;
-  }
-
-  let cloudModels = $state<DjModelChoice[] | null>(null);
-  let modelsError = $state<string | null>(null);
-  let modelsFor: DjCloud | null = null;
-  // Lists the provider's models once its key is in.
-  $effect(() => {
-    if (cloud && djStatus?.keys[cloud] && modelsFor !== cloud) loadModels(cloud);
-  });
-
-  async function loadModels(provider: DjCloud) {
-    modelsFor = provider;
-    cloudModels = null;
-    modelsError = null;
-    try {
-      const list = await dj.models(provider);
-      if (modelsFor !== provider) return;
-      cloudModels = list;
-      // Nothing picked yet: the newest the key can use, past previews and experiments, which come and go.
-      if (list.length && !djSettings?.api_models[provider] && !DEFAULT_CLOUD_MODEL[provider]) {
-        const pick = list.find((m) => !/preview|exp/i.test(m.id)) ?? list[0];
-        dj.configure({ api_models: { [provider]: pick.id } });
-      }
-    } catch (e) {
-      if (modelsFor === provider) modelsError = errorMessage(e);
-    }
-  }
-
-  function pickCloudModel(id: string) {
-    if (cloud && id.trim() && id.trim() !== cloudModel) dj.configure({ api_models: { [cloud]: id.trim() } });
-  }
 
   function saveName() {
     const name = deviceName.trim();
@@ -429,351 +327,7 @@
     </label>
   </section>
 
-  <section>
-    <h2>AI DJ</h2>
-
-    <label class="row">
-      <span>
-        <span class="label">Turn on the DJ</span>
-        <span class="muted small">
-          Plays songs from your listening and talks between them, like a radio host. Its voice is made on this computer,
-          and so is its talk unless you pick a cloud model below. Turning it on downloads what it needs{djToDownload
-            ? `, about ${formatBytes(djToDownload)}`
-            : ""}; nothing is downloaded before.
-        </span>
-      </span>
-      <input
-        type="checkbox"
-        class="switch"
-        checked={dj.enabled}
-        disabled={!djStatus?.supported}
-        onchange={(e) => dj.setEnabled(e.currentTarget.checked)}
-      />
-    </label>
-
-    {#if djStatus && !djStatus.supported}
-      <div class="row"><span class="muted small">The DJ's model and voice aren't built for this computer's processor.</span></div>
-    {:else if dj.enabled && djSettings}
-      <div class="row">
-        <span>
-          {#if djInstall?.running}
-            <span class="label">Downloading {lowerFirst(djInstall.component ?? "the DJ")}…</span>
-            <span class="muted small">
-              {formatBytes(djInstall.received)}{djInstall.total ? ` of ${formatBytes(djInstall.total)}` : ""}
-            </span>
-          {:else if djInstall?.error}
-            <span class="label">Download stopped</span>
-            <span class="small error">{djInstall.error}</span>
-          {:else if djMissing.length}
-            <span class="label">{formatBytes(djToDownload)} left to download</span>
-          {:else if djStatus?.setup}
-            <span class="label">{cloud ? `Set up ${CLOUD_NAMES[cloud]}` : "Set up your model server"}</span>
-            <span class="small error">{djStatus.setup}</span>
-          {:else}
-            <span class="label">Ready</span>
-            <span class="muted small">Start it from the DJ page in the sidebar.</span>
-          {/if}
-        </span>
-        <span class="buttons">
-          {#if djInstall?.running}
-            <button class="btn quiet" onclick={() => dj.cancelDownload()}>Pause</button>
-          {:else if djMissing.length}
-            <button class="btn primary" onclick={() => dj.retry()}>Download</button>
-          {:else if djStatus?.setup}
-            <!-- The fields are right below. -->
-          {:else}
-            <button class="btn quiet" onclick={() => router.go({ name: "dj" })}><Icon name="dj" size={16} /> Open the DJ</button>
-          {/if}
-        </span>
-      </div>
-
-      <label class="row">
-        <span>
-          <span class="label">Language model</span>
-          <span class="muted small">
-            {#if djSettings.provider === "own"}
-              Any server with an OpenAI-style chat API: Ollama, LM Studio, llama.cpp. Nothing is downloaded for it.
-            {:else if cloud}
-              Usually smarter than the downloaded models, with your own {CLOUD_NAMES[cloud]} API key; what it uses is
-              billed to your account. Nothing is downloaded for it.
-            {:else}
-              {djStatus?.models.find((m) => m.id === djSettings.model)?.detail ?? ""}
-            {/if}
-          </span>
-        </span>
-        <select class="field" value={modelChoice} onchange={(e) => pickModel(e.currentTarget.value)}>
-          <optgroup label="On this computer">
-            {#each djStatus?.models ?? [] as m (m.id)}
-              <option value="local:{m.id}">{m.label} ({formatBytes(m.bytes)})</option>
-            {/each}
-          </optgroup>
-          <optgroup label="Your own">
-            <option value="own">Your own model server</option>
-          </optgroup>
-          <optgroup label="Cloud, with your API key">
-            {#each Object.entries(CLOUD_NAMES) as [id, name] (id)}
-              <option value={id}>{name}</option>
-            {/each}
-          </optgroup>
-        </select>
-      </label>
-
-      {#if cloud}
-        {#if djStatus?.keys[cloud]}
-          <div class="row">
-            <span>
-              <span class="label">{CLOUD_NAMES[cloud]} API key</span>
-              <span class="muted small">Saved in your system's keychain. It never leaves this computer except to {CLOUD_NAMES[cloud]}.</span>
-            </span>
-            <button class="btn quiet" onclick={removeKey}>Remove key</button>
-          </div>
-
-          <div class="row">
-            <span>
-              <span class="label">Model</span>
-              <span class="muted small">
-                {#if modelsError}
-                  Couldn't list the models: {modelsError}. Type a model name instead.
-                {:else}
-                  The models your key can use, newest first.
-                {/if}
-              </span>
-            </span>
-            <span class="buttons">
-              {#if cloudModels?.length}
-                <select class="field" value={cloudModel} onchange={(e) => pickCloudModel(e.currentTarget.value)}>
-                  {#if cloudModel && !cloudModels.some((m) => m.id === cloudModel)}
-                    <option value={cloudModel}>{cloudModel}</option>
-                  {/if}
-                  {#each cloudModels as m (m.id)}
-                    <option value={m.id}>{m.label}</option>
-                  {/each}
-                </select>
-              {:else if modelsError || cloudModels}
-                <input
-                  class="field"
-                  value={cloudModel}
-                  placeholder="Model name"
-                  onblur={(e) => pickCloudModel(e.currentTarget.value)}
-                  onkeydown={(e) => e.key === "Enter" && pickCloudModel(e.currentTarget.value)}
-                />
-              {:else}
-                <span class="muted small">Listing models…</span>
-              {/if}
-              <button class="btn quiet" title="List the models again" onclick={() => cloud && loadModels(cloud)}>Refresh</button>
-            </span>
-          </div>
-        {:else}
-          <label class="row">
-            <span>
-              <span class="label">{CLOUD_NAMES[cloud]} API key</span>
-              <span class="muted small">Kept in your system's keychain, and only ever sent to {CLOUD_NAMES[cloud]}.</span>
-            </span>
-            <span class="buttons">
-              <input
-                class="field"
-                type="password"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Paste your key"
-                bind:value={apiKey}
-                onkeydown={(e) => e.key === "Enter" && saveKey()}
-              />
-              <button class="btn primary" disabled={!apiKey.trim()} onclick={saveKey}>Save</button>
-            </span>
-          </label>
-        {/if}
-        <div class="row">
-          <span class="muted small">
-            With {CLOUD_NAMES[cloud]}, what the DJ is asked goes to {CLOUD_NAMES[cloud]}: the name it calls you, the songs
-            it's choosing from with when you played or liked them, what it looked up about them, and your instructions
-            below.
-          </span>
-        </div>
-      {/if}
-
-      {#if djSettings.provider === "own"}
-        <label class="row">
-          <span>
-            <span class="label">Server address</span>
-            <span class="muted small">Ollama listens on http://127.0.0.1:11434, LM Studio on http://127.0.0.1:1234.</span>
-          </span>
-          <input class="field" bind:value={serverUrl} onblur={saveServer} onkeydown={(e) => e.key === "Enter" && saveServer()} />
-        </label>
-        <label class="row">
-          <span>
-            <span class="label">Model name</span>
-            <span class="muted small">As your server lists it, for example llama3.2 or qwen2.5:7b.</span>
-          </span>
-          <input class="field" bind:value={serverModel} onblur={saveServer} onkeydown={(e) => e.key === "Enter" && saveServer()} />
-        </label>
-        <label class="row">
-          <span>
-            <span class="label">Its model can look things up</span>
-            <span class="muted small">
-              Turn this on if the model supports tool calls, as most recent Llama, Qwen and Mistral models do. The DJ
-              can then ask about songs before picking them.
-            </span>
-          </span>
-          <input type="checkbox" class="switch" checked={djSettings.own_tools} onchange={(e) => dj.configure({ own_tools: e.currentTarget.checked })} />
-        </label>
-      {/if}
-
-      {#if djStatus?.tools}
-        <label class="row">
-          <span>
-            <span class="label">Look up genres on MusicBrainz</span>
-            <span class="muted small">
-              When the DJ looks songs up, it reads what Spotify says about them, and can ask MusicBrainz for their
-              genres too. The songs' titles, artists and ISRC codes go to musicbrainz.org.
-            </span>
-          </span>
-          <input type="checkbox" class="switch" checked={djSettings.musicbrainz} onchange={(e) => dj.configure({ musicbrainz: e.currentTarget.checked })} />
-        </label>
-      {/if}
-
-      <label class="row">
-        <span>
-          <span class="label">Voice</span>
-          <span class="muted small">The voices speak English.</span>
-        </span>
-        <select class="field" value={djSettings.voice} onchange={(e) => dj.configure({ voice: e.currentTarget.value })}>
-          {#each djStatus?.voices ?? [] as v (v.id)}
-            <option value={v.id}>{v.label}</option>
-          {/each}
-        </select>
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">Allow DJ to talk over beginning of track</span>
-          <span class="muted small">
-            The next song comes in under the last few seconds of the DJ's talk, and the DJ is done before anyone
-            sings. When the song's intro is too short, or its lyrics aren't synced, it starts after the DJ anyway.
-            Off, songs always start once the DJ is done.
-          </span>
-        </span>
-        <input type="checkbox" class="switch" checked={dj.overStart} onchange={(e) => dj.setOverStart(e.currentTarget.checked)} />
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">Allow DJ to talk over end of track</span>
-          <span class="muted small">
-            The DJ starts over the last few seconds of a song, once nobody is singing. Off, it waits for the song to
-            finish.
-          </span>
-        </span>
-        <input type="checkbox" class="switch" checked={dj.overEnd} onchange={(e) => dj.setOverEnd(e.currentTarget.checked)} />
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">How much your DJ talks</span>
-          <span class="muted small">
-            Just play has no voice: the music plays straight through, and what the DJ would say shows as captions.
-            Applies from its next set.
-          </span>
-        </span>
-        <select class="field" value={dj.talk} onchange={(e) => isTalkStyle(e.currentTarget.value) && dj.setTalk(e.currentTarget.value)}>
-          <option value="silent">Just play</option>
-          <option value="brief">Brief</option>
-          <option value="normal">Normal</option>
-          <option value="chatty">Chatty</option>
-        </select>
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">Use my name</span>
-          <span class="muted small">
-            The DJ greets you by name, and says it again now and then: every fourth set on Normal and Chatty. Off, it
-            never does.
-          </span>
-        </span>
-        <input type="checkbox" class="switch" checked={dj.useName} onchange={(e) => dj.setUseName(e.currentTarget.checked)} />
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">What your DJ calls you</span>
-          <span class="muted small">
-            {#if accountName}
-              Empty, it calls you {accountName}, from your Spotify account.
-            {:else}
-              Empty, it uses no name: the one on your Spotify account doesn't look like one.
-            {/if}
-          </span>
-        </span>
-        <input
-          class="field"
-          maxlength={NAME_MAX}
-          placeholder={accountName ?? "Your name"}
-          disabled={!dj.useName}
-          bind:value={callMe}
-          onblur={saveCallMe}
-          onkeydown={(e) => e.key === "Enter" && saveCallMe()}
-        />
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">Pick songs as it goes</span>
-          <span class="muted small">
-            The DJ picks each next song while one plays, so what you do changes what comes next: like a song and it
-            plays more like it, skip one and that artist sits out, skip two and it moves on to something else. Off, it
-            picks a whole set ahead. Applies from its next set.
-          </span>
-        </span>
-        <input type="checkbox" class="switch" checked={dj.live} onchange={(e) => dj.setLive(e.currentTarget.checked)} />
-      </label>
-
-      <label class="row">
-        <span>
-          <span class="label">Let the DJ name every song in a set</span>
-          <span class="muted small">
-            {#if dj.live}
-              While it picks songs as it goes, it introduces only the first song: it hasn't picked the rest yet.
-            {:else}
-              Off, it introduces only the first song and lets the rest of the set speak for itself.
-            {/if}
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          class="switch"
-          checked={dj.nameAll}
-          disabled={dj.live}
-          onchange={(e) => dj.setNameAll(e.currentTarget.checked)}
-        />
-      </label>
-
-      <label class="row stacked">
-        <span>
-          <span class="label">Tell your DJ</span>
-          <span class="muted small">How it should talk and what to play from your listening. Applies from its next set.</span>
-        </span>
-        <textarea
-          class="field prose"
-          rows="3"
-          maxlength={INSTRUCTIONS_MAX}
-          placeholder="Talk like a late-night radio host. Keep it short."
-          value={dj.instructions}
-          oninput={(e) => dj.setInstructions(e.currentTarget.value)}
-        ></textarea>
-      </label>
-    {/if}
-
-    {#if djStatus?.disk_bytes}
-      <div class="row">
-        <span>
-          <span class="label">The DJ's files take {formatBytes(djStatus.disk_bytes)}</span>
-          <span class="muted small">Removing them turns the DJ off. They download again if you turn it back on.</span>
-        </span>
-        <button class="btn quiet" onclick={() => dj.remove()}>Remove the DJ's files</button>
-      </div>
-    {/if}
-  </section>
+  <DjSettings />
 
   <section>
     <h2>Themes and extensions</h2>
@@ -954,14 +508,16 @@
     letter-spacing: -0.03em;
     line-height: 1;
   }
-  section {
+  /* Sections, rows, labels, fields and switches: global within the page, so the sections other components bring
+     (the AI DJ's) look the same. */
+  :where(.page) :global(section) {
     display: grid;
     gap: 4px;
   }
-  section h2 {
+  :where(.page) :global(section h2) {
     margin-bottom: 10px;
   }
-  .small {
+  :where(.page) :global(.small) {
     font-size: var(--t-sm);
   }
   .status {
@@ -994,7 +550,7 @@
   .dot.state-premium_required {
     background: var(--danger);
   }
-  .row {
+  :where(.page) :global(.row) {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1003,32 +559,36 @@
     border-bottom: 1px solid var(--border);
     font-size: var(--t-md);
   }
-  .row > span {
+  :where(.page) :global(.row > span) {
     display: grid;
     gap: 2px;
   }
-  .label {
+  /* A button beside a setting keeps its words on one line; the description wraps instead. */
+  :where(.page) :global(.row > .btn) {
+    flex: none;
+  }
+  :where(.page) :global(.label) {
     font-weight: 600;
   }
-  .row .field {
+  :where(.page) :global(.row .field) {
     width: 260px;
     flex: none;
   }
   .count {
-    display: flex !important;
+    display: flex;
     align-items: center;
     gap: 10px;
   }
   .row .count .field {
     width: 80px;
   }
-  select.field {
+  :where(.page) :global(select.field) {
     appearance: auto;
   }
   .row .field.narrow {
     width: 160px;
   }
-  .switch {
+  :where(.page) :global(.switch) {
     /* Checkboxes drawn as toggle switches. */
     appearance: none;
     position: relative;
@@ -1041,7 +601,7 @@
     cursor: pointer;
     transition: background 160ms;
   }
-  .switch::before {
+  :where(.page) :global(.switch::before) {
     content: "";
     position: absolute;
     top: 3px;
@@ -1053,19 +613,19 @@
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
     transition: transform 160ms;
   }
-  .switch:checked {
+  :where(.page) :global(.switch:checked) {
     background: var(--highlight);
   }
-  .switch:checked::before {
+  :where(.page) :global(.switch:checked::before) {
     transform: translateX(18px);
     background: var(--on-highlight);
   }
-  .switch:disabled {
+  :where(.page) :global(.switch:disabled) {
     cursor: default;
     opacity: 0.4;
   }
   .timing {
-    display: flex !important;
+    display: flex;
     align-items: center;
     gap: 10px;
   }
@@ -1082,7 +642,7 @@
   .login .field {
     width: 200px;
   }
-  .stacked {
+  :where(.page) :global(.stacked) {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -1097,21 +657,11 @@
     font-size: var(--t-sm);
     user-select: text;
   }
-  .row .prose {
-    width: 100%;
-    height: auto;
-    padding: 10px 12px;
-    color: inherit;
-    resize: vertical;
-    font: inherit;
-    font-size: var(--t-md);
-    user-select: text;
-  }
   .version {
     margin-left: 8px;
     font-weight: 400;
   }
-  .error {
+  :where(.page) :global(.error) {
     color: var(--danger);
   }
   .link {
@@ -1130,8 +680,9 @@
     gap: 8px;
     padding-top: 12px;
   }
-  .buttons {
+  :where(.page) :global(.row > .buttons) {
     display: flex;
+    align-items: center;
     flex: none;
     gap: 8px;
   }

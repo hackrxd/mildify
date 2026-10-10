@@ -38,6 +38,7 @@
     collapse: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
     puzzle: "M5 7h3.5a2 2 0 1 1 4 0H16v3.5a2 2 0 1 1 0 4V18h-3.5a2 2 0 1 0-4 0H5v-3.5a2 2 0 1 0 0-4z",
     dj: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h3.5v6H5a1 1 0 0 1-1-1zM20 14h-3.5v6H19a1 1 0 0 0 1-1z",
+    info: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zM12 11v5.5M12 7.5v.01",
   } as const;
 
   const FILLED = new Set(["play", "pause", "next", "prev"]);

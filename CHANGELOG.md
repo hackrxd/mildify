@@ -10,6 +10,13 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
+- Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
+  and before removing the DJ's files.
+- Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
+- Each set on the DJ page has a menu, from its "…" button or a right-click on its name: skip it, or copy its song
+  list. Its "Skip this set" button shows only while the set can be skipped.
+- Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
+  menu.
 
 ### Changed
 
@@ -26,9 +33,20 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and Chatty, it says why the song is here.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
+- The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
+- The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
+  and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
+- When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
+  DJ's settings, instead of only in a notice that goes away.
+- The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
 
 ### Fixed
 
+- In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
+- A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
+  app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.
+- The DJ page no longer says turning the DJ on downloads "0 B" when its files are already there, or a language model
+  when a cloud model or your own server writes what it says.
 - With "Pick songs as it goes" on, the DJ introduces only a set's first song, even when it may name every song: the
   rest aren't picked yet. Settings says so, and keeps your choice for when it picks whole sets.
 - The DJ's set starts with the song its line introduces, and a line the model left unfinished ends at its last

@@ -7,6 +7,9 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
+  import { setMenu } from "../lib/djMenu";
+  import { djLead, offNote, providerName, troubleNotes } from "../lib/djView";
+  import { contextMenu, menu } from "../lib/menu.svelte";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -30,9 +33,10 @@
     dj.request(request);
     request = "";
   }
-  const CLOUD_NAMES: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
-  /** The cloud provider writing the talk, if one is. */
-  const cloud = $derived(status ? (CLOUD_NAMES[status.settings.provider] ?? null) : null);
+  /** What's wrong with the DJ's model or voice, until it's fixed; it plays on all the same. */
+  const troubles = $derived(
+    troubleNotes({ model: dj.modelTrouble, voice: dj.voiceTrouble, talk: dj.talk, playing: dj.phase !== "off" }),
+  );
   const lamp = $derived(
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
   );
@@ -40,10 +44,11 @@
   /** The page below the header as one keyed list: the card, then the running order. A set keeps its place as it
    * moves up and as it grows when it's picked as it goes, and the card is measured with the rest, so a change in
    * its height moves the blocks below smoothly. */
-  type Block = { key: number; kind: "set"; set: DjSet } | { key: string; kind: "card" | "said" | "tell" };
+  type Block = { key: number; kind: "set"; set: DjSet } | { key: string; kind: "card" | "trouble" | "said" | "tell" };
   const blocks = $derived.by(() => {
     const out: Block[] = [{ key: "card", kind: "card" }];
     if (ready) {
+      if (troubles.length) out.push({ key: "trouble", kind: "trouble" });
       if (dj.current) out.push({ key: dj.current.id, kind: "set", set: dj.current });
       if (dj.upNext && dj.upNext.id !== dj.current?.id) out.push({ key: dj.upNext.id, kind: "set", set: dj.upNext });
       if (said.length) out.push({ key: "said", kind: "said" });
@@ -59,10 +64,10 @@
   function settle(node: Element, rects: { from: DOMRect; to: DOMRect }, { duration = 420, still = false } = {}) {
     return still || reducedMotion() ? { duration: 0 } : flip(node, rects, { duration, easing: cubicOut });
   }
-  /** A new line's list drops in, once the blocks below have mostly made room; the sets bring their own rows'
-   * entrance. */
+  /** A new line's list, or trouble, drops in, once the blocks below have mostly made room; the sets bring their own
+   * rows' entrance. */
   function enter(node: Element, kind: Block["kind"]) {
-    if (kind === "said") return rise(node, { y: -8, delay: MAKE_ROOM_MS });
+    if (kind === "said" || kind === "trouble") return rise(node, { y: -8, delay: MAKE_ROOM_MS });
     // A transition, not a CSS animation: nothing fades in when the page opens.
     if (kind === "set" && !reducedMotion()) {
       return { delay: MAKE_ROOM_MS, duration: 240, easing: cubicOut, css: (t: number) => `opacity: ${t}` };
@@ -83,15 +88,7 @@
       <h1>DJ</h1>
       {#if ready}<OnAirLamp mode={lamp} />{/if}
     </div>
-    <p class="muted lead">
-      {#if cloud}
-        Your own radio DJ. It plays songs from your listening and talks between them: {cloud} writes what it says, and
-        the voice is made on this computer.
-      {:else}
-        Your own radio DJ, running on this computer. It plays songs from your listening and talks between them, in a
-        voice made here rather than in the cloud.
-      {/if}
-    </p>
+    <p class="muted lead">{djLead(status)}</p>
   </header>
 
   {#each blocks as b (b.key)}
@@ -105,14 +102,10 @@
           </section>
         {:else if !dj.enabled}
           <section class="card" in:rise>
-            <p>
-              The DJ is off. Turning it on downloads what it runs on, about {formatBytes(toDownload)}: a language model, a
-              voice and the programs for them. Nothing is downloaded until then, and you can remove it all again in
-              Settings.
-            </p>
+            <p>{offNote(status)}</p>
             <div class="actions">
               <button class="btn primary" onclick={() => dj.setEnabled(true)}><Icon name="dj" size={18} /> Turn on the DJ</button>
-              <button class="btn quiet" onclick={() => router.go({ name: "settings" })}>Choose a model and voice</button>
+              <button class="btn quiet" onclick={() => router.go({ name: "settings", section: "dj" })}>Choose a model and voice</button>
             </div>
           </section>
         {:else if missing.length && install?.running}
@@ -141,10 +134,10 @@
         {:else if status.setup}
           <section class="card" in:rise>
             <p>
-              The DJ is set to use {cloud ?? "your own model server"}, and it isn't set up yet:
+              The DJ is set to use {providerName(status.settings)}, and it isn't set up yet:
               {lowerFirst(status.setup)}.
             </p>
-            <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings" })}>Set it up in Settings</button></div>
+            <div class="actions"><button class="btn primary" onclick={() => router.go({ name: "settings", section: "dj" })}>Set it up in Settings</button></div>
           </section>
         {:else}
           <section class="card start" in:rise>
@@ -184,21 +177,40 @@
             {/if}
           </section>
         {/if}
+      {:else if b.kind === "trouble"}
+        <section class="card trouble">
+          {#each troubles as note (note)}<p>{note}</p>{/each}
+          <div class="actions">
+            <button class="btn quiet" onclick={() => router.go({ name: "settings", section: "dj" })}>Check the DJ's settings</button>
+          </div>
+        </section>
       {:else if b.kind === "set"}
         {@const now = b.set.id === dj.current?.id}
         <div class="set-head">
-          <h2>
+          <h2 {@attach contextMenu(() => setMenu(b.set))}>
             {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
             {b.set.name}
           </h2>
-          {#if now && dj.phase === "on" && !dj.onAir}
-            <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
-              <Icon name="next" size={16} /> Skip this set
+          <span class="set-actions">
+            {#if now && dj.canSkipSet(b.set)}
+              <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
+                <Icon name="next" size={16} /> Skip this set
+              </button>
+            {/if}
+            <button
+              class="icon-btn"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-label="More for {b.set.name}"
+              title="More for {b.set.name}"
+              onclick={(e) => menu.showFor(e.currentTarget, setMenu(b.set))}
+            >
+              <Icon name="more" size={18} />
             </button>
-          {/if}
+          </span>
         </div>
         {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
-        <DjSongs songs={b.set.songs} />
+        <DjSongs set={b.set} />
         {#if b.set.live}
           <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>
         {/if}
@@ -277,6 +289,12 @@
   .card p {
     max-width: 66ch;
   }
+  /* What's wrong with the DJ's model or voice, until it's fixed. */
+  .trouble {
+    display: grid;
+    gap: 10px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, var(--border));
+  }
   .actions {
     display: flex;
     flex-wrap: wrap;
@@ -341,6 +359,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+  }
+  .set-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
   }
   .request-note {
     padding: 0 10px;

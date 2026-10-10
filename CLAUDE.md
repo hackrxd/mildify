@@ -19,7 +19,8 @@ cd src-tauri && cargo test --lib
 cd src-tauri && cargo clippy
 ```
 
-Frontend tests sit next to the module they test (`src/lib/*.test.ts`); tests for the vendored renderer live in
+Frontend tests sit next to the module they test (`src/lib/*.test.ts`, and `src/components/*.test.ts` for the few
+components with behaviour of their own, mounted with Svelte's `mount` and `flushSync`); tests for the vendored renderer live in
 `src/spicy-lyrics/tests/` so the upstream tree stays diffable. Rust tests are `#[cfg(test)] mod tests` at the
 bottom of each file and never touch the network: logic that depends on the clock or environment takes them as
 parameters (`OutputClock::heard_at`, `webkit::picks_wayland`, `lyrics::cached`), and the sign-in redirect is
@@ -54,7 +55,11 @@ filed under when it will be heard and sent as `audio-level` events, which `src/l
 `--audio-pulse` CSS variable on the player bar, whose cover glow grows with it.
 
 **Frontend state** lives in Svelte 5 rune classes in `src/lib/*.svelte.ts`, as singletons (`session`, `player`,
-`router`, `lyrics`, …). Routing is the in-memory `router` store; views live in `src/views/`.
+`router`, `lyrics`, …). Routing is the in-memory `router` store; views live in `src/views/`. A route can name a
+section of its page (`{ name: "settings", section: "dj" }`); App.svelte scrolls to it (`sectionOf`, `SECTION_IDS`).
+Right-click menus are one app-wide `menu` (`menu.svelte.ts`: `contextMenu` attachment, `showFor` under a button);
+a track's menu comes from `trackMenu.ts`, and entries code outside the app adds go through `addedItems`, which
+leaves out one whose label throws and toasts an action that fails.
 
 **Lyrics.** `src/spicy-lyrics/` is a vendored port of the Spicy Lyrics renderer (AGPL-3.0), aliased as the
 `spicy-lyrics-renderer` module in `vite.config.ts`. The app plugs into it through `setHost()`
@@ -130,7 +135,13 @@ names). The session keeps its likes and skips in `djTaste.ts`, asks the model th
 played lately in `djMemory.ts` and plays lines through `djVoice.ts`; `dj.on(fn)` tells whatever listens what happens
 (`DjEvent`: sets picked, started and skipped, songs started, skipped, unskipped and liked, lines spoken and withdrawn,
 stopped). Dev builds check the session's rules after every tick and stop (`#checkInvariants`), and every `dj.test.ts`
-case fails on a broken one.
+case fails on a broken one. What the pages say about the DJ is in `djView.ts` (the lead, the sidebar's `djNav`, the
+off note, `troubleNotes`, `askBefore` for Settings' questions under a change that stops it, and `songWhy`). The
+page keeps `dj.modelTrouble` until the model answers or its settings change, and `dj.voiceTrouble` until a line
+plays through or another voice is picked, through stopping and starting. A set keeps what the model looked up
+(`DjSet.lookedUp`, by song URI), and each song its Web API track (`Candidate.track`) for its row's cover, links and
+menu. `dj.canSkipSet(set)` is the one rule for skipping, and `djMenu.ts` builds a set's menu, where
+`addSetAction` adds entries (guarded like extensions' track entries); `dj.onAir.set` lets the queue panel open it.
 User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's

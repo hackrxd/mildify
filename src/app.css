@@ -196,6 +196,23 @@ img {
   background: color-mix(in srgb, var(--text) 6%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 30%, transparent);
 }
+/* For what can't be taken back, such as removing files or a key: in the danger colour, quiet unless it's the answer
+   to a question. */
+.btn.danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-raised));
+}
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, var(--surface-raised));
+}
+.btn.quiet.danger {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.btn.quiet.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 60%, transparent);
+}
 
 .icon-btn {
   display: inline-grid;
