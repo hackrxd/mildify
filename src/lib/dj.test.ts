@@ -1217,6 +1217,20 @@ describe("starting", () => {
     expect(voice.hold).not.toHaveBeenCalled();
   });
 
+  it("doesn't start with the song in the player, which it couldn't tell had begun", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const first = await started();
+    const song = first.songs[0].uri;
+    dj.stop();
+    // Remembering nothing of that, with the song still in the player.
+    localStorage.clear();
+    dj = new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>);
+    dj.status = readyStatus;
+    expect(player.track?.uri).toBe(song);
+    const again = await started();
+    expect(again.songs.map((s) => s.uri)).not.toContain(song);
+  });
+
   it("holds its voice's output open from the start, until it lets go of its voice as it stops", async () => {
     player.isPlaying = false;
     const starting = dj.start();
@@ -3162,7 +3176,9 @@ describe("what it picks from", () => {
       await playing(s.uri, 0);
     }
     dj.stop();
+    // Days later, with nothing in the player.
     vi.setSystemTime(Date.now() + 4 * DAY);
+    player.track = null;
     backend.djGenerate.mockClear();
     await started();
     expect(prompt(0)).toMatch(/^1\. Song 4 by Artist 4\b/m);

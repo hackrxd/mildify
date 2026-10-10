@@ -857,6 +857,9 @@ class Dj {
       this.#pool = buildPool(await loadListening({ user: session.user?.id }));
       if (run !== this.#run) return;
       this.#played = this.#memory.playedWithin(PLAYED_MEMORY_MS);
+      // The song in the player counts as played: a set starting with it would play it again from the top, and the
+      // DJ, seeing no new song, couldn't tell its set had begun.
+      if (player.track) this.#played.add(player.track.uri);
       this.activity = "Picking your first songs…";
       const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS, true);
       if (run !== this.#run) return;
