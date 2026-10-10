@@ -57,6 +57,8 @@ export interface DjConfig {
   /** The downloaded model the "local" provider runs, an id from `DjStatus.models`. */
   model: string;
   voice: string;
+  /** How fast the voice speaks, against its own pace: `VOICE_SPEED`'s range. */
+  voice_speed: number;
   server_url: string;
   server_model: string;
   /** The own server's model can call tools, so it can look songs up. */

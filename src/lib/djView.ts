@@ -57,6 +57,16 @@ export function voiceName(status: DjStatus): string {
   return status.voices.find((v) => v.id === status.settings.voice)?.label ?? status.settings.voice;
 }
 
+/** Settings' range for how fast the voice speaks, against its own pace: the backend's (src-tauri/src/dj/voice.rs). */
+export const VOICE_SPEED = { min: 0.8, max: 1.3, step: 0.05 } as const;
+
+/** How fast the voice speaks, in words: "At its usual pace", "15% faster than usual". */
+export function speedWords(speed: number): string {
+  const percent = Math.round((speed - 1) * 100);
+  if (percent === 0) return "At its usual pace";
+  return `${Math.abs(percent)}% ${percent > 0 ? "faster" : "slower"} than usual`;
+}
+
 /** Who writes what the DJ says, as the subject of a sentence. */
 function writer(status: DjStatus): string {
   const s = status.settings;

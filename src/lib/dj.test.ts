@@ -156,6 +156,7 @@ const readyStatus = {
     provider: "local",
     model: "qwen2.5-1.5b",
     voice: "michael",
+    voice_speed: 1,
     server_url: "",
     server_model: "",
     own_tools: false,

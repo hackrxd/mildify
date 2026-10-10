@@ -12,8 +12,10 @@ import {
   offNote,
   providerName,
   songWhy,
+  speedWords,
   troubleNotes,
   voiceName,
+  VOICE_SPEED,
 } from "./djView";
 import type { Candidate } from "./djPicks";
 import type { DjConfig, DjSongInfo, DjStatus } from "./ipc";
@@ -23,6 +25,7 @@ const settings: DjConfig = {
   provider: "local",
   model: "qwen2.5-1.5b",
   voice: "michael",
+  voice_speed: 1,
   server_url: "",
   server_model: "",
   own_tools: false,
@@ -86,6 +89,18 @@ describe("names", () => {
     ]);
     expect([modelName(status()), voiceName(status())]).toEqual(["Qwen2.5 1.5B", "Michael (American)"]);
     expect([modelName(status({ model: "new-model" })), voiceName(status({ voice: "emma" }))]).toEqual(["new-model", "emma"]);
+  });
+
+  it("says how fast the voice speaks against its usual pace", () => {
+    expect([1, 1.15, 0.85, VOICE_SPEED.max, VOICE_SPEED.min].map(speedWords)).toEqual([
+      "At its usual pace",
+      "15% faster than usual",
+      "15% slower than usual",
+      "30% faster than usual",
+      "20% slower than usual",
+    ]);
+    // What a float a step off 1 comes back as from the backend.
+    expect(speedWords(1.0000001)).toBe("At its usual pace");
   });
 });
 
