@@ -147,7 +147,9 @@ singing.
 
 While it talks over music, the music is turned down inside the player's own output, not with the volume slider.
 Your volume and other Spotify apps see no change. The voice plays on this computer's sound output, as the music
-does, and follows the volume slider, so it sits at the same loudness as the music.
+does, and follows the volume slider, so it sits at the same loudness as the music. Each line is brought to one level
+first, so every voice sounds as loud as the others. While the DJ is on, it keeps that output open, so headphones
+that take a moment to wake up don't cut off its first word.
 
 What it says shows up as captions: in the player bar where the current lyric line usually is, and over the
 lyrics view. Each word lights up as it's spoken (without a voice, at about the pace it would be), the same way synced

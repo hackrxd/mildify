@@ -40,6 +40,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and Chatty, it says why the song is here.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
+- Every voice of the DJ's plays at the same loudness. The Light voices were about twice as loud as most Kokoro ones,
+  and Michael, Sky and Lewis a little quieter.
 - The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
 - The DJ reads your top tracks 50 at a time, digs up different old likes each session, and doesn't read your
   listening again when it's started within half an hour of the last time.
@@ -64,6 +66,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 - The DJ's voice no longer stops mid-sentence after an initial or an abbreviation, as in J. Cole or Mr. Brightside,
   and its captions no longer break there.
+- Headphones that take a moment to wake up no longer cut off the first word of the DJ's lines: it keeps the sound
+  output open while it's on.
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
 - A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
   app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.
