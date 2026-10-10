@@ -1339,6 +1339,22 @@ cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
         assert!(d.speech_audio(speech.id).is_some());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_lines_the_way_they_read_right_and_shows_them_as_written() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "michael");
+        let cfg = DjConfig { enabled: true, ..DjConfig::default() };
+        let speech = d.speak(&cfg, "That was the #1 song by J. Cole, from 1999. Next up!").await.unwrap();
+        let shown: Vec<&str> = speech.sentences.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(shown, ["That was the #1 song by J. Cole, from 1999.", "Next up!"]);
+        let asked = std::fs::read_to_string(asked).unwrap();
+        assert_eq!(asked.lines().last(), Some("That was the number 1 song by J Cole, from 19 99. Next up!"));
+    }
+
     #[test]
     fn keeps_the_last_few_lines() {
         let d = dj();

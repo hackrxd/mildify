@@ -1,5 +1,6 @@
 //! The DJ's voice: sherpa-onnx's offline text-to-speech program reads a line into a WAV file. It reports
-//! each sentence's length as it goes, which times the captions sentence by sentence.
+//! each sentence's length as it goes, which times the captions sentence by sentence. What it's given is what the
+//! captions show, sentence by sentence, said the way it reads right (`say.rs`).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,6 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::manifest::Voice;
+use super::say;
 use crate::error::{AppError, Result};
 
 /// Anything longer isn't a DJ line.
@@ -46,17 +48,19 @@ pub struct Setup {
 
 /// Reads `text` aloud into WAV bytes, with each sentence's timing.
 pub async fn speak(setup: &Setup, text: &str, scratch: &Path) -> Result<(Vec<u8>, Vec<Sentence>, u32)> {
-    let text = clean(text);
-    if text.is_empty() {
+    let shown = split_sentences(&clean(text));
+    if shown.is_empty() {
         return Err(AppError::Other("Nothing to say".into()));
     }
+    let said: Vec<String> = shown.iter().map(|s| say::say(s)).collect();
+    let line = said.join(" ");
     tokio::fs::create_dir_all(scratch).await?;
     let out = scratch.join(format!("speech-{}.wav", crate::config::random_hex(6)));
     let mut cmd = tokio::process::Command::new(&setup.program);
     cmd.args(args(setup, &out, threads()))
         // A lone "--" ends the options: whatever the line says, it's only ever text.
         .arg("--")
-        .arg(&text)
+        .arg(&line)
         .current_dir(setup.program.parent().unwrap_or(Path::new(".")))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -79,8 +83,8 @@ pub async fn speak(setup: &Setup, text: &str, scratch: &Path) -> Result<(Vec<u8>
     let wav = wav?;
     let info = wav_info(&wav).ok_or_else(|| AppError::Other("The DJ's voice wrote no audio".into()))?;
     let chunks = chunk_samples(&String::from_utf8_lossy(&output.stdout));
-    let sentences = timings(&split_sentences(&text), &chunks, info.sample_rate, info.frames);
-    log_timing(started.elapsed(), &output, info.duration_ms(), text.chars().count());
+    let sentences = timings(&shown, &said, &chunks, info.sample_rate, info.frames);
+    log_timing(started.elapsed(), &output, info.duration_ms(), line.chars().count());
     Ok((wav, sentences, info.duration_ms()))
 }
 
@@ -139,12 +143,19 @@ fn length_scale(speed: f32) -> f32 {
 }
 
 /// The line as the voice should get it: one paragraph of plain text, no markup or emoji, never starting
-/// with something that looks like an option.
+/// with something that looks like an option. A "#" stays only before a number ("#1").
 pub fn clean(text: &str) -> String {
-    let kept: String = text
-        .chars()
-        .map(|c| if c.is_whitespace() || c.is_control() { ' ' } else { c })
-        .filter(|c| c.is_alphanumeric() || c.is_whitespace() || ".,!?;:'’\"“”()&%$€£/+-–—…".contains(*c))
+    let chars: Vec<char> = text.chars().map(|c| if c.is_whitespace() || c.is_control() { ' ' } else { c }).collect();
+    let kept: String = chars
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| {
+            c.is_alphanumeric()
+                || c.is_whitespace()
+                || ".,!?;:'’\"“”()&%$€£/+-–—…".contains(**c)
+                || (**c == '#' && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+        })
+        .map(|(_, c)| *c)
         .collect();
     let mut out = kept.split_whitespace().collect::<Vec<_>>().join(" ");
     out = out.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '"' && c != '“').to_owned();
@@ -158,25 +169,35 @@ pub fn clean(text: &str) -> String {
     out
 }
 
-/// Sentences as a reader would hear them: split after . ! ? or … followed by a space.
+/// Sentences as the voice program reads them: split after . ! or ? followed by a space. Not after an ellipsis, nor
+/// after a full stop the sentence goes on after (`say::keeps_going`): before a lowercase word, after an abbreviation,
+/// an initial or a dotted acronym.
 pub fn split_sentences(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         current.push(c);
-        let ends = matches!(c, '.' | '!' | '?' | '…');
+        let ends = matches!(c, '.' | '!' | '?');
         // Closing quotes and brackets stay with their sentence.
         while ends && matches!(chars.peek(), Some('"' | '”' | '’' | '\'' | ')')) {
             current.push(chars.next().unwrap());
         }
-        if ends && chars.peek().is_none_or(|n| n.is_whitespace()) {
-            let s = current.trim();
-            if !s.is_empty() {
-                out.push(s.to_owned());
-            }
-            current.clear();
+        if !ends || !chars.peek().is_none_or(|n| n.is_whitespace()) {
+            continue;
         }
+        if c == '.' {
+            let word = current.rsplit(char::is_whitespace).next().unwrap_or_default();
+            let next: String = chars.clone().skip_while(|n| n.is_whitespace()).take_while(|n| !n.is_whitespace()).collect();
+            if say::keeps_going(word, &next) {
+                continue;
+            }
+        }
+        let s = current.trim();
+        if !s.is_empty() {
+            out.push(s.to_owned());
+        }
+        current.clear();
     }
     let s = current.trim();
     if !s.is_empty() {
@@ -193,20 +214,20 @@ fn chunk_samples(stdout: &str) -> Vec<u64> {
         .collect()
 }
 
-/// When each sentence is spoken. With one reported length per sentence they're exact; otherwise (the
-/// program split differently) the time is shared out by length of text.
-fn timings(sentences: &[String], chunks: &[u64], sample_rate: u32, frames: u64) -> Vec<Sentence> {
+/// When each sentence `shown` is spoken, as it was `said`. With one reported length per sentence they're exact;
+/// otherwise (the program split differently) the time is shared out by the length of what was said.
+fn timings(shown: &[String], said: &[String], chunks: &[u64], sample_rate: u32, frames: u64) -> Vec<Sentence> {
     let ms = |samples: u64| (samples * 1000 / u64::from(sample_rate.max(1))) as u32;
     let total_ms = ms(frames);
-    let exact = chunks.len() == sentences.len() && chunks.iter().sum::<u64>() <= frames + u64::from(sample_rate);
+    let exact = chunks.len() == shown.len() && chunks.iter().sum::<u64>() <= frames + u64::from(sample_rate);
     let weights: Vec<u64> = if exact {
         chunks.to_vec()
     } else {
-        sentences.iter().map(|s| s.chars().count().max(1) as u64).collect()
+        said.iter().map(|s| s.chars().count().max(1) as u64).collect()
     };
     let sum: u64 = weights.iter().sum::<u64>().max(1);
     let mut at = 0u64;
-    sentences
+    shown
         .iter()
         .zip(weights)
         .map(|(text, w)| {
@@ -421,9 +442,26 @@ mod tests {
     }
 
     #[test]
+    fn splits_sentences_where_the_voice_program_does() {
+        // It reads on after an initial, an abbreviation, a dotted acronym, an ellipsis, and before a lowercase word.
+        assert_eq!(
+            split_sentences("That was Middle Child by J. Cole. Up next, Mr. Brightside feat. nobody. Ready?"),
+            vec!["That was Middle Child by J. Cole.", "Up next, Mr. Brightside feat. nobody.", "Ready?"]
+        );
+        assert_eq!(
+            split_sentences("Wait for it… Here it is. Hey... Next song. B.B. King, then U.S.A. songs. Done."),
+            vec!["Wait for it… Here it is.", "Hey... Next song.", "B.B. King, then U.S.A. songs.", "Done."]
+        );
+        assert_eq!(
+            split_sentences("That was great. and then more! and more? Yes. The No. 1 song. No. Not now."),
+            vec!["That was great. and then more!", "and more?", "Yes.", "The No. 1 song.", "No.", "Not now."]
+        );
+    }
+
+    #[test]
     fn times_sentences_exactly_when_the_counts_match() {
         let s = vec!["One.".to_owned(), "Two two.".to_owned()];
-        let t = timings(&s, &[24_000, 48_000], 24_000, 72_000);
+        let t = timings(&s, &s, &[24_000, 48_000], 24_000, 72_000);
         assert_eq!((t[0].start_ms, t[0].end_ms), (0, 1000));
         assert_eq!((t[1].start_ms, t[1].end_ms), (1000, 3000));
     }
@@ -431,18 +469,24 @@ mod tests {
     #[test]
     fn shares_time_out_by_length_when_they_dont() {
         let s = vec!["Aaaa.".to_owned(), "Bbbbbbbbbb.".to_owned()];
-        let t = timings(&s, &[72_000], 24_000, 72_000);
+        let t = timings(&s, &s, &[72_000], 24_000, 72_000);
         assert_eq!(t[0].start_ms, 0);
         assert_eq!(t[1].end_ms, 3000);
         assert!(t[0].end_ms > 800 && t[0].end_ms < 1100, "{t:?}");
         assert_eq!(t[0].end_ms, t[1].start_ms);
+        // By the length of what was said, with what's shown as the captions' text.
+        let said = vec!["Aaaaaaaaaaaaaaaaaaaa.".to_owned(), "Bbbbbbbbbb.".to_owned()];
+        let t = timings(&s, &said, &[72_000], 24_000, 72_000);
+        assert!(t[0].end_ms > 1800 && t[0].end_ms < 2100, "{t:?}");
+        assert_eq!((t[0].text.as_str(), t[1].text.as_str()), ("Aaaa.", "Bbbbbbbbbb."));
     }
 
     #[test]
     fn cleans_lines_for_reading_aloud() {
         assert_eq!(clean("  **Hey!** 🎧 It's   your DJ.\n\nUp next…"), "Hey! It's your DJ. Up next…");
         assert_eq!(clean("--output-filename=/etc/passwd hi"), "output-filename/etc/passwd hi");
-        assert_eq!(clean("<b>#1</b> `song`"), "b1/b song");
+        assert_eq!(clean("<b>#1</b> `song`"), "b#1/b song");
+        assert_eq!(clean("The #1 song, #tbt ## yes #"), "The #1 song, tbt yes");
         assert_eq!(clean("\"Quoted\" start"), "\"Quoted\" start");
         let long = "Word ".repeat(400);
         assert!(clean(&long).chars().count() <= MAX_CHARS);
