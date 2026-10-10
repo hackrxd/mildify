@@ -415,6 +415,12 @@ async fn dj_speak(state: State<'_, AppState>, text: String) -> Result<dj::voice:
     state.dj.speak(&state.config().dj, &text).await
 }
 
+/// Reads a short line in a voice, to hear it before it's picked; `dj_voice` plays it.
+#[tauri::command]
+async fn dj_preview(state: State<'_, AppState>, voice: String, text: String) -> Result<dj::voice::Speech> {
+    state.dj.preview(&state.config().dj, &voice, &text).await
+}
+
 /// Plays, pauses or stops the DJ's lines on this computer's audio output, as the music plays.
 #[tauri::command]
 fn dj_voice(app: AppHandle, state: State<'_, AppState>, command: dj::speaker::VoiceCommand) -> Result<()> {
@@ -579,6 +585,7 @@ pub fn run() {
             dj_models,
             dj_song_info,
             dj_speak,
+            dj_preview,
             dj_voice,
             dj_duck,
             dj_release,

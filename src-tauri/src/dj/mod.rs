@@ -314,6 +314,8 @@ pub struct Dj {
     installing: Arc<tokio::sync::Mutex<()>>,
     engine: Arc<Engine>,
     speech: Mutex<VecDeque<(u64, Arc<Vec<u8>>)>>,
+    /// The last voice preview, apart from the DJ's lines so it can't push one out.
+    preview: Mutex<Option<(u64, Arc<Vec<u8>>)>>,
     next_speech: AtomicU64,
     speaker: Speaker,
     keys: Arc<Keys>,
@@ -345,6 +347,7 @@ impl Dj {
             installing: Arc::default(),
             engine: Arc::default(),
             speech: Mutex::default(),
+            preview: Mutex::default(),
             next_speech: AtomicU64::new(1),
             speaker: Speaker::default(),
             // Beside the DJ's folder, not in it: removing the DJ's downloads keeps the keys.
@@ -729,16 +732,8 @@ impl Dj {
         if !cfg.enabled {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
-        let rt = self.runtime.ok_or_else(|| AppError::Other("The DJ can't run on this computer".into()))?;
         let v = manifest::voice(&cfg.voice).ok_or_else(|| AppError::Other("Pick a voice for the DJ".into()))?;
-        let incomplete =
-            || AppError::Other("The DJ's voice is incomplete. Remove the DJ's files and turn it on again.".into());
-        let program = install::find(&self.installed_dir(&rt.tts)?, manifest::TTS_PROGRAM, 3).ok_or_else(incomplete)?;
-        let dir = install::find(&self.installed_dir(&v.component)?, v.kind.model_file(), 2)
-            .and_then(|f| f.parent().map(Path::to_owned))
-            .ok_or_else(incomplete)?;
-        let setup = voice::Setup { program, dir, voice: v, speed: cfg.voice_speed };
-        let (wav, sentences, duration_ms) = voice::speak(&setup, text, &self.scratch).await?;
+        let (wav, sentences, duration_ms) = voice::speak(&self.voice_setup(v, cfg.voice_speed)?, text, &self.scratch).await?;
         let id = self.next_speech.fetch_add(1, Ordering::SeqCst);
         let mut kept = self.speech.lock().unwrap();
         if kept.len() >= SPEECH_KEPT {
@@ -748,9 +743,32 @@ impl Dj {
         Ok(Speech { id, duration_ms, sentences })
     }
 
-    /// The WAV audio of a line `speak` made.
+    /// Reads `text` in `voice` at the speed set, to hear it before it's picked: with its package downloaded, whether
+    /// or not the DJ is on. Kept apart from the DJ's lines, and in place of the last preview.
+    pub async fn preview(&self, cfg: &DjConfig, voice: &str, text: &str) -> Result<Speech> {
+        let v = manifest::voice(voice).ok_or_else(|| AppError::Other(format!("Unknown DJ voice {voice}")))?;
+        let (wav, sentences, duration_ms) = voice::speak(&self.voice_setup(v, cfg.voice_speed)?, text, &self.scratch).await?;
+        let id = self.next_speech.fetch_add(1, Ordering::SeqCst);
+        *self.preview.lock().unwrap() = Some((id, Arc::new(wav)));
+        Ok(Speech { id, duration_ms, sentences })
+    }
+
+    /// What the voice program needs to read in `v`, once it's all downloaded.
+    fn voice_setup(&self, v: &'static manifest::Voice, speed: f32) -> Result<voice::Setup> {
+        let rt = self.runtime.ok_or_else(|| AppError::Other("The DJ can't run on this computer".into()))?;
+        let incomplete =
+            || AppError::Other("The DJ's voice is incomplete. Remove the DJ's files and turn it on again.".into());
+        let program = install::find(&self.installed_dir(&rt.tts)?, manifest::TTS_PROGRAM, 3).ok_or_else(incomplete)?;
+        let dir = install::find(&self.installed_dir(&v.component)?, v.kind.model_file(), 2)
+            .and_then(|f| f.parent().map(Path::to_owned))
+            .ok_or_else(incomplete)?;
+        Ok(voice::Setup { program, dir, voice: v, speed })
+    }
+
+    /// The WAV audio of a line `speak` made, or of the last preview.
     fn speech_audio(&self, id: u64) -> Option<Arc<Vec<u8>>> {
-        self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone())
+        let kept = self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone());
+        kept.or_else(|| self.preview.lock().unwrap().as_ref().filter(|(i, _)| *i == id).map(|(_, wav)| wav.clone()))
     }
 
     /// Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes.
@@ -1370,6 +1388,44 @@ cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
         assert!(asked.contains(&"--sid=1") && asked.contains(&"--kitten-length-scale=0.800"), "{asked:?}");
         assert_eq!(asked[asked.len() - 2..], ["--", "Hi there."]);
         assert!(d.speech_audio(speech.id).is_some());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn previews_a_voice_apart_from_the_djs_lines() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "lewis");
+        // Picked or not, and with the DJ off.
+        let cfg = DjConfig { voice_speed: 0.8, ..DjConfig::default() };
+        let first = d.preview(&cfg, "lewis", "Hi, I'm Lewis.").await.unwrap();
+        let asked = std::fs::read_to_string(asked).unwrap();
+        assert!(asked.contains("--sid=10\n") && asked.contains("--kokoro-length-scale=1.250\n"), "{asked}");
+        let on = DjConfig { enabled: true, voice: "lewis".into(), ..DjConfig::default() };
+        let mut lines = Vec::new();
+        for _ in 0..SPEECH_KEPT {
+            lines.push(d.speak(&on, "Hi.").await.unwrap().id);
+        }
+        let preview = d.preview(&cfg, "lewis", "Hi again.").await.unwrap();
+        // No line of the DJ's was pushed out, and only the last preview is kept.
+        assert!(lines.iter().all(|id| d.speech_audio(*id).is_some()));
+        assert!(d.speech_audio(preview.id).is_some());
+        assert!(d.speech_audio(first.id).is_none());
+        assert!(d.preview(&cfg, "nobody", "Hi.").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn previews_only_a_voice_that_is_downloaded() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        match d.preview(&DjConfig::default(), "lewis", "Hi.").await {
+            Err(AppError::Other(m)) => assert!(m.contains("downloading"), "{m}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[cfg(unix)]
