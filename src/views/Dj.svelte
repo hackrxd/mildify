@@ -7,7 +7,9 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
+  import { setMenu } from "../lib/djMenu";
   import { djLead, offNote, providerName, troubleNotes } from "../lib/djView";
+  import { contextMenu, menu } from "../lib/menu.svelte";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
   import { formatBytes, lowerFirst } from "../lib/util";
@@ -185,15 +187,26 @@
       {:else if b.kind === "set"}
         {@const now = b.set.id === dj.current?.id}
         <div class="set-head">
-          <h2>
+          <h2 {@attach contextMenu(() => setMenu(b.set))}>
             {#key now}<span class="when" class:now in:rise={{ y: 6, duration: 300 }}>{now ? "Now" : "Up next"}:</span>{/key}
             {b.set.name}
           </h2>
-          {#if now && dj.phase === "on" && !dj.onAir}
-            <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
-              <Icon name="next" size={16} /> Skip this set
+          <span class="set-actions">
+            {#if now && dj.canSkipSet(b.set)}
+              <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
+                <Icon name="next" size={16} /> Skip this set
+              </button>
+            {/if}
+            <button
+              class="icon-btn"
+              aria-haspopup="menu"
+              aria-label="More for {b.set.name}"
+              title="More for {b.set.name}"
+              onclick={(e) => menu.showFor(e.currentTarget, setMenu(b.set))}
+            >
+              <Icon name="more" size={18} />
             </button>
-          {/if}
+          </span>
         </div>
         {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
         <DjSongs set={b.set} />
@@ -345,6 +358,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+  }
+  .set-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
   }
   .request-note {
     padding: 0 10px;
