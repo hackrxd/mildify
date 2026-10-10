@@ -60,6 +60,61 @@ describe("ContextMenu", () => {
     expect(menu.open).toBe(false);
   });
 
+  it("opens under a menu button, and gives it the focus back once it's answered", async () => {
+    const button = target.appendChild(document.createElement("button"));
+    button.getBoundingClientRect = () => new DOMRect(40, 80, 32, 20);
+    button.focus();
+    menu.showFor(button, [{ label: "Copy the song list", action: () => {} }]);
+    flushSync();
+    // Its end in line with the button's.
+    expect([menu.x, menu.y, menu.alignEnd]).toEqual([72, 104, true]);
+    await tick();
+    await tick();
+    expect(document.activeElement?.textContent?.trim()).toBe("Copy the song list");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    flushSync();
+    expect(document.activeElement).toBe(button);
+
+    menu.showFor(button, [{ label: "Copy the song list", action: () => {} }]);
+    flushSync();
+    target.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click();
+    flushSync();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("lines its end up with the button's, and stays on screen", async () => {
+    const width = vi.spyOn(HTMLUListElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 80));
+    const button = target.appendChild(document.createElement("button"));
+    button.getBoundingClientRect = () => new DOMRect(368, 80, 32, 20);
+    menu.showFor(button, [{ label: "Copy the song list", action: () => {} }]);
+    flushSync();
+    await tick();
+    flushSync();
+    const list = target.querySelector<HTMLElement>('[role="menu"]')!;
+    expect([list.style.left, list.style.top]).toEqual(["200px", "104px"]);
+    menu.close();
+    flushSync();
+    button.getBoundingClientRect = () => new DOMRect(10, 80, 32, 20);
+    menu.showFor(button, [{ label: "Copy the song list", action: () => {} }]);
+    flushSync();
+    await tick();
+    flushSync();
+    expect(target.querySelector<HTMLElement>('[role="menu"]')!.style.left).toBe("8px");
+    width.mockRestore();
+  });
+
+  it("leaves the focus alone when it's closed some other way", async () => {
+    const button = target.appendChild(document.createElement("button"));
+    const elsewhere = target.appendChild(document.createElement("input"));
+    menu.showFor(button, [{ label: "Copy the song list", action: () => {} }]);
+    flushSync();
+    elsewhere.focus();
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    flushSync();
+    expect(menu.open).toBe(false);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
   it("runs nothing for a disabled entry", () => {
     const action = vi.fn();
     const [button] = open([{ label: "Save to Liked Songs", action, disabled: true }]);

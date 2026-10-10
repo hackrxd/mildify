@@ -13,17 +13,38 @@ class Menu {
   x = $state(0);
   y = $state(0);
   items = $state<MenuItem[]>([]);
+  /** `x` is where the menu ends, not where it starts: opened from a button, it lines up with the button's end. */
+  alignEnd = $state(false);
+  /** The button it opened from, which has the focus back once it's answered. */
+  #opener: HTMLElement | null = null;
 
   show(e: MouseEvent, items: MenuItem[]) {
     e.preventDefault();
     this.items = items;
     this.x = e.clientX;
     this.y = e.clientY;
+    this.alignEnd = false;
+    this.#opener = null;
     this.open = true;
   }
 
-  close() {
+  /** Opens the menu under `button`, its end in line with the button's, as a menu button does: from the keyboard
+   * too. */
+  showFor(button: HTMLElement, items: MenuItem[]) {
+    const r = button.getBoundingClientRect();
+    this.items = items;
+    this.x = r.right;
+    this.y = r.bottom + 4;
+    this.alignEnd = true;
+    this.#opener = button;
+    this.open = true;
+  }
+
+  /** Closes the menu. `answered`, by a choice or Escape, gives the focus back to the button it opened from. */
+  close(answered = false) {
     this.open = false;
+    if (answered && this.#opener?.isConnected) this.#opener.focus();
+    this.#opener = null;
   }
 }
 
