@@ -96,7 +96,8 @@ when a cloud model is asked); `voice.rs` reads lines to WAV
 and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
 output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
-segments from top tracks, recent plays and liked songs (read by `djListening.ts`), and `djTalk.ts` asks for
+segments from top tracks, recent plays and liked songs (read by `djListening.ts`: top tracks 50 a page, the newest
+likes and a random page from each half of the rest, kept half an hour per user when it all came), and `djTalk.ts` asks for
 `{name, songs, talk}` against a JSON schema
 (llama.cpp writes properties alphabetically, so the songs come before the talk), falling back to templates
 (`fallbackPick`: a bank per moment, never the last one used). Later sets are told their number, what was said lately
@@ -125,14 +126,27 @@ every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. A
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
-picked only as the last song starts. Only songs a set was started with sit behind the player, so Next and
+picked only as the last song starts. Likes let a set run on past its plan (`setCap`: a song each, up to `RUN_ON`,
+while there's more like them), and an artist doesn't play twice running, by every artist a song credits
+(`sharesArtist`), unless liked or named by the set's request. A set's own songs are left out only for artists
+skipped since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set was started with sit behind the player, so Next and
 Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving. `dj.request(text)` makes the next set a
 requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet introduced (its queue cleared after
 what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
 through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
 playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
-names). The session keeps its likes and skips in `djTaste.ts`, asks the model through `djPicker.ts`, remembers what it
-played lately in `djMemory.ts` and plays lines through `djVoice.ts`; `dj.on(fn)` tells whatever listens what happens
+names). The session keeps its likes and skips in `djTaste.ts` (a skipped song's main artist sits out the next
+`SIT_OUT_SETS` sets picked, and the rest of the session after two skips: `sittingOut`), asks the model through
+`djPicker.ts` and plays lines through `djVoice.ts`. `DjMemory` (`djMemory.ts`) keeps across sessions, in localStorage
+per Spotify account (`memoryKey`), under `MEMORY_MAX_BYTES` and each list capped by age and count, what was played,
+skips and likes (fading by half-lives; likes are noticed in every set), how sets went and how sessions opened; the
+session files its own events into it (`#remember`), and `dj.forget()` clears the account's. As a `Taste` it orders
+choices (`songScore`, `weightedOrder`) before `spread` takes one per credited artist a round, and it leaves out songs
+and artists skipped too much lately (`leftOutSongs`, `leftOutArtists`). `#avoid` adds the sit-outs, but not an artist
+the set's request names in full (`asksFor`), and a song it names by title or album (`asksForSong`) comes anyway; with
+too little left, a set starts over without what was played, then without what was skipped too. Only a model on this
+computer or the listener's own server hears anything from earlier sessions: how the DJ opened lately
+(`lastOpenings`, stored without the listener's name by `withoutName`). `dj.on(fn)` tells whatever listens what happens
 (`DjEvent`: sets picked, started and skipped, songs started, skipped, unskipped and liked, lines spoken and withdrawn,
 stopped). Dev builds check the session's rules after every tick and stop (`#checkInvariants`), and every `dj.test.ts`
 case fails on a broken one. What the pages say about the DJ is in `djView.ts` (the lead, the sidebar's `djNav`, the

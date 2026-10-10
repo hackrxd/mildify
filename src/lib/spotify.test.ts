@@ -29,6 +29,14 @@ describe("development-mode limits", () => {
     expect(lastQuery().limit).toBeLessThanOrEqual(10);
   });
 
+  it("asks for top tracks by time range, 20 at a time unless told more", async () => {
+    await sp.topTracksIn("long_term", 20);
+    expect(apiMock.mock.lastCall?.[1]).toBe("/me/top/tracks");
+    expect(lastQuery()).toEqual({ limit: 20, offset: 20, time_range: "long_term" });
+    await sp.topTracksIn("short_term", 0, 50);
+    expect(lastQuery()).toEqual({ limit: 50, offset: 0, time_range: "short_term" });
+  });
+
   it("lists artist albums at most 10 per page", async () => {
     await sp.artistAlbums("id", 20);
     expect(apiMock.mock.lastCall?.[1]).toBe("/artists/id/albums");

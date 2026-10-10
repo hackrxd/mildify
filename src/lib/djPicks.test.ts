@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  asksFor,
+  asksForSong,
   buildPool,
   choicesFor,
   kinship,
@@ -10,12 +12,18 @@ import {
   requestChoices,
   requestScore,
   requestSegment,
+  RUN_ON,
   SEGMENTS,
+  setCap,
+  sharesArtist,
   shuffled,
   SKIPS_TO_MOVE_ON,
+  songScore,
+  weightedOrder,
   type Candidate,
   type Listening,
   type SetSoFar,
+  type Taste,
 } from "./djPicks";
 import { segmentMessages } from "./djTalk";
 import type { Track } from "./types";
@@ -148,6 +156,13 @@ describe("requests", () => {
     expect(avoided[0]).toBe("spotify:track:rh2");
   });
 
+  it("offers what the listener will more likely want first, among what the request names and after it", () => {
+    const taste: Taste = { ...quiet, artistLove: (a) => (a === "Artist 7" ? 2 : 0), songSkip: (uri) => (uri === "spotify:track:rh1" ? 1 : 0) };
+    // With the same draw for every song, the order is by weight alone.
+    const choices = requestChoices("Radiohead", pool, none, () => 0.5, taste).map((c) => c.uri);
+    expect(choices.slice(0, 3)).toEqual(["spotify:track:rh2", "spotify:track:rh1", "spotify:track:c7"]);
+  });
+
   it("leaves out what the request says not to play, until the clause ends", () => {
     const score = (request: string, uri: string) => requestScore(request)(pool.find((c) => c.uri === uri)!);
     const few = pool.slice(-4);
@@ -230,6 +245,39 @@ describe("requests", () => {
     expect(score("anything but Radiohead", "spotify:track:rh1")).toBeLessThan(0);
   });
 
+  it("tells which artists a request asks for by their whole name", () => {
+    expect(asksFor("more Radiohead please")("Radiohead")).toBe(true);
+    expect(asksFor("some U2")("U2")).toBe(true);
+    expect(asksFor("beatles")("The Beatles")).toBe(true);
+    expect(asksFor("Radiohead")("Band")).toBe(false);
+    expect(asksFor("no Radiohead")("Radiohead")).toBe(false);
+    expect(asksFor("the 90s")("Radiohead")).toBe(false);
+    // A word of a name isn't the name.
+    expect(asksFor("some pop")("Iggy Pop")).toBe(false);
+    expect(asksFor("more Iggy Pop")("Iggy Pop")).toBe(true);
+  });
+
+  it("tells which songs a request asks for by their whole title or album", () => {
+    const billie = { ...pool[0], uri: "spotify:track:bj", name: "Billie Jean - 2008 Remaster", artists: ["Michael Jackson"], album: "Thriller", year: "1982" };
+    const blue = { ...pool[0], uri: "spotify:track:sw", name: "So What", artists: ["Miles Davis"], album: "Kind of Blue", year: "1959" };
+    const named = (request: string, c: Candidate) => asksForSong(request)(c);
+    expect(named("Billie Jean", billie)).toBe(true);
+    expect(named("the Thriller album", billie)).toBe(true);
+    expect(named("Billie", billie)).toBe(false);
+    expect(named("anything but Billie Jean", billie)).toBe(false);
+    expect(named("Kind of Blue", blue)).toBe(true);
+    expect(named("something blue", blue)).toBe(false);
+  });
+
+  it("offers a song asked for by name even when it was skipped lately or its artist sits out, but not when it played lately", () => {
+    const billie = { ...pool[0], uri: "spotify:track:bj", name: "Billie Jean", artists: ["Michael Jackson"], album: "Thriller", year: "1982" };
+    const songs = [billie, ...candidates(5, ["favorite"])];
+    const avoid = { played: new Set<string>(), skippedSongs: new Set([billie.uri]), skippedArtists: new Set(["Michael Jackson"]) };
+    expect(requestChoices("Billie Jean", songs, avoid, () => 0)[0]).toBe(billie);
+    expect(requestChoices("something calm", songs, avoid, () => 0)).not.toContain(billie);
+    expect(requestChoices("Billie Jean", songs, { ...avoid, played: new Set([billie.uri]) }, () => 0)).not.toContain(billie);
+  });
+
   it("doesn't match songs on the words around what's asked for", () => {
     const filler = { ...pool[0], uri: "spotify:track:want", name: "Want", artists: ["Can"], album: "Feeling" };
     expect(requestScore("can you give me something i want, feeling it")(filler)).toBe(0);
@@ -267,13 +315,14 @@ describe("requests", () => {
 });
 
 describe("choicesFor", () => {
-  it("leaves out what's been played and artists the listener skipped", () => {
+  it("leaves out what's been played or skipped lately, and artists the listener skipped", () => {
     const pool = candidates(6, ["onRepeat"]);
     const choices = choicesFor(seg("onRepeat"), pool, {
       played: new Set(["spotify:track:c0"]),
+      skippedSongs: new Set(["spotify:track:c5"]),
       skippedArtists: new Set(["Artist 1"]),
     });
-    expect(choices.map((c) => c.uri).sort()).toEqual(["spotify:track:c2", "spotify:track:c3", "spotify:track:c4", "spotify:track:c5"]);
+    expect(choices.map((c) => c.uri).sort()).toEqual(["spotify:track:c2", "spotify:track:c3", "spotify:track:c4"]);
   });
 
   it("spreads choices across artists and caps them", () => {
@@ -282,6 +331,89 @@ describe("choicesFor", () => {
     const choices = choicesFor(seg("onRepeat"), pool, none);
     expect(choices).toHaveLength(MAX_CHOICES);
     expect(new Set(choices.slice(0, 3).map((c) => c.artists[0])).size).toBe(3);
+  });
+
+  it("counts a song for every artist it credits, so a feature doesn't bring an artist back early", () => {
+    const [a, b, c, d] = candidates(4, ["onRepeat"]);
+    const feat = { ...b, artists: ["Bo", "Ann"] };
+    const pool = [{ ...a, artists: ["Ann"] }, feat, { ...c, artists: ["Cy"] }, { ...d, artists: ["Ann"] }];
+    // In this order, a round takes Ann, then Cy; Bo's song features Ann, so it waits for the next round.
+    const choices = choicesFor(seg("onRepeat"), pool, none, () => 0, quiet);
+    expect(choices.map((x) => x.artists.join(" & "))).toEqual(["Ann", "Cy", "Bo & Ann", "Ann"]);
+    // And once Bo's song is in, Ann's waits for the round after.
+    const featFirst = choicesFor(seg("onRepeat"), [feat, pool[0], pool[2]], none, () => 0, quiet);
+    expect(featFirst.map((x) => x.artists.join(" & "))).toEqual(["Bo & Ann", "Cy", "Ann"]);
+  });
+
+  it("offers songs the listener will more likely want first, more often", () => {
+    const pool = candidates(20, ["onRepeat"]);
+    const loved: Taste = { ...quiet, artistLove: (name) => (name === "Artist 7" ? 2 : 0), songSkip: (uri) => (uri === "spotify:track:c3" ? 1 : 0) };
+    const random = seeded(7);
+    const firsts = new Map<string, number>();
+    const lasts = new Map<string, number>();
+    for (let i = 0; i < 300; i++) {
+      const choices = choicesFor(seg("onRepeat"), pool, none, random, loved);
+      firsts.set(choices[0].artists[0], (firsts.get(choices[0].artists[0]) ?? 0) + 1);
+      if (!choices.some((c) => c.uri === "spotify:track:c3")) lasts.set("c3", (lasts.get("c3") ?? 0) + 1);
+    }
+    // A loved artist's song comes first about three times in ten, against one in twenty by chance.
+    expect(firsts.get("Artist 7") ?? 0).toBeGreaterThan(60);
+    // A skipped song is left out of the 14 offered nine times in ten, against three in ten by chance.
+    expect(lasts.get("c3") ?? 0).toBeGreaterThan(240);
+  });
+});
+
+/** A seeded random source (mulberry32), for draws that are the same every run. */
+function seeded(seed: number): () => number {
+  let t = seed;
+  return () => {
+    t = (t + 0x6d2b79f5) | 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A taste that knows nothing more than the listening. */
+const quiet: Taste = { songSkip: () => 0, artistSkip: () => 0, artistLove: () => 0, playedAgo: () => null };
+
+describe("songScore", () => {
+  const [song] = candidates(1, ["onRepeat"]);
+  const feat = { ...song, artists: ["Main", "Featured"] };
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("is nothing for a song nothing more is known about, a little more for one in the listening several ways", () => {
+    expect(songScore(song, quiet)).toBe(0);
+    expect(songScore({ ...song, reasons: ["onRepeat", "allTime"] }, quiet)).toBe(0.5);
+    expect(songScore({ ...song, reasons: ["onRepeat", "allTime", "recent", "likedLately"] }, quiet)).toBe(1);
+  });
+
+  it("adds up to 2 for the artists the listener liked, and takes off for skips, a featured artist's less", () => {
+    expect(songScore(feat, { ...quiet, artistLove: () => 1.5 })).toBe(2);
+    expect(songScore(feat, { ...quiet, artistLove: (a) => (a === "Featured" ? 0.5 : 0) })).toBe(0.5);
+    expect(songScore(feat, { ...quiet, songSkip: () => 1 })).toBe(-3);
+    expect(songScore(feat, { ...quiet, artistSkip: (a) => (a === "Main" ? 1 : 0) })).toBe(-2);
+    expect(songScore(feat, { ...quiet, artistSkip: (a) => (a === "Featured" ? 1 : 0) })).toBeCloseTo(-0.7);
+  });
+
+  it("takes off for a song the DJ played lately, less as days go by", () => {
+    expect(songScore(song, { ...quiet, playedAgo: () => 0 })).toBe(-1.5);
+    expect(songScore(song, { ...quiet, playedAgo: () => 5 * DAY })).toBeCloseTo(-0.75);
+  });
+});
+
+describe("weightedOrder", () => {
+  it("puts heavier items first in proportion to their weight", () => {
+    const random = seeded(1);
+    let heavyFirst = 0;
+    for (let i = 0; i < 1000; i++) if (weightedOrder(["light", "heavy"], (x) => (x === "heavy" ? 9 : 1), random)[0] === "heavy") heavyFirst++;
+    // 9 in 10, give or take.
+    expect(heavyFirst).toBeGreaterThan(860);
+    expect(heavyFirst).toBeLessThan(940);
+  });
+
+  it("keeps every item, once", () => {
+    expect(weightedOrder([1, 2, 3, 4], () => 1, seeded(3)).sort()).toEqual([1, 2, 3, 4]);
   });
 });
 
@@ -335,6 +467,60 @@ describe("picking as it goes", () => {
 
   it("ends the set when nothing's left to pick", () => {
     expect(nextInSet(ask({ choices: [], pool: [], played: new Set([a.uri, b.uri, c.uri]) }))).toBeNull();
+  });
+
+  it("runs on past its plan after a like, a song for each, up to two, while there's more like it", () => {
+    const ann3 = song("ann3", "Ann");
+    const ann4 = song("ann4", "Ann");
+    const pool = [a, b, c, d, ann2, ann3, ann4];
+    const after = (sofar: Candidate[], liked: Candidate[]) =>
+      nextInSet(ask({ pool, sofar, played: new Set(sofar.map((s) => s.uri)), reactions: { liked, skipped: [] } }));
+    expect(after([a, b, c], [a])).toBe(ann2);
+    expect(after([a, b, c, ann2], [a])).toBeNull();
+    expect(after([a, b, c, ann2], [ann2, a])).toBe(ann3);
+    expect(after([a, b, c, ann2, ann3], [ann2, a])).toBeNull();
+    // Nothing left like the song liked: the set ends with its plan.
+    expect(after([a, b, c], [b])).toBeNull();
+  });
+
+  it("caps a set at its plan, and a song more for each like while there's more like it, up to two", () => {
+    expect(setCap(3, 0, true)).toBe(3);
+    expect(setCap(3, 1, true)).toBe(4);
+    expect(setCap(3, 5, true)).toBe(3 + RUN_ON);
+    expect(setCap(3, 2, false)).toBe(3);
+    expect(setCap(0, 0, false)).toBe(1);
+  });
+
+  it("counts every artist a song credits when it keeps an artist from playing twice running", () => {
+    const feat = song("feat", "Cy", { artists: ["Cy", "Bo"] });
+    expect(sharesArtist(feat, b)).toBe(true);
+    expect(sharesArtist(feat, a)).toBe(false);
+    expect(nextInSet(ask({ plan: [b, feat, c], sofar: [b], played: new Set([b.uri]) }))).toBe(c);
+    // Liking a song by anyone on the one playing asks for more of all of them.
+    const cy2 = song("cy2", "Cy");
+    const playingFeat = { plan: [feat, cy2, d], choices: [], pool: [feat, cy2, d], sofar: [feat], played: new Set([feat.uri]) };
+    expect(nextInSet(ask(playingFeat))).toBe(d);
+    expect(nextInSet(ask({ ...playingFeat, reactions: { liked: [song("x", "Bo")], skipped: [] } }))).toBe(cy2);
+  });
+
+  it("plays an artist the set's request names twice running", () => {
+    const bo2 = song("bo2", "Bo");
+    const set = { plan: [b, bo2, c], sofar: [b], played: new Set([b.uri]) };
+    expect(nextInSet(ask({ ...set, request: "more Bo please" }))).toBe(bo2);
+    expect(nextInSet(ask({ ...set, request: "something calm" }))).toBe(c);
+  });
+
+  it("goes by the listener's taste among the songs from outside the plan, and leaves the plan's order alone", () => {
+    const eve = song("eve", "Eve");
+    const loves = (name: string): Taste => ({ ...quiet, artistLove: (n) => (n === name ? 2 : 0) });
+    // At the plan's end, with a like that lets it run on, the two songs like it are told apart by taste.
+    const ann3 = song("ann3", "Ann");
+    const run = { pool: [a, b, c, ann2, ann3], sofar: [a, b, c], played: new Set([a.uri, b.uri, c.uri]), reactions: { liked: [a], skipped: [] } };
+    expect(nextInSet(ask(run))).toBe(ann2);
+    expect(nextInSet(ask(run), { ...quiet, playedAgo: (uri) => (uri === ann2.uri ? 0 : null) })).toBe(ann3);
+    // A loved artist off the plan doesn't jump it, and a skip doesn't move the plan's songs around.
+    expect(nextInSet(ask({ choices: [d, eve] }), loves("Eve"))).toBe(b);
+    expect(nextInSet(ask(), { ...quiet, songSkip: (uri) => (uri === b.uri ? 1 : 0) })).toBe(b);
   });
 
   it("weighs a song by how close it is to one liked", () => {

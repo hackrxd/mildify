@@ -189,16 +189,35 @@ export interface SetSoFar {
   sofar: Candidate[];
   played: Set<string>;
   skippedArtists: Set<string>;
+  /** Likes and skips in this set; the skips of the whole session. */
   reactions: Reactions;
   /** Songs skipped in this set. */
   skips: number;
+  /** What the listener asked for, when the set is their request. */
+  request?: string | null;
+}
+
+/** How many songs past its plan a set picked as it goes can run, for likes in it. */
+export const RUN_ON = 2;
+
+/** Whether two songs credit an artist in common. */
+export function sharesArtist(a: Candidate, b: Candidate): boolean {
+  return a.artists.some((x) => b.artists.includes(x));
+}
+
+/** How many songs a set picked as it goes plays: as many as its `plan`, and one more for each of its `likes`, up to
+ * RUN_ON more, while there are `more` songs like those liked to play. */
+export function setCap(plan: number, likes: number, more: boolean): number {
+  return Math.max(plan, 1) + (more ? Math.min(RUN_ON, likes) : 0);
 }
 
 /** The set's next song, picked while the one before it plays; null when the set should end with it. The plan
- * comes first, but a song the listener liked pulls its artist and album forward, a skipped artist sits out, and
- * the same artist twice running is avoided unless they asked for more of it. */
-export function nextInSet(p: SetSoFar): Candidate | null {
-  if (p.skips >= SKIPS_TO_MOVE_ON || p.sofar.length >= Math.max(p.plan.length, 1)) return null;
+ * comes first, but a song the listener liked pulls its artist and album forward, and lets the set run on; a skipped
+ * artist sits out, and the same artist twice running is avoided unless the listener liked or asked for more of
+ * them. Of the songs from outside the plan, with what the DJ knows of the listener's `taste`, those they'll more
+ * likely want lean forward. */
+export function nextInSet(p: SetSoFar, taste?: Taste): Candidate | null {
+  if (p.skips >= SKIPS_TO_MOVE_ON) return null;
   const used = new Set(p.sofar.map((s) => s.uri));
   const liked = p.reactions.liked.slice(0, 3);
   const close = p.pool.filter((c) => liked.some((l) => kinship(c, l) >= 3));
@@ -208,9 +227,12 @@ export function nextInSet(p: SetSoFar): Candidate | null {
     seen.add(c.uri);
     return !c.artists.some((a) => p.skippedArtists.has(a));
   });
+  const more = options.some((c) => liked.some((l) => sharesArtist(c, l)));
+  if (p.sofar.length >= setCap(p.plan.length, p.reactions.liked.length, more)) return null;
   const last = p.sofar[p.sofar.length - 1];
-  // Liking the song playing asks for more of its artist.
-  const moreOfLast = !!last && liked.some((l) => l.artists[0] === last.artists[0]);
+  const asked = p.request ? asksFor(p.request) : () => false;
+  // Liking the song playing, or asking for its artist, asks for more of them.
+  const moreOfLast = !!last && (liked.some((l) => sharesArtist(l, last)) || last.artists.some(asked));
   let best: Candidate | null = null;
   let top = -Infinity;
   for (const c of options) {
@@ -218,7 +240,9 @@ export function nextInSet(p: SetSoFar): Candidate | null {
     let score = planned >= 0 ? 2 - planned * 0.1 : 0;
     // The latest like counts most.
     liked.forEach((l, i) => (score += kinship(c, l) / (i + 1)));
-    if (last && !moreOfLast && c.artists[0] === last.artists[0]) score -= 2;
+    if (last && !moreOfLast && sharesArtist(c, last)) score -= 2;
+    // The plan was picked by taste already: it decides between the songs from outside it.
+    if (taste && planned < 0) score += songScore(c, taste) / 4;
     if (score > top) {
       top = score;
       best = c;
@@ -237,29 +261,84 @@ export function shuffled<T>(items: T[], random: () => number = Math.random): T[]
   return out;
 }
 
-/** The songs a segment can choose from: fitting, not played yet, and not by an artist the listener skipped. */
+/** What the DJ knows of the listener beyond their listening: how much skipping a song or an artist still counts,
+ * how much they've liked an artist's songs while it played, and how long ago it played a song. Its memory is one. */
+export interface Taste {
+  songSkip(uri: string): number;
+  artistSkip(name: string): number;
+  artistLove(name: string): number;
+  /** ms since the DJ last played it, if it remembers. */
+  playedAgo(uri: string): number | null;
+}
+
+/** Love counts up to this much in a song's score. */
+const LOVE_MAX = 2;
+/** The score a song loses for having been played by the DJ halves this often. */
+const PLAYED_FADE_MS = 5 * DAY_MS;
+
+/** How much the listener should hear `c` now: 0 for a song nothing more is known about. Up to 2 more for artists
+ * they liked while the DJ played them, and a little for a song in their listening several ways; less for a song or
+ * an artist they skipped (a featured artist's skips count for less), and for a song the DJ played lately. */
+export function songScore(c: Candidate, taste: Taste): number {
+  let n = 0.5 * Math.min(2, c.reasons.length - 1);
+  n += Math.min(LOVE_MAX, c.artists.reduce((sum, a) => sum + taste.artistLove(a), 0));
+  n -= 3 * taste.songSkip(c.uri);
+  c.artists.forEach((a, i) => (n -= (i === 0 ? 2 : 0.7) * taste.artistSkip(a)));
+  const ago = taste.playedAgo(c.uri);
+  if (ago !== null) n -= 1.5 * Math.pow(0.5, ago / PLAYED_FADE_MS);
+  return n;
+}
+
+/** `items` in a random order where each comes early in proportion to its weight (Efraimidis and Spirakis'
+ * sampling). */
+export function weightedOrder<T>(items: T[], weight: (item: T) => number, random: () => number = Math.random): T[] {
+  return items
+    .map((item) => ({ item, key: Math.log(Math.max(random(), Number.MIN_VALUE)) / weight(item) }))
+    .sort((a, b) => b.key - a.key)
+    .map((k) => k.item);
+}
+
+/** Up to `max` of `songs`, in their order but one per artist a round, so a set isn't one artist start to finish. A
+ * song counts for every artist it credits, so a feature doesn't bring an artist back early. */
+function spread(songs: Candidate[], max: number): Candidate[] {
+  const out: Candidate[] = [];
+  let rest = songs;
+  while (out.length < max && rest.length) {
+    const used = new Set<string>();
+    const later: Candidate[] = [];
+    for (const c of rest) {
+      if (out.length >= max || c.artists.some((a) => used.has(a))) later.push(c);
+      else {
+        out.push(c);
+        for (const a of c.artists) used.add(a);
+      }
+    }
+    rest = later;
+  }
+  return out;
+}
+
+/** What a set leaves out: songs played lately, songs skipped too lately to offer, and artists sitting out. */
+export interface Avoid {
+  played: Set<string>;
+  skippedArtists: Set<string>;
+  skippedSongs?: Set<string>;
+}
+
+/** The songs a segment can choose from: fitting, not played or skipped lately, and not by an artist sitting out. With
+ * what the DJ knows of the listener's `taste`, songs they'll more likely want come first more often. */
 export function choicesFor(
   segment: Segment,
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
+  taste?: Taste,
 ): Candidate[] {
   const fitting = pool.filter(
-    (c) => segment.fits(c) && !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)),
+    (c) => segment.fits(c) && !avoid.played.has(c.uri) && !avoid.skippedSongs?.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)),
   );
-  // One song per artist where possible, so a set isn't one artist start to finish.
-  const byArtist = new Map<string, Candidate[]>();
-  for (const c of shuffled(fitting, random)) {
-    const key = c.artists[0] ?? "";
-    byArtist.set(key, [...(byArtist.get(key) ?? []), c]);
-  }
-  const out: Candidate[] = [];
-  for (let round = 0; out.length < MAX_CHOICES && out.length < fitting.length; round++) {
-    for (const songs of byArtist.values()) {
-      if (songs[round] && out.length < MAX_CHOICES) out.push(songs[round]);
-    }
-  }
-  return out;
+  const order = taste ? weightedOrder(fitting, (c) => Math.exp(songScore(c, taste)), random) : shuffled(fitting, random);
+  return spread(order, MAX_CHOICES);
 }
 
 /** The longest request the DJ takes for its next set. */
@@ -379,6 +458,49 @@ export function requestScore(request: string): (c: Candidate) => number {
   };
 }
 
+/** Words a name needn't be said with: "Beatles" names The Beatles, but "blue" isn't Kind of Blue. */
+const NAME_FILLER = new Set(["the", "a", "an", "and", "of"]);
+/** A song with nothing to it but what's probed. */
+const NOTHING = { uri: "", name: "", artists: [] as string[], album: "", year: null, durationMs: 0, explicit: false, reasons: [], likedAt: null, playedAt: null };
+
+/** A name's or a request's words, as `requestScore` reads them. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().replace(/['\u2018\u2019]/g, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/** Whether `words` hold every word of `name` that counts. */
+function saysWhole(words: Set<string>, name: string): boolean {
+  const own = wordsOf(name).filter((w) => !NAME_FILLER.has(w));
+  return own.length > 0 && own.every((w) => words.has(w));
+}
+
+/** A song's title without what's added to it: " - Remastered 2011", " (feat. Ann)", " [Live]". */
+function bareTitle(title: string): string {
+  return title.replace(/\s+-\s+.*$/, "").replace(/\s*[([][^)\]]*[)\]]/g, "").trim();
+}
+
+/** Whether `request` asks for `artist` by their whole name, and not to leave them out: "more Iggy Pop" does; "some
+ * pop", "no Iggy Pop" and "the 90s" don't. */
+export function asksFor(request: string): (artist: string) => boolean {
+  const score = requestScore(request);
+  const words = new Set(wordsOf(request));
+  return (artist) => saysWhole(words, artist) && score({ ...NOTHING, artists: [artist] }) > 0;
+}
+
+/** Whether `request` asks for the song `c` by its whole title or album, and not to leave it out: "Billie Jean",
+ * "the Thriller album". */
+export function asksForSong(request: string): (c: Candidate) => boolean {
+  const score = requestScore(request);
+  const words = new Set(wordsOf(request));
+  return (c) => {
+    const title = bareTitle(c.name);
+    return (
+      (saysWhole(words, title) && score({ ...NOTHING, name: title }) > 0) ||
+      (saysWhole(words, c.album) && score({ ...NOTHING, album: c.album }) > 0)
+    );
+  };
+}
+
 /** The decade a word names ("90s", "1980s", "2010s", "eighties"), as its first year. */
 function decadeOf(word: string): number | null {
   // Its own words only: `in` would also find "constructor" on every object.
@@ -402,32 +524,29 @@ function spanOf(word: string): [number, number] | null {
 export function requestChoices(
   request: string,
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
+  taste?: Taste,
 ): Candidate[] {
-  const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
+  const asked = asksForSong(request);
+  // A song asked for by its title or album comes even if it was skipped lately, or its artist sits out.
+  const open = pool.filter(
+    (c) => !avoid.played.has(c.uri) && (asked(c) || (!avoid.skippedSongs?.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)))),
+  );
   const score = requestScore(request);
-  const scored = shuffled(open, random).map((c) => ({ c, n: score(c) }));
+  const ordered = taste ? weightedOrder(open, (c) => Math.exp(songScore(c, taste)), random) : shuffled(open, random);
+  const scored = ordered.map((c) => ({ c, n: score(c) }));
   const named = scored.filter((s) => s.n > 0).sort((a, b) => b.n - a.n).map((s) => s.c).slice(0, REQUEST_CHOICES);
-  // What the request says to leave out (below zero) isn't offered at all.
+  // What the request says to leave out (below zero) isn't offered at all. The rest, one per artist where possible.
   const rest = scored.filter((s) => s.n === 0).map((s) => s.c);
-  // The rest, one per artist where possible.
-  const byArtist = new Map<string, Candidate[]>();
-  for (const c of rest) byArtist.set(c.artists[0] ?? "", [...(byArtist.get(c.artists[0] ?? "") ?? []), c]);
-  const out = [...named];
-  for (let round = 0; out.length < REQUEST_CHOICES && out.length < named.length + rest.length; round++) {
-    for (const songs of byArtist.values()) {
-      if (songs[round] && out.length < REQUEST_CHOICES) out.push(songs[round]);
-    }
-  }
-  return out;
+  return [...named, ...spread(rest, REQUEST_CHOICES - named.length)];
 }
 
 /** The next segment: one that has songs left, not one of the last two, the opener first when it can be. */
 export function nextSegment(
   history: SegmentId[],
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
 ): Segment | null {
   const usable = SEGMENTS.filter((s) => choicesFor(s, pool, avoid, () => 0).length >= MIN_CHOICES);

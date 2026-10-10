@@ -30,11 +30,14 @@ export function facts(c: Candidate, now = new Date()): string[] {
   return out;
 }
 
-function partOfDay(now: Date): string {
+/** The part of the day `now` is in: night until 5, morning until noon, afternoon until 5 pm, evening until 9. */
+export function daypart(now: Date): "night" | "morning" | "afternoon" | "evening" {
   const h = now.getHours();
-  const day = now.toLocaleDateString("en-US", { weekday: "long" });
-  const part = h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night";
-  return `${day} ${part}`;
+  return h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night";
+}
+
+function partOfDay(now: Date): string {
+  return `${now.toLocaleDateString("en-US", { weekday: "long" })} ${daypart(now)}`;
 }
 
 /** The longest custom instructions the DJ takes. */
@@ -104,7 +107,8 @@ export interface SegmentAsk {
   opening?: boolean;
   /** Which set of the show this is, counting from 1. */
   setNumber?: number;
-  /** What the DJ said before these, most recent last, so it doesn't say it again. */
+  /** What the DJ said this session, most recent last, so it doesn't say it again; at its opening, how it opened its
+   * last sessions. */
   earlier?: string[];
   /** A small model's prompt: less of what was said before, so it has room to think. */
   compact?: boolean;
@@ -204,6 +208,28 @@ export function earlierLines(earlier: string[], compact: boolean): string[] {
   return out;
 }
 
+/** `line` with `name` taken out, and the commas and spaces it leaves behind tidied: how it's remembered, so a
+ * later session doesn't hear a name it may no longer use. */
+export function withoutName(line: string, name: string | null): string {
+  const who = name?.trim();
+  if (!who) return line;
+  const escaped = who.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return line
+    .replace(new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?:['\u2019]s)?(?![\\p{L}\\p{N}])`, "giu"), "$1")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/[,;:]+(?=[,.!?;:])/g, "")
+    .replace(/[,;:]\s+(?=[\u2013\u2014])/g, " ")
+    .replace(/^[\s,.!?;:\u2013\u2014-]+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** How the DJ opened its last sessions, for it to greet the listener some other way this time. */
+export function openedLately(openings: string[]): string[] {
+  const said = [...new Set(openings.map(openingOf).filter(Boolean))];
+  return said.length ? [`How you opened lately: ${said.map((o) => `"${o}…"`).join(", ")}. Greet them some other way.`] : [];
+}
+
 /** Ways a line can start, so the show doesn't sound the same set after set. */
 export type Angle = "why" | "theme" | "bridge" | "moment" | "request";
 
@@ -237,6 +263,7 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
     where.push(
       `It's ${partOfDay(now)}.${ask.listener ? ` The listener's name is ${ask.listener}.` : ""}`,
       "This is the start of the session: greet the listener first.",
+      ...openedLately(ask.earlier ?? []),
     );
   } else {
     const set = ask.setNumber && ask.setNumber > 1 ? `set ${ask.setNumber} of the show` : "a new set in the show";

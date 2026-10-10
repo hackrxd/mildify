@@ -12,6 +12,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import {
+  asksFor,
   buildPool,
   choicesFor,
   MIN_CHOICES,
@@ -21,18 +22,21 @@ import {
   requestChoices,
   requestScore,
   requestSegment,
+  type Avoid,
   type Candidate,
   type Segment,
   type SegmentId,
 } from "./djPicks";
 import {
   cleanName,
+  daypart,
   fallbackPick,
   INSTRUCTIONS_MAX,
   isTalkStyle,
   listenerName,
   pickAngle,
   sentences,
+  withoutName,
   type Angle,
   type SegmentAsk,
   type TalkStyle,
@@ -40,7 +44,7 @@ import {
 } from "./djTalk";
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
-import { load, persist, playedLately, rememberPlayed } from "./djMemory";
+import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, voiceNote } from "./djView";
@@ -74,6 +78,8 @@ const NAME_ALL_KEY = "nativify:djNameAll";
 const TALK_KEY = "nativify:djTalk";
 const NAME_KEY = "nativify:djName";
 const USE_NAME_KEY = "nativify:djUseName";
+/** How many of its latest openings a local model hears before opening a session. */
+const OPENINGS_REMEMBERED = 3;
 /** The settings that pick the model, or say how to reach it: changing any may fix what was wrong with it. */
 const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "server_url", "server_model", "own_tools", "api_models"];
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
@@ -256,6 +262,10 @@ class Dj {
   #played = new Set<string>();
   /** What the listener liked and skipped this session. */
   #taste = new SessionTaste();
+  /** What the DJ remembers from one session to the next. */
+  #memoryOf: { user: string | null; memory: DjMemory } | null = null;
+  /** When this session started: with a set's id, what its memory is kept under. */
+  #sessionStart = 0;
   #preparing: Promise<void> | null = null;
   #rush: (() => void) | null = null;
   #queued: "no" | "pending" | "done" | "failed" = "no";
@@ -301,6 +311,8 @@ class Dj {
   #setIds = 0;
   /** Sets picked this session, for the model to know how far into the show it is. */
   #setsThisSession = 0;
+  /** The artists left out when each set of this session was picked, by its id. */
+  #leftOutAtPick = new Map<number, Set<string>>();
   /** How the model's lines this session have started, so the next starts another way. */
   #angles: Angle[] = [];
   /** The template the DJ talked from last this session, so the next is another. */
@@ -343,6 +355,7 @@ class Dj {
 
   constructor(voice?: Voice) {
     if (voice) this.#voice = voice;
+    this.on((e) => this.#remember(e));
   }
 
   async init() {
@@ -583,10 +596,15 @@ class Dj {
   /** Lets go of the next set, and of one still being picked (its answer is ignored when it comes): their songs
    * are up for picking again. The player's queue and any hand-over to it are the caller's to undo. */
   #letGoOfNext() {
-    if (this.upNext) this.#unplayed(this.upNext.songs);
+    if (this.upNext) {
+      this.#unplayed(this.upNext.songs);
+      // Never heard, it isn't one of the session's sets: the one picked instead takes its number.
+      this.#setsThisSession--;
+    }
     this.upNext = null;
     this.#preparing = null;
     this.#prepareGen++;
+    this.#taste.recount(this.#setsThisSession);
   }
 
   /** Songs picked for a set that won't play: up for picking again. */
@@ -789,15 +807,16 @@ class Dj {
     const run = ++this.#run;
     // Playback is at rest already: there's no session to start from but a stopped one.
     this.#resetShow();
+    this.#sessionStart = Date.now();
     this.phase = "starting";
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
     // The DJ plays here; music on another device would play on under its voice.
     if (player.isPlaying && !player.isLocal) player.togglePlay();
     try {
-      this.#pool = buildPool(await loadListening());
+      this.#pool = buildPool(await loadListening({ user: session.user?.id }));
       if (run !== this.#run) return;
-      this.#played = new Set(playedLately().keys());
+      this.#played = this.#memory.playedWithin(PLAYED_MEMORY_MS);
       this.activity = "Picking your first songs…";
       const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS, true);
       if (run !== this.#run) return;
@@ -857,6 +876,7 @@ class Dj {
     this.#voiceWarned = false;
     this.#modelWarned = false;
     this.#setsThisSession = 0;
+    this.#leftOutAtPick.clear();
     this.#angles = [];
     this.#lastTemplate = null;
     this.said = [];
@@ -915,6 +935,60 @@ class Dj {
 
   #listeners = new Set<(event: DjEvent) => void>();
 
+  /** Forgets what the DJ remembers of the account signed in: what it played, what was skipped and liked while it
+   * played, how its sets went and how it opened. This session carries on as it is. */
+  forget() {
+    this.#memory.forget();
+  }
+
+  /** What the DJ remembers of the account signed in, read when it's first wanted. */
+  get #memory(): DjMemory {
+    const user = session.user?.id ?? null;
+    if (this.#memoryOf?.user !== user) this.#memoryOf = { user, memory: new DjMemory({ user }) };
+    return this.#memoryOf.memory;
+  }
+
+  /** What the DJ keeps for later sessions, from what happens in this one. */
+  #remember(e: DjEvent) {
+    const memory = this.#memory;
+    const key = (set: DjSet) => `${this.#sessionStart}:${set.id}`;
+    // A song's skip or like counts toward the set playing, when it's that set's.
+    const setOf = (song: Candidate) => (this.current?.songs.some((s) => s.uri === song.uri) ? this.current : null);
+    const note = (song: Candidate, what: SetNote) => {
+      const set = setOf(song);
+      if (set) memory.noteSet(key(set), what);
+    };
+    switch (e.type) {
+      case "set-started":
+        memory.setStarted(key(e.set), { segment: e.set.segment, part: daypart(new Date()), request: !!e.set.request });
+        break;
+      case "set-skipped":
+        memory.noteSet(key(e.set), "skipped");
+        break;
+      case "song-started":
+        memory.played(e.song.uri);
+        if (e.set) memory.noteSet(key(e.set), "song");
+        break;
+      case "song-skipped":
+        memory.skipped(e.song);
+        note(e.song, "skip");
+        break;
+      case "song-unskipped":
+        memory.unskipped(e.song);
+        note(e.song, "unskip");
+        break;
+      case "song-liked":
+        memory.liked(e.song);
+        note(e.song, "like");
+        break;
+      case "line-spoken":
+        // The session's first line opened it: remembered without the name it called the listener, which they may
+        // not want used next time.
+        if (this.said.length === 1) memory.opened({ talk: withoutName(e.line.talk, this.#listener()), byModel: e.line.byModel });
+        break;
+    }
+  }
+
   /** Calls `fn` with each thing that happens in a session, as it happens; returns a function that stops it. */
   on(fn: (event: DjEvent) => void): () => void {
     this.#listeners.add(fn);
@@ -969,12 +1043,15 @@ class Dj {
     const chosen = this.#chooseSegment(request);
     if (!chosen) return null;
     let { segment, choices } = chosen;
+    const leftOut = this.#avoid(request).skippedArtists;
     // Said until a set that says it is on its way: one given up on leaves it for the one picked instead.
     const skippedSet = this.#setSkipped ?? undefined;
     const listener = this.#listener();
     const prev = previous ? { name: previous.name, artists: previous.artists } : null;
     const live = this.live;
     const reactions = live ? this.#taste.news() : undefined;
+    // A model on this computer, or the listener's own, has less room than a cloud one.
+    const local = this.status?.settings.provider === "local" || this.status?.settings.provider === "own";
     const ask: SegmentAsk = {
       segment,
       choices,
@@ -983,9 +1060,8 @@ class Dj {
       instructions: this.instructions,
       opening,
       setNumber: this.#setsThisSession + 1,
-      earlier: this.#earlier(),
-      // A model on this computer, or the listener's own, has less room than a cloud one.
-      compact: this.status?.settings.provider === "local" || this.status?.settings.provider === "own",
+      earlier: this.#earlier(local),
+      compact: local,
       nameAll: this.nameAll,
       live,
       reactions,
@@ -1042,6 +1118,7 @@ class Dj {
     this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));
     this.#setsThisSession++;
+    this.#leftOutAtPick.set(this.#setIds + 1, leftOut);
     return {
       id: ++this.#setIds,
       segment: segment.id,
@@ -1064,7 +1141,7 @@ class Dj {
    * choose from for it, or the next of the usual segments. None when the listening has nothing left. */
   #chooseSegment(request: string | null): { segment: Segment; choices: Candidate[] } | null {
     if (request) {
-      const choices = requestChoices(request, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists });
+      const choices = requestChoices(request, this.#pool, this.#avoid(request), Math.random, this.#memory);
       if (choices.length >= MIN_CHOICES) return { segment: requestSegment(request), choices };
     }
     return this.#ordinarySegment();
@@ -1094,25 +1171,39 @@ class Dj {
     return this.#ordinarySegment();
   }
 
-  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. */
+  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. When
+   * everything's been played, it starts over, leaving out only what's playing now and what's skipped; when that
+   * leaves too little, only what's playing now. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
-    const avoid = { played: this.#played, skippedArtists: this.#taste.skippedArtists };
-    let segment = nextSegment(this.#segments, this.#pool, avoid);
-    if (!segment && this.#played.size) {
-      // Everything's been played: start over, leaving out only what's playing now.
-      this.#played = new Set(this.current?.songs.map((s) => s.uri) ?? []);
-      segment = nextSegment(this.#segments, this.#pool, { ...avoid, played: this.#played });
+    const playing = new Set(this.current?.songs.map((s) => s.uri) ?? []);
+    const ways = [this.#avoid(), this.#avoid(null, playing), { played: playing, skippedArtists: new Set<string>() }];
+    for (const avoid of ways) {
+      const segment = nextSegment(this.#segments, this.#pool, avoid);
+      if (!segment) continue;
+      if (avoid !== ways[0]) this.#played = new Set(playing);
+      return { segment, choices: choicesFor(segment, this.#pool, avoid, Math.random, this.#memory) };
     }
-    if (!segment) return null;
-    return { segment, choices: choicesFor(segment, this.#pool, { played: this.#played, skippedArtists: this.#taste.skippedArtists }) };
+    return null;
+  }
+
+  /** What a set leaves out: songs `played` (lately, by default), songs and artists skipped too much lately
+   * (`DjMemory.leftOutSongs`, `leftOutArtists`), and artists sitting out after a skip this session
+   * (`SessionTaste.sittingOut`); but not an artist the set's `request` asks for by name. */
+  #avoid(request: string | null = null, played = this.#played): Required<Avoid> {
+    const asked = request ? asksFor(request) : () => false;
+    const out = [...this.#taste.sittingOut(this.#setsThisSession), ...this.#memory.leftOutArtists()];
+    return { played: new Set(played), skippedSongs: this.#memory.leftOutSongs(), skippedArtists: new Set(out.filter((a) => !asked(a))) };
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's
-   * held for its talk), and what it's about to say comes last. */
-  #earlier(): string[] {
+   * held for its talk), and what it's about to say comes last. Before it's said anything this session, a model on
+   * this computer or the listener's own server hears how the DJ opened lately, so it opens some other way; a cloud
+   * model hears nothing from earlier sessions. */
+  #earlier(local: boolean): string[] {
     const spoken = this.said.map((s) => s.talk);
     const cur = this.current;
     if (cur && this.announced !== cur && !spoken.includes(cur.talk)) spoken.push(cur.talk);
+    if (!spoken.length && local) return this.#memory.lastOpenings(OPENINGS_REMEMBERED).map((s) => s.talk);
     return spoken;
   }
 
@@ -1488,6 +1579,7 @@ class Dj {
   #towardNextSet(run: number, t: typeof player.track, uri: string | null, pos: number) {
     if (!this.current || !t || !uri || this.#awaiting) return;
     const left = t.durationMs - pos;
+    this.#noticeLikes(this.current);
     if (this.current.live && player.isLocal) this.#goLive(run, this.current, uri, left);
     const cur = this.current;
     const last = cur.songs[cur.songs.length - 1];
@@ -1536,7 +1628,6 @@ class Dj {
    * queue, and picked again when the listener likes something, until it's too late to change. When the set
    * should end with the song playing, the next set gets picked. */
   #goLive(run: number, cur: DjSet, uri: string, left: number) {
-    this.#noticeLikes(cur);
     if (this.#setEnds || this.#lining) return;
     const at = cur.songs.findIndex((s) => s.uri === uri);
     if (at < 0) return;
@@ -1558,16 +1649,25 @@ class Dj {
   }
 
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
-    return nextInSet({
-      plan: cur.plan,
-      choices: cur.choices,
-      pool: this.#pool,
-      sofar,
-      played,
-      skippedArtists: this.#taste.skippedArtists,
-      reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
-      skips: this.#setSkips,
-    });
+    const avoid = this.#avoid(cur.request);
+    const before = this.#leftOutAtPick.get(cur.id) ?? new Set<string>();
+    return nextInSet(
+      {
+        plan: cur.plan,
+        choices: cur.choices,
+        // More like a song liked comes from the rest of the listening, leaving out all a set would.
+        pool: this.#pool.filter((c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a))),
+        sofar,
+        played,
+        // The set's own songs passed what was left out as it was picked, or were let in on purpose: only artists
+        // skipped since leave them out.
+        skippedArtists: new Set([...avoid.skippedArtists].filter((a) => !before.has(a))),
+        reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
+        skips: this.#setSkips,
+        request: cur.request,
+      },
+      this.#memory,
+    );
   }
 
   /** Puts `pick` after `sofar`, in the set and in the player's queue, in place of whatever was lined up. */
@@ -1602,7 +1702,8 @@ class Dj {
     return done;
   }
 
-  /** A song of the set the listener just liked, here or anywhere in the app: what's next leans toward it. */
+  /** A song of the set the listener just liked, here or anywhere in the app: it's remembered, and in a set picked as
+   * it goes, what's next leans toward it. */
   #noticeLikes(cur: DjSet) {
     for (const s of cur.songs) if (liked.has(s.uri) === undefined) liked.ensure([s.uri]);
     for (const s of this.#taste.noticeLikes(cur.songs, (uri) => liked.has(uri))) {
@@ -1684,7 +1785,6 @@ class Dj {
       return;
     }
     this.#foreignSince = null;
-    rememberPlayed(uri);
     const next = this.upNext;
     if (next && next.songs.some((s) => s.uri === uri)) this.#advance(run, next);
     this.#emit({ type: "song-started", song, set: this.current?.songs.some((s) => s.uri === uri) ? this.current : null });
@@ -1693,7 +1793,8 @@ class Dj {
   /** The listener skipped `song`: once per song left, however many ways its leaving is seen (a Next past a set's
    * end, then the track change it makes). A skip in the set playing counts toward changing direction. */
   #countSkip(song: Candidate) {
-    if (!this.#taste.skipped(song)) return;
+    // A set being picked has its choices already: the artist sits out the sets picked after it.
+    if (!this.#taste.skipped(song, this.#setsThisSession + (this.#preparing ? 1 : 0))) return;
     if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips++;
     this.#emit({ type: "song-skipped", song });
   }
