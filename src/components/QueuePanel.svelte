@@ -3,6 +3,7 @@
   import { dj, type DjSet } from "../lib/dj.svelte";
   import { setMenu } from "../lib/djMenu";
   import { errorMessage } from "../lib/ipc";
+  import { liked } from "../lib/liked.svelte";
   import { contextMenu } from "../lib/menu.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
@@ -39,6 +40,12 @@
   });
 
   const upNext = $derived((queue?.queue ?? []).slice(0, 30));
+
+  // Whether each song is liked, for its menu: queued songs may come from anywhere, so nothing else has asked.
+  $effect(() => {
+    const songs = [queue?.currently_playing, ...upNext].filter((t): t is Track => !!t?.uri?.startsWith("spotify:track:"));
+    liked.ensure(songs.map((t) => t.uri));
+  });
   // The DJ's next talk is an item of the queue too: before its set's first song, or, before that set is
   // queued, after the last song of the one playing now.
   const djNext = $derived(dj.upNext?.speech && dj.announced !== dj.upNext ? dj.upNext : null);
