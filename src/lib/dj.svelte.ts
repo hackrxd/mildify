@@ -34,7 +34,6 @@ import {
   pickAngle,
   sentences,
   type Angle,
-  type Pick,
   type SegmentAsk,
   type TalkStyle,
   type TemplatePick,
@@ -42,11 +41,21 @@ import {
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { load, persist, playedLately, rememberPlayed } from "./djMemory";
-import { askModel, GaveUp, songVocals } from "./djPicker";
+import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, voiceNote } from "./djView";
 import { Voice, type Spoken } from "./djVoice";
-import { backend, errorMessage, type DjCloud, type DjConfig, type DjModelChoice, type DjInstall, type DjStatus, type RepeatMode } from "./ipc";
+import {
+  backend,
+  errorMessage,
+  type DjCloud,
+  type DjConfig,
+  type DjInstall,
+  type DjModelChoice,
+  type DjSongInfo,
+  type DjStatus,
+  type RepeatMode,
+} from "./ipc";
 import type { LyricLine } from "./lyricLines";
 import { liked } from "./liked.svelte";
 import { player } from "./player.svelte";
@@ -136,6 +145,9 @@ export interface DjSet {
   speech: Spoken | null;
   /** The first song's vocals, for timing the talk. */
   firstVocals: Vocals | null;
+  /** What the model looked up about the set's songs, by URI, for the DJ page. A set from a template has what was
+   * looked up before the model failed, if anything. */
+  lookedUp: ReadonlyMap<string, DjSongInfo>;
 }
 
 /** A line the DJ said this session. */
@@ -1032,6 +1044,7 @@ class Dj {
       request: segment.id === "request" ? request : null,
       speech,
       firstVocals,
+      lookedUp: asked.found,
     };
   }
 
@@ -1047,7 +1060,7 @@ class Dj {
 
   /** The model's pick for `ask`, after any look-ups it wants; none, with why, when it didn't give a usable one in
    * time or was given up on. A failure the listener can fix is said once a session. */
-  async #askModel(ask: SegmentAsk, timeoutMs: number, stale: () => boolean): Promise<{ pick: Pick | null; why: string | null }> {
+  async #askModel(ask: SegmentAsk, timeoutMs: number, stale: () => boolean): Promise<ModelRound> {
     const round = await askModel(ask, {
       tools: !!this.status?.tools,
       wait: (p) => this.#rushable(p, timeoutMs),

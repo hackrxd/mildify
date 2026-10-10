@@ -485,6 +485,21 @@ describe("what the DJ is asked", () => {
       expect(backend.djSongInfo).not.toHaveBeenCalled();
       expect(lastPrompt()[1].content).not.toContain("What you looked up");
       expect(first.byModel).toBe(true);
+      expect(first.lookedUp.size).toBe(0);
+    });
+
+    it("keeps what it looked up with the set, for the DJ page", async () => {
+      const first = await started();
+      // The model asked about two of the songs.
+      expect([...first.lookedUp.keys()]).toHaveLength(2);
+      for (const [uri, facts] of first.lookedUp) expect(facts).toEqual(info(uri));
+    });
+
+    it("keeps what it looked up before the model failed, for a set from a template", async () => {
+      backend.djGenerate.mockRejectedValue({ kind: "other", message: "OpenAI didn't accept your API key" });
+      const first = await started();
+      expect(first.byModel).toBe(false);
+      expect([...first.lookedUp.keys()]).toHaveLength(2);
     });
 
     it("picks without look-ups when they fail", async () => {
