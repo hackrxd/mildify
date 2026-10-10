@@ -14,7 +14,7 @@ use super::manifest::{Component, Pack};
 use crate::error::{AppError, Result};
 
 /// Written last into a component's folder: its presence means the folder is whole.
-const COMPLETE: &str = ".complete";
+pub(crate) const COMPLETE: &str = ".complete";
 /// Partial downloads, kept so an interrupted one resumes.
 pub const DOWNLOADS: &str = "downloads";
 /// A download that sends nothing for this long has stalled.

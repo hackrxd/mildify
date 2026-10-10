@@ -14,6 +14,9 @@ use crate::error::{AppError, Result};
 const MAX_CHARS: usize = 800;
 /// Reading a long line with the bigger voice on a slow CPU.
 const TIMEOUT: Duration = Duration::from_secs(120);
+/// How much slower or faster than its own pace the voice may speak: Settings' range.
+pub const SPEED_MIN: f32 = 0.8;
+pub const SPEED_MAX: f32 = 1.3;
 
 /// A sentence of the line and when it's spoken, from the start of the audio.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -37,6 +40,8 @@ pub struct Setup {
     /// The voice package's folder (the one holding its model file).
     pub dir: PathBuf,
     pub voice: &'static Voice,
+    /// How fast it speaks, against the voice's own pace.
+    pub speed: f32,
 }
 
 /// Reads `text` aloud into WAV bytes, with each sentence's timing.
@@ -119,10 +124,18 @@ fn args(setup: &Setup, out: &Path, threads: usize) -> Vec<std::ffi::OsString> {
     opt(&format!("{kind}-data-dir"), file("espeak-ng-data"));
     opt("num-threads", threads.to_string().into());
     opt("sid", setup.voice.sid.to_string().into());
+    opt(&format!("{kind}-length-scale"), format!("{:.3}", length_scale(setup.speed)).into());
     // One sentence at a time, so each is reported on its own.
     opt("tts-max-num-sentences", "1".into());
     opt("output-filename", out.as_os_str().to_owned());
     args
+}
+
+/// The program's length scale for `speed`: how long the speech takes against the voice's own pace. A speed from
+/// outside Settings' range (a config edited by hand) is held to it.
+fn length_scale(speed: f32) -> f32 {
+    let speed = if speed.is_finite() { speed.clamp(SPEED_MIN, SPEED_MAX) } else { 1.0 };
+    1.0 / speed
 }
 
 /// The line as the voice should get it: one paragraph of plain text, no markup or emoji, never starting
@@ -438,7 +451,7 @@ mod tests {
     #[test]
     fn loads_the_chosen_voice_and_speaker() {
         let voice = manifest::voice("george").unwrap();
-        let setup = Setup { program: "/rt/bin/tts".into(), dir: "/voices/kokoro".into(), voice };
+        let setup = Setup { program: "/rt/bin/tts".into(), dir: "/voices/kokoro".into(), voice, speed: 1.0 };
         let args: Vec<String> = args(&setup, Path::new("/tmp/out.wav"), 3)
             .into_iter()
             .map(|a| a.into_string().unwrap())
@@ -448,6 +461,27 @@ mod tests {
         assert!(args.contains(&"--sid=9".to_owned()));
         assert!(args.contains(&"--num-threads=3".to_owned()));
         assert!(args.contains(&"--output-filename=/tmp/out.wav".to_owned()));
+        assert!(args.contains(&"--kokoro-length-scale=1.000".to_owned()), "{args:?}");
         assert!(args.iter().all(|a| a.starts_with("--")), "the text goes after a lone --");
+    }
+
+    #[test]
+    fn speaks_at_the_speed_picked() {
+        let scale = |voice: &str, speed: f32| {
+            let setup = Setup { program: "/tts".into(), dir: "/v".into(), voice: manifest::voice(voice).unwrap(), speed };
+            args(&setup, Path::new("/out.wav"), 1)
+                .into_iter()
+                .map(|a| a.into_string().unwrap())
+                .find_map(|a| a.split_once("-length-scale=").map(|(kind, v)| format!("{kind} {v}")))
+                .unwrap()
+        };
+        // Faster speech is shorter: the program takes how long it runs.
+        assert_eq!(scale("michael", 1.25), "--kokoro 0.800");
+        assert_eq!(scale("michael", 0.8), "--kokoro 1.250");
+        assert_eq!(scale("light-male", 1.25), "--kitten 0.800");
+        // Held to Settings' range, whatever the config says.
+        assert_eq!(scale("michael", 3.0), scale("michael", SPEED_MAX));
+        assert_eq!(scale("michael", 0.1), scale("michael", SPEED_MIN));
+        assert_eq!(scale("michael", f32::NAN), "--kokoro 1.000");
     }
 }

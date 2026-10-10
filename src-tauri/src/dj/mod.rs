@@ -51,6 +51,8 @@ pub struct DjConfig {
     pub model: String,
     /// A `manifest::VOICES` id.
     pub voice: String,
+    /// How fast the voice speaks, against its own pace: `voice::SPEED_MIN` to `voice::SPEED_MAX`.
+    pub voice_speed: f32,
     /// The user's own OpenAI-compatible server (Ollama, LM Studio, llama.cpp…), the `"own"` provider.
     pub server_url: String,
     /// The model name that server knows.
@@ -90,6 +92,7 @@ impl Default for DjConfig {
             provider: "local".into(),
             model: manifest::DEFAULT_MODEL.into(),
             voice: manifest::DEFAULT_VOICE.into(),
+            voice_speed: 1.0,
             server_url: "http://127.0.0.1:11434".into(),
             server_model: String::new(),
             own_tools: false,
@@ -107,6 +110,7 @@ pub struct DjSettingsInput {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub voice: Option<String>,
+    pub voice_speed: Option<f32>,
     pub server_url: Option<String>,
     pub server_model: Option<String>,
     pub own_tools: Option<bool>,
@@ -131,6 +135,13 @@ impl DjConfig {
         if let Some(bad) = input.api_models.iter().flatten().map(|(p, _)| p).find(|p| !CLOUD.contains(&p.as_str())) {
             return Err(AppError::Other(format!("Unknown DJ model provider {bad}")));
         }
+        if input.voice_speed.is_some_and(|s| !(voice::SPEED_MIN..=voice::SPEED_MAX).contains(&s)) {
+            return Err(AppError::Other(format!(
+                "The DJ speaks between {} and {} times its usual speed",
+                voice::SPEED_MIN,
+                voice::SPEED_MAX
+            )));
+        }
         if let Some(m) = input.model {
             // Settings from before there were providers say "own" here.
             if m == OWN_SERVER {
@@ -148,6 +159,9 @@ impl DjConfig {
                 return Err(AppError::Other(format!("Unknown DJ voice {v}")));
             }
             self.voice = v;
+        }
+        if let Some(speed) = input.voice_speed {
+            self.voice_speed = speed;
         }
         if let Some(url) = input.server_url {
             self.server_url = url.trim().to_owned();
@@ -702,7 +716,7 @@ impl Dj {
         let dir = install::find(&self.installed_dir(&v.component)?, v.kind.model_file(), 2)
             .and_then(|f| f.parent().map(Path::to_owned))
             .ok_or_else(incomplete)?;
-        let setup = voice::Setup { program, dir, voice: v };
+        let setup = voice::Setup { program, dir, voice: v, speed: cfg.voice_speed };
         let (wav, sentences, duration_ms) = voice::speak(&setup, text, &self.scratch).await?;
         let id = self.next_speech.fetch_add(1, Ordering::SeqCst);
         let mut kept = self.speech.lock().unwrap();
@@ -1000,11 +1014,16 @@ mod tests {
         assert!(c.apply(DjSettingsInput { provider: Some("skynet".into()), ..Default::default() }).is_err());
         let bad_pick = BTreeMap::from([("skynet".to_owned(), "t-800".to_owned())]);
         assert!(c.apply(DjSettingsInput { api_models: Some(bad_pick), ..Default::default() }).is_err());
+        for speed in [0.5, 1.31, f32::NAN] {
+            let change = DjSettingsInput { voice: Some("emma".into()), voice_speed: Some(speed), ..Default::default() };
+            assert!(c.apply(change).is_err(), "{speed}");
+        }
         assert_eq!(c, DjConfig::default(), "a refused change changes nothing");
         c.apply(DjSettingsInput {
             enabled: Some(true),
             provider: Some(OWN_SERVER.into()),
             voice: Some("emma".into()),
+            voice_speed: Some(1.3),
             server_url: Some(" http://localhost:1234 ".into()),
             server_model: Some(" qwen ".into()),
             own_tools: Some(true),
@@ -1012,7 +1031,7 @@ mod tests {
         })
         .unwrap();
         assert!(c.enabled && c.api() == Api::Own && c.own_tools);
-        assert_eq!(c.voice, "emma");
+        assert_eq!((c.voice.as_str(), c.voice_speed), ("emma", 1.3));
         assert_eq!(c.server_url, "http://localhost:1234");
         assert_eq!(c.server_model, "qwen");
         // Picking a downloaded model goes back to running it here.
@@ -1138,6 +1157,7 @@ mod tests {
         for keeps in [
             DjConfig { voice: "emma".into(), ..old.clone() },
             DjConfig { voice: "light-male".into(), ..old.clone() },
+            DjConfig { voice_speed: 1.2, ..old.clone() },
             DjConfig { server_url: "http://x".into(), server_model: "m".into(), ..old.clone() },
             DjConfig {
                 musicbrainz: false,
@@ -1162,6 +1182,7 @@ mod tests {
         // Both voices come in one package.
         assert!(d.same_downloads(&old, &DjConfig { voice: "emma".into(), ..old.clone() }));
         assert!(d.same_downloads(&old, &DjConfig { musicbrainz: false, ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { voice_speed: 0.9, ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { voice: "light-male".into(), ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { model: "qwen3-4b".into(), ..old.clone() }));
         // A cloud model needs neither the model nor its runtime.
@@ -1247,6 +1268,73 @@ mod tests {
         let d = dj();
         d.remove().await.unwrap();
         assert_eq!(d.status(&DjConfig::default()).disk_bytes, 0);
+    }
+
+    /// A WAV of `ms` of silence, mono 16-bit at 24 kHz, as the voice program writes.
+    fn silence(ms: u32) -> Vec<u8> {
+        let data = 24 * ms * 2;
+        let mut w = Vec::new();
+        w.extend_from_slice(b"RIFF");
+        w.extend_from_slice(&(36 + data).to_le_bytes());
+        w.extend_from_slice(b"WAVEfmt ");
+        for field in [16u32.to_le_bytes(), [1, 0, 1, 0], 24_000u32.to_le_bytes(), 48_000u32.to_le_bytes(), [2, 0, 16, 0]] {
+            w.extend_from_slice(&field);
+        }
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&data.to_le_bytes());
+        w.resize(w.len() + data as usize, 0);
+        w
+    }
+
+    /// The voice program and `voice`'s package, as downloaded. The program writes down what it's asked, one argument a
+    /// line, in the `asked.txt` it returns, and reads every line as a second of silence.
+    #[cfg(unix)]
+    fn fake_voice(d: &Dj, voice: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        const PROGRAM: &str = r#"#!/bin/sh
+here=$(dirname "$0")
+printf '%s\n' "$@" > "$here/asked.txt"
+for a in "$@"; do case "$a" in --output-filename=*) out="${a#--output-filename=}";; esac; done
+cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
+"#;
+        let (rt, v) = (d.runtime.unwrap(), manifest::voice(voice).unwrap());
+        let (bin, pkg) = (install::component_dir(&d.root, &rt.tts).join("bin"), install::component_dir(&d.root, &v.component));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(pkg.join("pkg")).unwrap();
+        std::fs::write(pkg.join("pkg").join(v.kind.model_file()), "").unwrap();
+        std::fs::write(bin.join("line.wav"), silence(1000)).unwrap();
+        let program = bin.join(manifest::TTS_PROGRAM);
+        std::fs::write(&program, PROGRAM).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for dir in [bin.parent().unwrap(), &pkg] {
+            std::fs::write(dir.join(install::COMPLETE), "").unwrap();
+        }
+        // A process another test starts may hold the program open for writing a moment longer: wait until it runs.
+        for _ in 0..100 {
+            match std::process::Command::new(&program).output() {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
+                _ => break,
+            }
+        }
+        bin.join("asked.txt")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reads_lines_in_the_voice_and_at_the_speed_picked() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "light-female");
+        let cfg = DjConfig { enabled: true, voice: "light-female".into(), voice_speed: 1.25, ..DjConfig::default() };
+        let speech = d.speak(&cfg, "Hi there.").await.unwrap();
+        assert_eq!((speech.duration_ms, speech.sentences.len()), (1000, 1));
+        let asked = std::fs::read_to_string(asked).unwrap();
+        let asked: Vec<&str> = asked.lines().collect();
+        assert!(asked.contains(&"--sid=1") && asked.contains(&"--kitten-length-scale=0.800"), "{asked:?}");
+        assert_eq!(asked[asked.len() - 2..], ["--", "Hi there."]);
+        assert!(d.speech_audio(speech.id).is_some());
     }
 
     #[test]
