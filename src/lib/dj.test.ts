@@ -1208,7 +1208,7 @@ describe("starting", () => {
     ]);
     expect(dj.caption?.[0].text).toBe("Here's set number 1, nice and easy.");
     const set = dj.upNext!;
-    expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0] });
+    expect(dj.onAir).toEqual({ name: "Set 1", durationMs: speechMs, next: set.songs[0], set });
     // 6 s of talk, a 3 s intro: the song is asked for 3.7 s in, less the time it takes to start, so the DJ
     // is done 0.7 s before the singer.
     const wait = speechMs - (3000 - timing.VOCAL_GAP_MS) - mod.PLAY_LATENCY_MS;
@@ -2539,6 +2539,9 @@ describe("the DJ's item", () => {
     const first = await started();
     await lastSong2(first);
     expect(dj.speaking).toBe(true);
+    // The talk is the next set's, while the one ending is still the set playing.
+    expect(dj.onAir?.set).toBe(dj.upNext);
+    expect(dj.current).toBe(first);
     dj.skipTalk();
     expect(dj.speaking).toBe(false);
     expect(backend.device).toHaveBeenCalledWith({ action: "next" });

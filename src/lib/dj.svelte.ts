@@ -191,6 +191,8 @@ export interface OnAir {
   durationMs: number;
   /** The song it leads into. */
   next: Candidate;
+  /** The set it introduces, for its menu wherever the item is shown. */
+  set: DjSet;
 }
 
 class Dj {
@@ -1267,7 +1269,7 @@ class Dj {
     this.paused = false;
     this.talkMs = 0;
     this.caption = speech.lines;
-    this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0] };
+    this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0], set };
     this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
       if (error) this.#voiceFailed(error);
       // A line that played through: the voice works.
