@@ -6,6 +6,7 @@
     askBefore,
     choicePatch,
     CLOUD_NAMES,
+    deviceNote,
     cloudModelOf,
     cloudOf,
     DEFAULT_CLOUD_MODEL,
@@ -278,6 +279,16 @@
     </label>
     {#if pending?.change.kind === "model"}
       {@render asking(pending)}
+    {/if}
+
+    {#if djStatus && djSettings.provider === "local"}
+      <label class="row">
+        <span>
+          <span class="label">Use the graphics card</span>
+          <span class="muted small">{deviceNote(djStatus)}</span>
+        </span>
+        <input type="checkbox" class="switch" checked={djSettings.gpu} onchange={(e) => dj.configure({ gpu: e.currentTarget.checked })} />
+      </label>
     {/if}
 
     {#if cloud}
