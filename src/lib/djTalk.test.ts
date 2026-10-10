@@ -24,6 +24,7 @@ import {
   saysName,
   segmentSchema,
   sentences,
+  openedLately,
   popularityWord,
   songFacts,
   type Angle,
@@ -639,5 +640,15 @@ describe("popularityWord", () => {
       "a deep cut",
       "a deep cut",
     ]);
+  });
+});
+
+describe("openedLately", () => {
+  it("names how the last sessions opened, once each, for the DJ to greet some other way", () => {
+    expect(openedLately(["Good evening, Sam! Here's…", "Hey there Sam, welcome.", "Good evening, Sam. More…"])).toEqual([
+      'How you opened lately: "Good evening, Sam…", "Hey there Sam…". Greet them some other way.',
+    ]);
+    expect(openedLately([])).toEqual([]);
+    expect(openedLately(["   "])).toEqual([]);
   });
 });
