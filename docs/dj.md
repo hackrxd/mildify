@@ -33,7 +33,14 @@ names the segment and writes what to say. It's only allowed to use those facts, 
 ([Looking songs up](#looking-songs-up)), not made-up trivia.
 
 Songs the DJ played in the last three days aren't picked again at the start of a session. When you skip a DJ
-song before halfway, that artist sits out the rest of the session.
+song before halfway, its artist sits out the next two sets the DJ picks, and the rest of the session once you've
+skipped them twice. A featured artist doesn't sit out. A song you skipped stays out for three weeks, and an artist
+you skipped twice stays out for a day, in the sessions after too. Ask for an artist by name and they're back. When
+nothing else is left, the DJ plays songs you skipped again rather than stop.
+
+When a segment has more songs than it offers, it leans toward the ones you'll more likely want: songs your listening
+shows several ways, and by artists you liked while the DJ played them. It offers less of what you skipped, and of
+what it played lately, less so as time goes by: an artist's skips fade over days, a song's over weeks.
 
 The 2026 Web API has no recommendations, so the DJ plays only music you already listen to.
 
@@ -55,7 +62,8 @@ you do changes what comes next:
 - **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it for the rest of
   the set: more by that artist, or from that album, even from outside the set. It can change the song it lined up until about 35
   seconds before the one playing ends, when the player starts loading it.
-- **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
+- **Skip a song** before halfway and its artist sits out the rest of the set, and the next two. Skip two in a set
+  and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
   last one, so it can mention it. It introduces only the set's first song, even with **Let the DJ name every song in
   a set** on: the rest aren't picked yet.
