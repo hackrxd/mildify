@@ -4,7 +4,8 @@
 //! - downloading the runtimes, model and voice, only once the DJ is turned on (`install.rs`),
 //! - the language model: run locally by llama.cpp (`engine.rs`), on the user's own server, or a cloud provider's
 //!   with the user's API key (kept in the system keychain, `secrets.rs`); asked through `chat.rs`,
-//! - the voice, sherpa-onnx text-to-speech (`voice.rs`), played on this computer's audio output (`speaker.rs`).
+//! - the voice, sherpa-onnx text-to-speech (`voice.rs`, saying what it reads wrong another way: `say.rs`), played on
+//!   this computer's audio output (`speaker.rs`).
 //!
 //! Everything lives in `<app data>/dj/`; removing the DJ deletes that folder.
 
@@ -12,6 +13,7 @@ pub mod chat;
 pub mod engine;
 pub mod install;
 pub mod manifest;
+pub mod say;
 pub mod secrets;
 pub mod songinfo;
 pub mod speaker;
