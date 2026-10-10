@@ -12,6 +12,9 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
 - "Speaking speed", in Settings → AI DJ: the DJ's voice can talk up to 20% slower or 30% faster.
 - "Hear it", beside the DJ's voice in Settings, plays a short line in that voice at the speed set.
+- The DJ's model runs on the graphics card on Windows and Linux PCs too, as it does on Apple silicon, and goes back to
+  the processor when the card can't run it. "Use the graphics card", in Settings → AI DJ, says where the model runs
+  and can keep it on the processor. On those PCs the DJ downloads its new model runtime once, about 32 MB.
 - Four more voices for the DJ: Nicole and Sky (American), Isabella and Lewis (British). Settings lists the voices by
   the package they download in, and asks before a voice that has to download first stops the DJ while it plays.
 - Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,

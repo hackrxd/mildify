@@ -236,7 +236,7 @@ on macOS, `%APPDATA%\dev.hackrxd.nativespotify\dj` on Windows).
 
 | Part | From | Size | License |
 | --- | --- | --- | --- |
-| Language model runtime | [llama.cpp](https://github.com/ggml-org/llama.cpp) b11382, CPU build (Metal on Apple silicon) | 12–19 MB | MIT |
+| Language model runtime | [llama.cpp](https://github.com/ggml-org/llama.cpp) b11382: Vulkan build on Windows and Linux PCs, CPU build on Arm, Metal on Apple silicon | 11–33 MB | MIT |
 | Speech runtime | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13.8 | 20–44 MB | Apache-2.0 |
 | Model: Qwen2.5 1.5B Instruct (default) | [Qwen on Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF), Q4_K_M | 1.1 GB | Apache-2.0 |
 | Model: Qwen3 4B | [Qwen on Hugging Face](https://huggingface.co/Qwen/Qwen3-4B-GGUF), Q4_K_M | 2.5 GB | Apache-2.0 |
@@ -250,6 +250,13 @@ Hugging Face repository, so a file changed there later is never picked up.
 
 The Qwen2.5 model needs about 2 GB of memory while the DJ is on, and Qwen3 4B about 4 GB. The model is unloaded
 when you stop the DJ, or after 10 minutes without use.
+
+The model runs on your graphics card when llama.cpp finds one it can use (through Vulkan on Windows and Linux PCs,
+Metal on Apple silicon), with as much of it as fits in the card's memory, and on the processor otherwise. If the card
+can't load the model, or stops while running it, the DJ loads it again on the processor and leaves the card out until
+the app restarts. **Use the graphics card** (Settings → AI DJ) says where the model runs, and why not on the card when
+it isn't; turning it off keeps the model on the processor, and turning it back on tries the card again. A change
+there loads the model again for the DJ's next set, and the music plays on.
 
 ## Your own model server
 
