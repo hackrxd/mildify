@@ -2820,6 +2820,17 @@ describe("what it remembers", () => {
     ]);
   });
 
+  it("remembers a like in a set it picked whole, as in one it picks as it goes", async () => {
+    for (let i = 1; i <= 12; i++) likedState.saved.set(`spotify:track:t${i}`, false);
+    const events = heard();
+    const set = await started();
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
+    expect(memory().artistLove(set.songs[0].artists[0])).toBeCloseTo(1);
+    expect(memory().sets()[0].likes).toBe(1);
+  });
+
   it("takes back a skip the listener took back", async () => {
     await liveSession();
     const [, b] = dj.current!.songs;

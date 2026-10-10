@@ -1573,6 +1573,7 @@ class Dj {
   #towardNextSet(run: number, t: typeof player.track, uri: string | null, pos: number) {
     if (!this.current || !t || !uri || this.#awaiting) return;
     const left = t.durationMs - pos;
+    this.#noticeLikes(this.current);
     if (this.current.live && player.isLocal) this.#goLive(run, this.current, uri, left);
     const cur = this.current;
     const last = cur.songs[cur.songs.length - 1];
@@ -1621,7 +1622,6 @@ class Dj {
    * queue, and picked again when the listener likes something, until it's too late to change. When the set
    * should end with the song playing, the next set gets picked. */
   #goLive(run: number, cur: DjSet, uri: string, left: number) {
-    this.#noticeLikes(cur);
     if (this.#setEnds || this.#lining) return;
     const at = cur.songs.findIndex((s) => s.uri === uri);
     if (at < 0) return;
@@ -1696,7 +1696,8 @@ class Dj {
     return done;
   }
 
-  /** A song of the set the listener just liked, here or anywhere in the app: what's next leans toward it. */
+  /** A song of the set the listener just liked, here or anywhere in the app: it's remembered, and in a set picked as
+   * it goes, what's next leans toward it. */
   #noticeLikes(cur: DjSet) {
     for (const s of cur.songs) if (liked.has(s.uri) === undefined) liked.ensure([s.uri]);
     for (const s of this.#taste.noticeLikes(cur.songs, (uri) => liked.has(uri))) {
