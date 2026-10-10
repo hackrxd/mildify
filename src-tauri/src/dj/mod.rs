@@ -478,13 +478,14 @@ impl Dj {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let (root, http, state, gen, app) =
             (self.root.clone(), self.http.clone(), self.install.clone(), self.generation.clone(), app.clone());
+        let known = self.known_ids();
         let installing = self.installing.clone();
         tauri::async_runtime::spawn(async move {
             let _one_at_a_time = installing.lock().await;
             if gen.load(Ordering::SeqCst) != generation {
                 return;
             }
-            install::remove_stale(&root, &manifest::known_ids());
+            install::remove_stale(&root, &known);
             let mut error = None;
             for c in &missing {
                 {
@@ -520,6 +521,11 @@ impl Dj {
             let _ = app.emit("dj-installed", ());
         });
         Ok(())
+    }
+
+    /// What the DJ's folder may hold on this computer; anything else there goes as a download starts.
+    fn known_ids(&self) -> Vec<&'static str> {
+        manifest::known_ids(self.runtime)
     }
 
     /// Whether `old` and `new` need the same downloads, so one under way can carry on: two voices from one
@@ -1263,6 +1269,15 @@ mod tests {
         // A cloud model needs neither the model nor its runtime.
         assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
+    }
+
+    #[test]
+    fn keeps_this_computers_runtimes_when_clearing_out_what_it_no_longer_needs() {
+        let d = dj();
+        let Some(rt) = d.runtime else { return };
+        let known = d.known_ids();
+        assert!(known.contains(&rt.llm.id) && known.contains(&rt.tts.id), "{known:?}");
+        assert!(manifest::MODELS.iter().all(|m| known.contains(&m.component.id)));
     }
 
     #[test]
