@@ -237,29 +237,77 @@ export function shuffled<T>(items: T[], random: () => number = Math.random): T[]
   return out;
 }
 
-/** The songs a segment can choose from: fitting, not played yet, and not by an artist the listener skipped. */
+/** What the DJ knows of the listener beyond their listening: how much skipping a song or an artist still counts,
+ * how much they've liked an artist's songs while it played, and how long ago it played a song. Its memory is one. */
+export interface Taste {
+  songSkip(uri: string): number;
+  artistSkip(name: string): number;
+  artistLove(name: string): number;
+  /** ms since the DJ last played it, if it remembers. */
+  playedAgo(uri: string): number | null;
+}
+
+/** Love counts up to this much in a song's score. */
+const LOVE_MAX = 2;
+/** The score a song loses for having been played by the DJ halves this often. */
+const PLAYED_FADE_MS = 5 * DAY_MS;
+
+/** How much the listener should hear `c` now: 0 for a song nothing more is known about. Up to 2 more for artists
+ * they liked while the DJ played them, and a little for a song in their listening several ways; less for a song or
+ * an artist they skipped (a featured artist's skips count for less), and for a song the DJ played lately. */
+export function songScore(c: Candidate, taste: Taste): number {
+  let n = 0.5 * Math.min(2, c.reasons.length - 1);
+  n += Math.min(LOVE_MAX, c.artists.reduce((sum, a) => sum + taste.artistLove(a), 0));
+  n -= 3 * taste.songSkip(c.uri);
+  c.artists.forEach((a, i) => (n -= (i === 0 ? 2 : 0.7) * taste.artistSkip(a)));
+  const ago = taste.playedAgo(c.uri);
+  if (ago !== null) n -= 1.5 * Math.pow(0.5, ago / PLAYED_FADE_MS);
+  return n;
+}
+
+/** `items` in a random order where each comes early in proportion to its weight (Efraimidis and Spirakis'
+ * sampling). */
+export function weightedOrder<T>(items: T[], weight: (item: T) => number, random: () => number = Math.random): T[] {
+  return items
+    .map((item) => ({ item, key: Math.log(Math.max(random(), Number.MIN_VALUE)) / weight(item) }))
+    .sort((a, b) => b.key - a.key)
+    .map((k) => k.item);
+}
+
+/** Up to `max` of `songs`, in their order but one per artist a round, so a set isn't one artist start to finish. A
+ * song counts for every artist it credits, so a feature doesn't bring an artist back early. */
+function spread(songs: Candidate[], max: number): Candidate[] {
+  const out: Candidate[] = [];
+  let rest = songs;
+  while (out.length < max && rest.length) {
+    const used = new Set<string>();
+    const later: Candidate[] = [];
+    for (const c of rest) {
+      if (out.length >= max || c.artists.some((a) => used.has(a))) later.push(c);
+      else {
+        out.push(c);
+        for (const a of c.artists) used.add(a);
+      }
+    }
+    rest = later;
+  }
+  return out;
+}
+
+/** The songs a segment can choose from: fitting, not played yet, and not by an artist sitting out. With what the
+ * DJ knows of the listener's `taste`, songs they'll more likely want come first more often. */
 export function choicesFor(
   segment: Segment,
   pool: Candidate[],
   avoid: { played: Set<string>; skippedArtists: Set<string> },
   random: () => number = Math.random,
+  taste?: Taste,
 ): Candidate[] {
   const fitting = pool.filter(
     (c) => segment.fits(c) && !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)),
   );
-  // One song per artist where possible, so a set isn't one artist start to finish.
-  const byArtist = new Map<string, Candidate[]>();
-  for (const c of shuffled(fitting, random)) {
-    const key = c.artists[0] ?? "";
-    byArtist.set(key, [...(byArtist.get(key) ?? []), c]);
-  }
-  const out: Candidate[] = [];
-  for (let round = 0; out.length < MAX_CHOICES && out.length < fitting.length; round++) {
-    for (const songs of byArtist.values()) {
-      if (songs[round] && out.length < MAX_CHOICES) out.push(songs[round]);
-    }
-  }
-  return out;
+  const order = taste ? weightedOrder(fitting, (c) => Math.exp(songScore(c, taste)), random) : shuffled(fitting, random);
+  return spread(order, MAX_CHOICES);
 }
 
 /** The longest request the DJ takes for its next set. */
@@ -404,23 +452,16 @@ export function requestChoices(
   pool: Candidate[],
   avoid: { played: Set<string>; skippedArtists: Set<string> },
   random: () => number = Math.random,
+  taste?: Taste,
 ): Candidate[] {
   const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
   const score = requestScore(request);
-  const scored = shuffled(open, random).map((c) => ({ c, n: score(c) }));
+  const ordered = taste ? weightedOrder(open, (c) => Math.exp(songScore(c, taste)), random) : shuffled(open, random);
+  const scored = ordered.map((c) => ({ c, n: score(c) }));
   const named = scored.filter((s) => s.n > 0).sort((a, b) => b.n - a.n).map((s) => s.c).slice(0, REQUEST_CHOICES);
-  // What the request says to leave out (below zero) isn't offered at all.
+  // What the request says to leave out (below zero) isn't offered at all. The rest, one per artist where possible.
   const rest = scored.filter((s) => s.n === 0).map((s) => s.c);
-  // The rest, one per artist where possible.
-  const byArtist = new Map<string, Candidate[]>();
-  for (const c of rest) byArtist.set(c.artists[0] ?? "", [...(byArtist.get(c.artists[0] ?? "") ?? []), c]);
-  const out = [...named];
-  for (let round = 0; out.length < REQUEST_CHOICES && out.length < named.length + rest.length; round++) {
-    for (const songs of byArtist.values()) {
-      if (songs[round] && out.length < REQUEST_CHOICES) out.push(songs[round]);
-    }
-  }
-  return out;
+  return [...named, ...spread(rest, REQUEST_CHOICES - named.length)];
 }
 
 /** The next segment: one that has songs left, not one of the last two, the opener first when it can be. */

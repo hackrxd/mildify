@@ -13,9 +13,12 @@ import {
   SEGMENTS,
   shuffled,
   SKIPS_TO_MOVE_ON,
+  songScore,
+  weightedOrder,
   type Candidate,
   type Listening,
   type SetSoFar,
+  type Taste,
 } from "./djPicks";
 import { segmentMessages } from "./djTalk";
 import type { Track } from "./types";
@@ -146,6 +149,13 @@ describe("requests", () => {
     expect(avoided).not.toContain("spotify:track:rh1");
     expect(avoided).not.toContain("spotify:track:c0");
     expect(avoided[0]).toBe("spotify:track:rh2");
+  });
+
+  it("offers what the listener will more likely want first, among what the request names and after it", () => {
+    const taste: Taste = { ...quiet, artistLove: (a) => (a === "Artist 7" ? 2 : 0), songSkip: (uri) => (uri === "spotify:track:rh1" ? 1 : 0) };
+    // With the same draw for every song, the order is by weight alone.
+    const choices = requestChoices("Radiohead", pool, none, () => 0.5, taste).map((c) => c.uri);
+    expect(choices.slice(0, 3)).toEqual(["spotify:track:rh2", "spotify:track:rh1", "spotify:track:c7"]);
   });
 
   it("leaves out what the request says not to play, until the clause ends", () => {
@@ -282,6 +292,89 @@ describe("choicesFor", () => {
     const choices = choicesFor(seg("onRepeat"), pool, none);
     expect(choices).toHaveLength(MAX_CHOICES);
     expect(new Set(choices.slice(0, 3).map((c) => c.artists[0])).size).toBe(3);
+  });
+
+  it("counts a song for every artist it credits, so a feature doesn't bring an artist back early", () => {
+    const [a, b, c, d] = candidates(4, ["onRepeat"]);
+    const feat = { ...b, artists: ["Bo", "Ann"] };
+    const pool = [{ ...a, artists: ["Ann"] }, feat, { ...c, artists: ["Cy"] }, { ...d, artists: ["Ann"] }];
+    // In this order, a round takes Ann, then Cy; Bo's song features Ann, so it waits for the next round.
+    const choices = choicesFor(seg("onRepeat"), pool, none, () => 0, quiet);
+    expect(choices.map((x) => x.artists.join(" & "))).toEqual(["Ann", "Cy", "Bo & Ann", "Ann"]);
+    // And once Bo's song is in, Ann's waits for the round after.
+    const featFirst = choicesFor(seg("onRepeat"), [feat, pool[0], pool[2]], none, () => 0, quiet);
+    expect(featFirst.map((x) => x.artists.join(" & "))).toEqual(["Bo & Ann", "Cy", "Ann"]);
+  });
+
+  it("offers songs the listener will more likely want first, more often", () => {
+    const pool = candidates(20, ["onRepeat"]);
+    const loved: Taste = { ...quiet, artistLove: (name) => (name === "Artist 7" ? 2 : 0), songSkip: (uri) => (uri === "spotify:track:c3" ? 1 : 0) };
+    const random = seeded(7);
+    const firsts = new Map<string, number>();
+    const lasts = new Map<string, number>();
+    for (let i = 0; i < 300; i++) {
+      const choices = choicesFor(seg("onRepeat"), pool, none, random, loved);
+      firsts.set(choices[0].artists[0], (firsts.get(choices[0].artists[0]) ?? 0) + 1);
+      if (!choices.some((c) => c.uri === "spotify:track:c3")) lasts.set("c3", (lasts.get("c3") ?? 0) + 1);
+    }
+    // A loved artist's song comes first about three times in ten, against one in twenty by chance.
+    expect(firsts.get("Artist 7") ?? 0).toBeGreaterThan(60);
+    // A skipped song is left out of the 14 offered nine times in ten, against three in ten by chance.
+    expect(lasts.get("c3") ?? 0).toBeGreaterThan(240);
+  });
+});
+
+/** A seeded random source (mulberry32), for draws that are the same every run. */
+function seeded(seed: number): () => number {
+  let t = seed;
+  return () => {
+    t = (t + 0x6d2b79f5) | 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A taste that knows nothing more than the listening. */
+const quiet: Taste = { songSkip: () => 0, artistSkip: () => 0, artistLove: () => 0, playedAgo: () => null };
+
+describe("songScore", () => {
+  const [song] = candidates(1, ["onRepeat"]);
+  const feat = { ...song, artists: ["Main", "Featured"] };
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("is nothing for a song nothing more is known about, a little more for one in the listening several ways", () => {
+    expect(songScore(song, quiet)).toBe(0);
+    expect(songScore({ ...song, reasons: ["onRepeat", "allTime"] }, quiet)).toBe(0.5);
+    expect(songScore({ ...song, reasons: ["onRepeat", "allTime", "recent", "likedLately"] }, quiet)).toBe(1);
+  });
+
+  it("adds up to 2 for the artists the listener liked, and takes off for skips, a featured artist's less", () => {
+    expect(songScore(feat, { ...quiet, artistLove: () => 1.5 })).toBe(2);
+    expect(songScore(feat, { ...quiet, artistLove: (a) => (a === "Featured" ? 0.5 : 0) })).toBe(0.5);
+    expect(songScore(feat, { ...quiet, songSkip: () => 1 })).toBe(-3);
+    expect(songScore(feat, { ...quiet, artistSkip: (a) => (a === "Main" ? 1 : 0) })).toBe(-2);
+    expect(songScore(feat, { ...quiet, artistSkip: (a) => (a === "Featured" ? 1 : 0) })).toBeCloseTo(-0.7);
+  });
+
+  it("takes off for a song the DJ played lately, less as days go by", () => {
+    expect(songScore(song, { ...quiet, playedAgo: () => 0 })).toBe(-1.5);
+    expect(songScore(song, { ...quiet, playedAgo: () => 5 * DAY })).toBeCloseTo(-0.75);
+  });
+});
+
+describe("weightedOrder", () => {
+  it("puts heavier items first in proportion to their weight", () => {
+    const random = seeded(1);
+    let heavyFirst = 0;
+    for (let i = 0; i < 1000; i++) if (weightedOrder(["light", "heavy"], (x) => (x === "heavy" ? 9 : 1), random)[0] === "heavy") heavyFirst++;
+    // 9 in 10, give or take.
+    expect(heavyFirst).toBeGreaterThan(860);
+    expect(heavyFirst).toBeLessThan(940);
+  });
+
+  it("keeps every item, once", () => {
+    expect(weightedOrder([1, 2, 3, 4], () => 1, seeded(3)).sort()).toEqual([1, 2, 3, 4]);
   });
 });
 
