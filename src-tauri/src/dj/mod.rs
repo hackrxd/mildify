@@ -264,7 +264,12 @@ pub struct Choice {
     pub id: &'static str,
     pub label: &'static str,
     pub detail: Option<&'static str>,
+    /// The size of its download, which a voice shares with the others in its group.
     pub bytes: u64,
+    /// Its download is in.
+    pub installed: bool,
+    /// A voice's package: the voices in one download together.
+    pub group: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -393,11 +398,25 @@ impl Dj {
             folder: self.root.clone(),
             models: manifest::MODELS
                 .iter()
-                .map(|m| Choice { id: m.id, label: m.label, detail: Some(m.detail), bytes: m.component.bytes })
+                .map(|m| Choice {
+                    id: m.id,
+                    label: m.label,
+                    detail: Some(m.detail),
+                    bytes: m.component.bytes,
+                    installed: install::is_installed(&self.root, &m.component),
+                    group: None,
+                })
                 .collect(),
             voices: manifest::VOICES
                 .iter()
-                .map(|v| Choice { id: v.id, label: v.label, detail: None, bytes: v.component.bytes })
+                .map(|v| Choice {
+                    id: v.id,
+                    label: v.label,
+                    detail: None,
+                    bytes: v.component.bytes,
+                    installed: install::is_installed(&self.root, &v.component),
+                    group: Some(v.kind.group()),
+                })
                 .collect(),
         }
     }
@@ -1190,6 +1209,20 @@ mod tests {
         // A cloud model needs neither the model nor its runtime.
         assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
         assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
+    }
+
+    #[test]
+    fn lists_voices_by_package_and_says_which_are_downloaded() {
+        let d = dj();
+        let kokoro = manifest::voice("lewis").unwrap().component;
+        std::fs::create_dir_all(install::component_dir(&d.root, &kokoro)).unwrap();
+        std::fs::write(install::component_dir(&d.root, &kokoro).join(install::COMPLETE), "").unwrap();
+        let status = d.status(&DjConfig::default());
+        let voice = |id: &str| status.voices.iter().find(|v| v.id == id).unwrap();
+        assert_eq!((voice("lewis").group, voice("lewis").installed, voice("lewis").bytes), (Some("Kokoro"), true, kokoro.bytes));
+        assert_eq!((voice("michael").group, voice("michael").installed), (Some("Kokoro"), true));
+        assert_eq!((voice("light-male").group, voice("light-male").installed), (Some("Light"), false));
+        assert!(status.models.iter().all(|m| m.group.is_none() && !m.installed));
     }
 
     #[test]
