@@ -43,6 +43,9 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   out for three weeks.
 - The DJ offers more of what you're likely to want: more by artists you liked while it played, less of what you
   skipped or it played lately.
+- With "Pick songs as it goes" on, liking a song can run the set a song or two longer when there's more like it, and
+  a set you asked for an artist in can play them back to back. Keeping an artist from playing twice running counts
+  featured artists too.
 - The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
