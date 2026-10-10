@@ -795,7 +795,7 @@ class Dj {
     // The DJ plays here; music on another device would play on under its voice.
     if (player.isPlaying && !player.isLocal) player.togglePlay();
     try {
-      this.#pool = buildPool(await loadListening());
+      this.#pool = buildPool(await loadListening({ user: session.user?.id }));
       if (run !== this.#run) return;
       this.#played = new Set(playedLately().keys());
       this.activity = "Picking your first songs…";
