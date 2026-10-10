@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   askBefore,
+  deviceNote,
   choicePatch,
   cloudModelOf,
   cloudOf,
@@ -28,6 +29,7 @@ const settings: DjConfig = {
   model: "qwen2.5-1.5b",
   voice: "michael",
   voice_speed: 1,
+  gpu: true,
   server_url: "",
   server_model: "",
   own_tools: false,
@@ -57,6 +59,7 @@ function status(patch: Partial<DjConfig> = {}): DjStatus {
       { id: "lewis", label: "Lewis (British)", detail: null, bytes: 103_248_205, installed: true, group: "Kokoro" },
       { id: "light-male", label: "Light (male, faster)", detail: null, bytes: 26_586_708, installed: false, group: "Light" },
     ],
+    runs_on: null,
   };
 }
 
@@ -95,6 +98,20 @@ describe("names", () => {
     ]);
     expect([modelName(status()), voiceName(status())]).toEqual(["Qwen2.5 1.5B", "Michael (American)"]);
     expect([modelName(status({ model: "new-model" })), voiceName(status({ voice: "emma" }))]).toEqual(["new-model", "emma"]);
+  });
+
+  it("says where the model runs, and why not on the graphics card when it doesn't", () => {
+    const on = (runs_on: DjStatus["runs_on"], gpu = true) => deviceNote({ ...status({ gpu }), runs_on });
+    expect(on({ card: "NVIDIA GeForce RTX 3060", card_failed: null })).toBe(
+      "The model runs on NVIDIA GeForce RTX 3060, with as much of it as fits in the card's memory.",
+    );
+    expect(on({ card: null, card_failed: "The DJ's model stopped while loading (exit status: 1)" })).toBe(
+      "The graphics card couldn't run the model, so it runs on the processor: the DJ's model stopped while loading (exit status: 1). Turn this off and on to try the card again.",
+    );
+    expect(on({ card: null, card_failed: "The DJ's model took too long to load." })).toMatch(/to load\. Turn this off/);
+    expect(on({ card: null, card_failed: null })).toBe("This computer has no graphics card the model can use, so it runs on the processor.");
+    expect(on(null)).toMatch(/^The model runs on it when this computer has one it can use/);
+    expect(on({ card: "NVIDIA GeForce RTX 3060", card_failed: null }, false)).toBe("Off, the model runs on the processor.");
   });
 
   it("lets a voice introduce itself by its name, or its group's", () => {

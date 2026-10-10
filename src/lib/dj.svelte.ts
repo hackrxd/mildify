@@ -83,7 +83,7 @@ const USE_NAME_KEY = "nativify:djUseName";
 /** How many of its latest openings a local model hears before opening a session. */
 const OPENINGS_REMEMBERED = 3;
 /** The settings that pick the model, or say how to reach it: changing any may fix what was wrong with it. */
-const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "server_url", "server_model", "own_tools", "api_models"];
+const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "gpu", "server_url", "server_model", "own_tools", "api_models"];
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -373,6 +373,8 @@ class Dj {
       if (e.payload.component !== was) this.refresh();
     });
     await listen("dj-installed", () => this.refresh());
+    // Where the model runs, once a load decides it.
+    await listen<DjStatus>("dj-status", (e) => (this.status = e.payload));
     // A reload in the middle of a line mustn't leave the music turned down, or the line playing on.
     backend.djDuck(1, 0, 0).catch(() => {});
     backend.djVoice({ action: "stop" }).catch(() => {});

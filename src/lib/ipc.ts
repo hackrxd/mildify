@@ -59,6 +59,8 @@ export interface DjConfig {
   voice: string;
   /** How fast the voice speaks, against its own pace: `VOICE_SPEED`'s range. */
   voice_speed: number;
+  /** The downloaded model runs on the graphics card, when llama.cpp finds one it can use. */
+  gpu: boolean;
   server_url: string;
   server_model: string;
   /** The own server's model can call tools, so it can look songs up. */
@@ -121,6 +123,16 @@ export interface DjStatus {
   folder: string;
   models: DjChoice[];
   voices: DjChoice[];
+  /** Where the downloaded model runs, once it has loaded since the app started. */
+  runs_on: DjRunsOn | null;
+}
+
+/** Where the downloaded model runs (src-tauri/src/dj/engine.rs). */
+export interface DjRunsOn {
+  /** The graphics card, by name; null for the processor. */
+  card: string | null;
+  /** Why the processor runs it although the card was to: the card failed to. */
+  card_failed: string | null;
 }
 
 export interface DjMessage {

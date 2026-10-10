@@ -3,7 +3,7 @@
 import { DAY_MS, type Candidate } from "./djPicks";
 import { monthYear, popularityWord, type TalkStyle } from "./djTalk";
 import type { DjChoice, DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
-import { formatBytes } from "./util";
+import { formatBytes, lowerFirst } from "./util";
 
 export const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
 /** A cloud provider's model before one is picked: the backend's own default (src-tauri/src/dj/mod.rs). */
@@ -55,6 +55,19 @@ export function modelName(status: DjStatus): string {
 
 export function voiceName(status: DjStatus): string {
   return status.voices.find((v) => v.id === status.settings.voice)?.label ?? status.settings.voice;
+}
+
+/** Where the downloaded model runs, for Settings, under "Use the graphics card". */
+export function deviceNote(status: DjStatus): string {
+  const runs = status.runs_on;
+  if (!status.settings.gpu) return "Off, the model runs on the processor.";
+  if (runs?.card) return `The model runs on ${runs.card}, with as much of it as fits in the card's memory.`;
+  if (runs?.card_failed) {
+    const why = lowerFirst(runs.card_failed).replace(/\.$/, "");
+    return `The graphics card couldn't run the model, so it runs on the processor: ${why}. Turn this off and on to try the card again.`;
+  }
+  if (runs) return "This computer has no graphics card the model can use, so it runs on the processor.";
+  return "The model runs on it when this computer has one it can use, and on the processor otherwise, or if the card fails.";
 }
 
 /** Voices that download together, as Settings lists them. */

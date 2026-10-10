@@ -162,6 +162,7 @@ const readyStatus = {
     model: "qwen2.5-1.5b",
     voice: "michael",
     voice_speed: 1,
+    gpu: true,
     server_url: "",
     server_model: "",
     own_tools: false,
@@ -177,6 +178,7 @@ const readyStatus = {
   folder: "/dj",
   models: [],
   voices: [],
+  runs_on: null,
 } as DjStatus;
 
 let voice: FakeVoice;
@@ -405,6 +407,11 @@ describe("what the DJ is asked", () => {
     expect(dj.modelTrouble).not.toBeNull();
     expect(told()).toBe(2);
     await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    expect(dj.modelTrouble).toBeNull();
+    // Moving the model on or off the graphics card may fix it too.
+    await askAgain();
+    expect(dj.modelTrouble).not.toBeNull();
+    await dj.configure({ gpu: false });
     expect(dj.modelTrouble).toBeNull();
     // Nor does a change that leaves the model as it was, or one that fails.
     await askAgain();
@@ -3442,3 +3449,21 @@ describe("hearing a voice before picking it", () => {
     expect(dj.previewing).toBeNull();
   });
 });
+
+describe("where the model runs", () => {
+  it("hears where the model runs as a load decides it, from the status the backend sends", async () => {
+    backend.djStatus.mockImplementation(async () => readyStatus);
+    await dj.init();
+    const runsOn = { card: null, card_failed: "The DJ's model stopped while loading (exit status: 1)" };
+    events.handlers.get("dj-status")!({ payload: { ...readyStatus, runs_on: runsOn } });
+    expect(dj.status?.runs_on).toEqual(runsOn);
+  });
+
+  it("carries on playing when the model moves on or off the graphics card", async () => {
+    await started();
+    await dj.configure({ gpu: false });
+    expect(dj.phase).toBe("on");
+    expect(backend.djConfigure).toHaveBeenCalledWith({ gpu: false });
+  });
+});
+
