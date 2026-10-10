@@ -81,6 +81,13 @@ export function voiceGroups(voices: DjChoice[]): VoiceGroup[] {
   return groups;
 }
 
+/** A short line to hear a voice by before it's picked, in its own name where it has one: "Lewis (British)" is
+ * Lewis, while "Light (male, faster)" is named after its group. */
+export function previewLine(voice: DjChoice): string {
+  const name = voice.label.split(" (")[0];
+  return `${name === voice.group ? "Hi there." : `Hi, I'm ${name}.`} This is how I'd sound between your songs.`;
+}
+
 /** Settings' range for how fast the voice speaks, against its own pace: the backend's (src-tauri/src/dj/voice.rs). */
 export const VOICE_SPEED = { min: 0.8, max: 1.3, step: 0.05 } as const;
 

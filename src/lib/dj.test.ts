@@ -17,6 +17,7 @@ const backend = vi.hoisted(() => ({
   djSongInfo: vi.fn(),
   djSetKey: vi.fn(),
   djSpeak: vi.fn(),
+  djPreview: vi.fn(),
   djVoice: vi.fn(async (_command: unknown) => {}),
   djDuck: vi.fn(async () => {}),
   djRelease: vi.fn(async () => {}),
@@ -118,6 +119,9 @@ class FakeVoice {
     return this.sounding ? (this.pausedAt ?? performance.now()) - this.startedAt : 0;
   }
   stop = vi.fn(() => {
+    this.sounding = false;
+  });
+  forget = vi.fn(() => {
     this.sounding = false;
   });
   /** The line plays out, or fails to. */
@@ -3333,5 +3337,79 @@ describe("events", () => {
     });
     const first = await started();
     expect(dj.current).toBe(first);
+  });
+});
+
+describe("hearing a voice before picking it", () => {
+  const lewis = { id: "lewis", label: "Lewis (British)", detail: null, bytes: 1, installed: true, group: "Kokoro" };
+  let preview: FakeVoice;
+
+  beforeEach(() => {
+    preview = new FakeVoice();
+    dj = new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>, preview as unknown as InstanceType<typeof mod.Voice>);
+    dj.status = readyStatus;
+    backend.djPreview.mockImplementation(async (_voice: string, text: string) => ({
+      id: 99,
+      duration_ms: 3000,
+      sentences: [{ text, start_ms: 0, end_ms: 3000 }],
+    }));
+  });
+
+  it("plays a short line in the voice, one at a time, while the DJ isn't talking", async () => {
+    const hearing = dj.preview(lewis);
+    expect(dj.previewing).toEqual({ voice: "lewis", playing: false });
+    await hearing;
+    expect(backend.djPreview).toHaveBeenCalledWith("lewis", "Hi, I'm Lewis. This is how I'd sound between your songs.");
+    expect(preview.played.map((p) => p.id)).toEqual([99]);
+    expect(dj.previewing).toEqual({ voice: "lewis", playing: true });
+    await dj.preview(lewis);
+    expect(backend.djPreview).toHaveBeenCalledTimes(1);
+    preview.end();
+    expect(dj.previewing).toBeNull();
+    expect(voice.played).toEqual([]);
+    await dj.preview(lewis);
+    expect(backend.djPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't play while the DJ talks, whose line it would cut off", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.speaking).toBe(true);
+    await dj.preview(lewis);
+    expect(backend.djPreview).not.toHaveBeenCalled();
+    expect(dj.previewing).toBeNull();
+  });
+
+  it("gives way to a line the DJ starts, without stopping it", async () => {
+    await dj.preview(lewis);
+    player.isPlaying = false;
+    await dj.start();
+    expect(voice.played).toHaveLength(1);
+    expect(dj.previewing).toBeNull();
+    expect(preview.forget).toHaveBeenCalled();
+    expect(preview.stop).not.toHaveBeenCalled();
+  });
+
+  it("isn't played when the DJ starts talking while it's made", async () => {
+    let made!: (s: { id: number; duration_ms: number; sentences: [] }) => void;
+    backend.djPreview.mockImplementation(() => new Promise((resolve) => (made = resolve)));
+    const hearing = dj.preview(lewis);
+    player.isPlaying = false;
+    await dj.start();
+    made({ id: 99, duration_ms: 3000, sentences: [] });
+    await hearing;
+    expect(preview.played).toEqual([]);
+    expect(dj.previewing).toBeNull();
+  });
+
+  it("says why a voice couldn't be heard", async () => {
+    backend.djPreview.mockRejectedValueOnce({ kind: "other", message: "The DJ is still downloading what it needs", status: null });
+    await dj.preview(lewis);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+    expect(dj.previewing).toBeNull();
+    await dj.preview(lewis);
+    preview.end("No audio output device");
+    expect(toasts.show).toHaveBeenCalledWith("Couldn't play the voice: No audio output device", "error");
+    expect(dj.previewing).toBeNull();
   });
 });

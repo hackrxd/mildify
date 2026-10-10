@@ -9,6 +9,7 @@ import {
   firstCloudModel,
   modelChoiceOf,
   modelName,
+  previewLine,
   offNote,
   providerName,
   songWhy,
@@ -94,6 +95,12 @@ describe("names", () => {
     ]);
     expect([modelName(status()), voiceName(status())]).toEqual(["Qwen2.5 1.5B", "Michael (American)"]);
     expect([modelName(status({ model: "new-model" })), voiceName(status({ voice: "emma" }))]).toEqual(["new-model", "emma"]);
+  });
+
+  it("lets a voice introduce itself by its name, or its group's", () => {
+    const [michael, , light] = status().voices;
+    expect(previewLine(michael)).toBe("Hi, I'm Michael. This is how I'd sound between your songs.");
+    expect(previewLine({ ...light, label: "Light (male, faster)" })).toBe("Hi there. This is how I'd sound between your songs.");
   });
 
   it("lists the voices by the package they download in", () => {

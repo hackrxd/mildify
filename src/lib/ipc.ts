@@ -355,6 +355,8 @@ export const backend = {
   /** The models a cloud provider offers with the saved key. */
   djModels: (provider: DjCloud) => invoke<DjModelChoice[]>("dj_models", { provider }),
   djSpeak: (text: string) => invoke<DjSpeech>("dj_speak", { text }),
+  /** Reads `text` in `voice` at the speed set, to hear it before it's picked; `djVoice` plays it. */
+  djPreview: (voice: string, text: string) => invoke<DjSpeech>("dj_preview", { voice, text }),
   /** Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes. */
   djVoice: (command: DjVoiceCommand) => invoke<void>("dj_voice", { command }),
   /** Turns the embedded player's music down to `level` (0-1), `delayMs` from now in heard time, or back up. */

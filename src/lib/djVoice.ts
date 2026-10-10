@@ -99,6 +99,11 @@ export class Voice {
     return this.#running ? this.#at + performance.now() - this.#since : this.#at;
   }
 
+  /** Lets go of the line without stopping it: another took its place on the output. Its `onEnd` isn't called. */
+  forget() {
+    this.#clear();
+  }
+
   /** Stops the line; its `onEnd` isn't called. */
   stop() {
     if (this.#id === null) return;

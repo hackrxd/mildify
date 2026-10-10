@@ -47,16 +47,18 @@ import { loadListening } from "./djListening";
 import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
-import { modelNote, voiceNote } from "./djView";
+import { modelNote, previewLine, voiceNote } from "./djView";
 import { Voice, type Spoken } from "./djVoice";
 import {
   backend,
   errorMessage,
+  type DjChoice,
   type DjCloud,
   type DjConfig,
   type DjInstall,
   type DjModelChoice,
   type DjSongInfo,
+  type DjSpeech,
   type DjStatus,
   type RepeatMode,
 } from "./ipc";
@@ -249,11 +251,15 @@ class Dj {
   talkMs = $state(0);
   /** The listener paused the DJ's item. */
   paused = $state(false);
+  /** The voice Settings is letting the listener hear, while its line is made, then `playing`. */
+  previewing = $state.raw<{ voice: string; playing: boolean } | null>(null);
 
   enabled = $derived(!!this.status?.settings.enabled);
   ready = $derived(!!this.status?.settings.enabled && !!this.status?.ready);
 
   #voice = new Voice();
+  /** Plays previews, on the same output as the DJ's lines. */
+  #preview = new Voice();
   #run = 0;
   #ticker: ReturnType<typeof setInterval> | undefined;
   #timers = new Set<ReturnType<typeof setTimeout>>();
@@ -353,8 +359,9 @@ class Dj {
   /** Bumped each time a set picked as it goes changes the player's queue, for views that show the queue. */
   linedUp = $state(0);
 
-  constructor(voice?: Voice) {
+  constructor(voice?: Voice, preview?: Voice) {
     if (voice) this.#voice = voice;
+    if (preview) this.#preview = preview;
     this.on((e) => this.#remember(e));
   }
 
@@ -412,6 +419,37 @@ class Dj {
     }
     if (inUse) this.#forgetModelTrouble();
     return true;
+  }
+
+  /** Lets the listener hear `voice` at the speed set before picking it: a short line, played as the DJ's are. Not
+   * while the DJ talks, whose line one in its place would cut off; a line the DJ starts takes the preview's place. */
+  async preview(voice: DjChoice) {
+    if (this.speaking || this.previewing) return;
+    const mine = { voice: voice.id, playing: false };
+    this.previewing = mine;
+    let speech: DjSpeech;
+    try {
+      speech = await backend.djPreview(voice.id, previewLine(voice));
+    } catch (e) {
+      if (this.previewing === mine) this.previewing = null;
+      toasts.error(e);
+      return;
+    }
+    // Let go of meanwhile: the DJ started talking.
+    if (this.previewing !== mine) return;
+    this.previewing = { ...mine, playing: true };
+    const playing = this.previewing;
+    this.#preview.play(speech.id, volumeGain(player.volume), (error) => {
+      if (this.previewing === playing) this.previewing = null;
+      if (error) toasts.show(`Couldn't play the voice: ${error}`, "error");
+    });
+  }
+
+  /** A line of the DJ's takes the preview's place on the output: it's let go of, without stopping what plays. */
+  #endPreview() {
+    if (!this.previewing) return;
+    this.previewing = null;
+    this.#preview.forget();
   }
 
   /** The models a cloud provider offers with the saved key. */
@@ -1366,6 +1404,7 @@ class Dj {
     this.talkMs = 0;
     this.caption = speech.lines;
     this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0], set };
+    this.#endPreview();
     this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
       if (error) this.#voiceFailed(error);
       // A line that played through: the voice works.
