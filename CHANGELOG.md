@@ -68,6 +68,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and its captions no longer break there.
 - Headphones that take a moment to wake up no longer cut off the first word of the DJ's lines: it keeps the sound
   output open while it's on.
+- The DJ's first set no longer starts with the song already in the player. When it did, the DJ couldn't tell its set
+  had begun, and stopped with "The DJ couldn't get its songs playing".
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
 - A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
   app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.
