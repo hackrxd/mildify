@@ -11,8 +11,8 @@ model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once 
 
 Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
 shows the model it's asking about until you answer. A new voice or speaking speed doesn't stop it: it comes in after
-any line the DJ already has ready. A voice from a package that isn't downloaded yet does stop it, without asking
-first, while it downloads.
+any line the DJ already has ready. A voice from a package that isn't downloaded yet does stop it while it downloads,
+so while it plays, Settings asks first there too.
 
 ## What it plays
 
@@ -212,8 +212,10 @@ from. The voices speak English, so a DJ told to speak another language will read
 
 ## Its voice
 
-Settings → AI DJ → **Voice** picks who reads the DJ's lines out, and **Speaking speed** how fast: from 20% slower
-to 30% faster than the voice's own pace. Like a new voice, a new speed comes in after any line the DJ already has
+Settings → AI DJ → **Voice** picks who reads the DJ's lines out: one of ten Kokoro voices, six American and four
+British, or one of two Light ones, quicker on a slow computer. They're listed by the package they download in, each
+with its size until it's downloaded; any voice in a package is ready once it's in. **Speaking speed** sets how fast
+it talks: from 20% slower to 30% faster than the voice's own pace. Like a new voice, a new speed comes in after any line the DJ already has
 ready, and the music plays on.
 
 The voice says some things the way a host would rather than as they're spelled: "#1" as "number one", 1999 as
