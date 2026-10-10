@@ -22,6 +22,7 @@ import {
   requestChoices,
   requestScore,
   requestSegment,
+  type Avoid,
   type Candidate,
   type Segment,
   type SegmentId,
@@ -1177,13 +1178,10 @@ class Dj {
   /** What a set leaves out: songs `played` (lately, by default), songs and artists skipped too much lately
    * (`DjMemory.leftOutSongs`, `leftOutArtists`), and artists sitting out after a skip this session
    * (`SessionTaste.sittingOut`); but not an artist the set's `request` asks for by name. */
-  #avoid(request: string | null = null, played = this.#played): { played: Set<string>; skippedArtists: Set<string> } {
+  #avoid(request: string | null = null, played = this.#played): Required<Avoid> {
     const asked = request ? asksFor(request) : () => false;
     const out = [...this.#taste.sittingOut(this.#setsThisSession), ...this.#memory.leftOutArtists()];
-    return {
-      played: new Set([...played, ...this.#memory.leftOutSongs()]),
-      skippedArtists: new Set(out.filter((a) => !asked(a))),
-    };
+    return { played: new Set(played), skippedSongs: this.#memory.leftOutSongs(), skippedArtists: new Set(out.filter((a) => !asked(a))) };
   }
 
   /** What the DJ said last, for the model not to say again: the set playing may not have had its say yet (it's

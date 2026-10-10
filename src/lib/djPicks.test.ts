@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asksFor,
+  asksForSong,
   buildPool,
   choicesFor,
   kinship,
@@ -244,12 +245,37 @@ describe("requests", () => {
     expect(score("anything but Radiohead", "spotify:track:rh1")).toBeLessThan(0);
   });
 
-  it("tells which artists a request asks for by name", () => {
+  it("tells which artists a request asks for by their whole name", () => {
     expect(asksFor("more Radiohead please")("Radiohead")).toBe(true);
     expect(asksFor("some U2")("U2")).toBe(true);
+    expect(asksFor("beatles")("The Beatles")).toBe(true);
     expect(asksFor("Radiohead")("Band")).toBe(false);
     expect(asksFor("no Radiohead")("Radiohead")).toBe(false);
     expect(asksFor("the 90s")("Radiohead")).toBe(false);
+    // A word of a name isn't the name.
+    expect(asksFor("some pop")("Iggy Pop")).toBe(false);
+    expect(asksFor("more Iggy Pop")("Iggy Pop")).toBe(true);
+  });
+
+  it("tells which songs a request asks for by their whole title or album", () => {
+    const billie = { ...pool[0], uri: "spotify:track:bj", name: "Billie Jean - 2008 Remaster", artists: ["Michael Jackson"], album: "Thriller", year: "1982" };
+    const blue = { ...pool[0], uri: "spotify:track:sw", name: "So What", artists: ["Miles Davis"], album: "Kind of Blue", year: "1959" };
+    const named = (request: string, c: Candidate) => asksForSong(request)(c);
+    expect(named("Billie Jean", billie)).toBe(true);
+    expect(named("the Thriller album", billie)).toBe(true);
+    expect(named("Billie", billie)).toBe(false);
+    expect(named("anything but Billie Jean", billie)).toBe(false);
+    expect(named("Kind of Blue", blue)).toBe(true);
+    expect(named("something blue", blue)).toBe(false);
+  });
+
+  it("offers a song asked for by name even when it was skipped lately or its artist sits out, but not when it played lately", () => {
+    const billie = { ...pool[0], uri: "spotify:track:bj", name: "Billie Jean", artists: ["Michael Jackson"], album: "Thriller", year: "1982" };
+    const songs = [billie, ...candidates(5, ["favorite"])];
+    const avoid = { played: new Set<string>(), skippedSongs: new Set([billie.uri]), skippedArtists: new Set(["Michael Jackson"]) };
+    expect(requestChoices("Billie Jean", songs, avoid, () => 0)[0]).toBe(billie);
+    expect(requestChoices("something calm", songs, avoid, () => 0)).not.toContain(billie);
+    expect(requestChoices("Billie Jean", songs, { ...avoid, played: new Set([billie.uri]) }, () => 0)).not.toContain(billie);
   });
 
   it("doesn't match songs on the words around what's asked for", () => {
@@ -289,13 +315,14 @@ describe("requests", () => {
 });
 
 describe("choicesFor", () => {
-  it("leaves out what's been played and artists the listener skipped", () => {
+  it("leaves out what's been played or skipped lately, and artists the listener skipped", () => {
     const pool = candidates(6, ["onRepeat"]);
     const choices = choicesFor(seg("onRepeat"), pool, {
       played: new Set(["spotify:track:c0"]),
+      skippedSongs: new Set(["spotify:track:c5"]),
       skippedArtists: new Set(["Artist 1"]),
     });
-    expect(choices.map((c) => c.uri).sort()).toEqual(["spotify:track:c2", "spotify:track:c3", "spotify:track:c4", "spotify:track:c5"]);
+    expect(choices.map((c) => c.uri).sort()).toEqual(["spotify:track:c2", "spotify:track:c3", "spotify:track:c4"]);
   });
 
   it("spreads choices across artists and caps them", () => {

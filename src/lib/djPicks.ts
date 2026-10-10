@@ -318,17 +318,24 @@ function spread(songs: Candidate[], max: number): Candidate[] {
   return out;
 }
 
-/** The songs a segment can choose from: fitting, not played yet, and not by an artist sitting out. With what the
- * DJ knows of the listener's `taste`, songs they'll more likely want come first more often. */
+/** What a set leaves out: songs played lately, songs skipped too lately to offer, and artists sitting out. */
+export interface Avoid {
+  played: Set<string>;
+  skippedArtists: Set<string>;
+  skippedSongs?: Set<string>;
+}
+
+/** The songs a segment can choose from: fitting, not played or skipped lately, and not by an artist sitting out. With
+ * what the DJ knows of the listener's `taste`, songs they'll more likely want come first more often. */
 export function choicesFor(
   segment: Segment,
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
   taste?: Taste,
 ): Candidate[] {
   const fitting = pool.filter(
-    (c) => segment.fits(c) && !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)),
+    (c) => segment.fits(c) && !avoid.played.has(c.uri) && !avoid.skippedSongs?.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)),
   );
   const order = taste ? weightedOrder(fitting, (c) => Math.exp(songScore(c, taste)), random) : shuffled(fitting, random);
   return spread(order, MAX_CHOICES);
@@ -451,11 +458,47 @@ export function requestScore(request: string): (c: Candidate) => number {
   };
 }
 
-/** Whether `request` asks for `artist` by name: "more Radiohead" does; "no Radiohead" and "the 90s" don't. */
+/** Words a name needn't be said with: "Beatles" names The Beatles, but "blue" isn't Kind of Blue. */
+const NAME_FILLER = new Set(["the", "a", "an", "and", "of"]);
+/** A song with nothing to it but what's probed. */
+const NOTHING = { uri: "", name: "", artists: [] as string[], album: "", year: null, durationMs: 0, explicit: false, reasons: [], likedAt: null, playedAt: null };
+
+/** A name's or a request's words, as `requestScore` reads them. */
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().replace(/['\u2018\u2019]/g, "").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+}
+
+/** Whether `words` hold every word of `name` that counts. */
+function saysWhole(words: Set<string>, name: string): boolean {
+  const own = wordsOf(name).filter((w) => !NAME_FILLER.has(w));
+  return own.length > 0 && own.every((w) => words.has(w));
+}
+
+/** A song's title without what's added to it: " - Remastered 2011", " (feat. Ann)", " [Live]". */
+function bareTitle(title: string): string {
+  return title.replace(/\s+-\s+.*$/, "").replace(/\s*[([][^)\]]*[)\]]/g, "").trim();
+}
+
+/** Whether `request` asks for `artist` by their whole name, and not to leave them out: "more Iggy Pop" does; "some
+ * pop", "no Iggy Pop" and "the 90s" don't. */
 export function asksFor(request: string): (artist: string) => boolean {
   const score = requestScore(request);
-  const nothingElse = { uri: "", name: "", album: "", year: null, durationMs: 0, explicit: false, reasons: [], likedAt: null, playedAt: null };
-  return (artist) => score({ ...nothingElse, artists: [artist] }) > 0;
+  const words = new Set(wordsOf(request));
+  return (artist) => saysWhole(words, artist) && score({ ...NOTHING, artists: [artist] }) > 0;
+}
+
+/** Whether `request` asks for the song `c` by its whole title or album, and not to leave it out: "Billie Jean",
+ * "the Thriller album". */
+export function asksForSong(request: string): (c: Candidate) => boolean {
+  const score = requestScore(request);
+  const words = new Set(wordsOf(request));
+  return (c) => {
+    const title = bareTitle(c.name);
+    return (
+      (saysWhole(words, title) && score({ ...NOTHING, name: title }) > 0) ||
+      (saysWhole(words, c.album) && score({ ...NOTHING, album: c.album }) > 0)
+    );
+  };
 }
 
 /** The decade a word names ("90s", "1980s", "2010s", "eighties"), as its first year. */
@@ -481,11 +524,15 @@ function spanOf(word: string): [number, number] | null {
 export function requestChoices(
   request: string,
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
   taste?: Taste,
 ): Candidate[] {
-  const open = pool.filter((c) => !avoid.played.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)));
+  const asked = asksForSong(request);
+  // A song asked for by its title or album comes even if it was skipped lately, or its artist sits out.
+  const open = pool.filter(
+    (c) => !avoid.played.has(c.uri) && (asked(c) || (!avoid.skippedSongs?.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)))),
+  );
   const score = requestScore(request);
   const ordered = taste ? weightedOrder(open, (c) => Math.exp(songScore(c, taste)), random) : shuffled(open, random);
   const scored = ordered.map((c) => ({ c, n: score(c) }));
@@ -499,7 +546,7 @@ export function requestChoices(
 export function nextSegment(
   history: SegmentId[],
   pool: Candidate[],
-  avoid: { played: Set<string>; skippedArtists: Set<string> },
+  avoid: Avoid,
   random: () => number = Math.random,
 ): Segment | null {
   const usable = SEGMENTS.filter((s) => choicesFor(s, pool, avoid, () => 0).length >= MIN_CHOICES);
