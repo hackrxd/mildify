@@ -219,6 +219,14 @@ impl VoiceKind {
             VoiceKind::Kitten => "kitten",
         }
     }
+
+    /// What Settings calls the voices of this kind's package, which download together.
+    pub fn group(self) -> &'static str {
+        match self {
+            VoiceKind::Kokoro => "Kokoro",
+            VoiceKind::Kitten => "Light",
+        }
+    }
 }
 
 const KOKORO: Component = Component {
@@ -250,14 +258,19 @@ pub struct Voice {
 }
 
 /// Kokoro's English package numbers its speakers af, af_bella, af_nicole, af_sarah, af_sky, am_adam,
-/// am_michael, bf_emma, bf_isabella, bm_george, bm_lewis (0–10); Kitten nano v0.2 alternates m/f voices.
+/// am_michael, bf_emma, bf_isabella, bm_george, bm_lewis (0–10); all but `af`, a blend of two, are offered. Kitten
+/// nano v0.2 alternates m/f voices. Settings lists them in this order, a package's together.
 pub const VOICES: &[Voice] = &[
     Voice { id: "michael", label: "Michael (American)", kind: VoiceKind::Kokoro, sid: 6, component: KOKORO },
     Voice { id: "adam", label: "Adam (American)", kind: VoiceKind::Kokoro, sid: 5, component: KOKORO },
     Voice { id: "bella", label: "Bella (American)", kind: VoiceKind::Kokoro, sid: 1, component: KOKORO },
     Voice { id: "sarah", label: "Sarah (American)", kind: VoiceKind::Kokoro, sid: 3, component: KOKORO },
+    Voice { id: "nicole", label: "Nicole (American)", kind: VoiceKind::Kokoro, sid: 2, component: KOKORO },
+    Voice { id: "sky", label: "Sky (American)", kind: VoiceKind::Kokoro, sid: 4, component: KOKORO },
     Voice { id: "george", label: "George (British)", kind: VoiceKind::Kokoro, sid: 9, component: KOKORO },
+    Voice { id: "lewis", label: "Lewis (British)", kind: VoiceKind::Kokoro, sid: 10, component: KOKORO },
     Voice { id: "emma", label: "Emma (British)", kind: VoiceKind::Kokoro, sid: 7, component: KOKORO },
+    Voice { id: "isabella", label: "Isabella (British)", kind: VoiceKind::Kokoro, sid: 8, component: KOKORO },
     Voice { id: "light-male", label: "Light (male, faster)", kind: VoiceKind::Kitten, sid: 2, component: KITTEN },
     Voice { id: "light-female", label: "Light (female, faster)", kind: VoiceKind::Kitten, sid: 1, component: KITTEN },
 ];
@@ -366,5 +379,21 @@ mod tests {
         assert!(kokoro.len() > 1);
         assert!(kokoro.iter().all(|v| v.component == KOKORO));
         assert_eq!(known_ids().iter().filter(|id| **id == KOKORO.id).count(), 1);
+    }
+
+    #[test]
+    fn each_voice_is_its_own_speaker_and_a_packages_voices_are_listed_together() {
+        let mut speakers: Vec<_> = VOICES.iter().map(|v| (v.component.id, v.sid)).collect();
+        speakers.sort_unstable();
+        speakers.dedup();
+        assert_eq!(speakers.len(), VOICES.len());
+        // Kokoro's English package has 11 speakers, Kitten nano's 8.
+        assert!(VOICES.iter().all(|v| v.sid <= if v.kind == VoiceKind::Kokoro { 10 } else { 7 }));
+        let groups: Vec<_> = VOICES.iter().map(|v| v.kind.group()).collect();
+        let mut seen = groups.clone();
+        seen.dedup();
+        assert_eq!(seen, ["Kokoro", "Light"]);
+        assert_eq!(voice("lewis").map(|v| v.sid), Some(10));
+        assert_eq!(voice("nicole").map(|v| v.sid), Some(2));
     }
 }
