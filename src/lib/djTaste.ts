@@ -21,8 +21,8 @@ export class SessionTaste {
   /** Each skipped song's main artist, with how many sets had been picked at each of their skips. */
   #skipsOf = new Map<string, number[]>();
 
-  /** The listener skipped `song`, `sets` sets into the session. False when it's the skip just recorded (the same
-   * leave seen twice), so a skip is counted once. */
+  /** The listener skipped `song` when `sets` sets had been picked, or were being picked. False when it's the skip
+   * just recorded (the same leave seen twice), so a skip is counted once. */
   skipped(song: Candidate, sets = 0): boolean {
     if (this.skippedSongs[0]?.uri === song.uri) return false;
     const main = song.artists[0];
@@ -40,6 +40,12 @@ export class SessionTaste {
     if (left.length) this.#skipsOf.set(main, left);
     else this.#skipsOf.delete(main);
     return true;
+  }
+
+  /** Only `sets` sets count as picked now, some let go of unheard: a skip counted among the sets picked before it
+   * no more than there are. */
+  recount(sets: number) {
+    for (const [artist, skips] of this.#skipsOf) this.#skipsOf.set(artist, skips.map((n) => Math.min(n, sets)));
   }
 
   /** The artists sitting out when `sets` sets have been picked: a skipped song's main artist for the next

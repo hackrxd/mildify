@@ -43,6 +43,18 @@ describe("SessionTaste", () => {
     expect([...taste.sittingOut(SIT_OUT_SETS + 50)]).toEqual(["Ann"]);
   });
 
+  it("counts a skip among no more sets than are picked, once some are let go of unheard", () => {
+    const taste = new SessionTaste();
+    taste.skipped(song("one", ["Ann"]), 3);
+    taste.recount(1);
+    expect([...taste.sittingOut(2)]).toEqual(["Ann"]);
+    expect(taste.sittingOut(3).size).toBe(0);
+    // A skip after the sets let go of is left as it was.
+    taste.skipped(song("two", ["Bo"]), 1);
+    taste.recount(2);
+    expect([...taste.sittingOut(2)].sort()).toEqual(["Ann", "Bo"]);
+  });
+
   it("takes back a skip, and its artist's latest", () => {
     const taste = new SessionTaste();
     const one = song("one", ["Ann"]);

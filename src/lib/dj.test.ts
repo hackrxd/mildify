@@ -2927,6 +2927,61 @@ describe("what it picks from", () => {
     expect(offersAnn()).toBe(true);
   });
 
+  it("sits an artist skipped while the next set is being picked out of the two sets after that one", async () => {
+    annAnd(20);
+    let release = () => {};
+    const answer = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate
+      .mockImplementationOnce(answer)
+      .mockImplementationOnce((...args: unknown[]) => new Promise((r) => (release = () => r(answer(...args)))));
+    player.isPlaying = false;
+    await dj.start();
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await playing(dj.upNext!.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    // The set after this one has its choices, Ann's among them, when Ann is skipped.
+    expect(dj.upNext).toBeNull();
+    await skipAnn();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext).not.toBeNull();
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(true);
+  });
+
+  it("doesn't count a set let go of unheard among the two an artist sits out", async () => {
+    annAnd(20);
+    await started();
+    await skipAnn();
+    await playOn();
+    // The set picked after the skip is let go of for one asked for, which sits Ann out in its place.
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(true);
+  });
+
+  it("sits an artist out of the two sets heard after the skip when the one picked before it is let go of", async () => {
+    annAnd(20);
+    await started();
+    await skipAnn();
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(false);
+    await playOn();
+    expect(offersAnn()).toBe(true);
+  });
+
   it("leaves an artist skipped twice out for the rest of the session", async () => {
     annAnd(20);
     await started();

@@ -592,10 +592,15 @@ class Dj {
   /** Lets go of the next set, and of one still being picked (its answer is ignored when it comes): their songs
    * are up for picking again. The player's queue and any hand-over to it are the caller's to undo. */
   #letGoOfNext() {
-    if (this.upNext) this.#unplayed(this.upNext.songs);
+    if (this.upNext) {
+      this.#unplayed(this.upNext.songs);
+      // Never heard, it isn't one of the session's sets: the one picked instead takes its number.
+      this.#setsThisSession--;
+    }
     this.upNext = null;
     this.#preparing = null;
     this.#prepareGen++;
+    this.#taste.recount(this.#setsThisSession);
   }
 
   /** Songs picked for a set that won't play: up for picking again. */
@@ -1773,7 +1778,8 @@ class Dj {
   /** The listener skipped `song`: once per song left, however many ways its leaving is seen (a Next past a set's
    * end, then the track change it makes). A skip in the set playing counts toward changing direction. */
   #countSkip(song: Candidate) {
-    if (!this.#taste.skipped(song, this.#setsThisSession)) return;
+    // A set being picked has its choices already: the artist sits out the sets picked after it.
+    if (!this.#taste.skipped(song, this.#setsThisSession + (this.#preparing ? 1 : 0))) return;
     if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips++;
     this.#emit({ type: "song-skipped", song });
   }
