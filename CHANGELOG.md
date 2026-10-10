@@ -35,6 +35,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and before removing the DJ's files.
 - The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
 - Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
+- Each set on the DJ page has a menu, from its "…" button or a right-click on its name: skip it, or copy its song
+  list. "Skip this set" shows only while the set can be skipped.
 
 ### Fixed
 
