@@ -526,8 +526,8 @@
       <span>
         <span class="label">What your DJ remembers</span>
         <span class="muted small">
-          What it played, and what you skipped and liked while it played, kept on this computer for up to a year.
-          Removing its files doesn't forget it.
+          What it played, and what you skipped and liked while it played, kept on this computer for your Spotify
+          account, for up to a year. Removing its files doesn't forget it.
         </span>
       </span>
       <button class="btn quiet danger" onclick={() => change({ kind: "forget" })}>Forget it</button>
