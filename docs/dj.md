@@ -36,6 +36,11 @@ The DJ page lists each set's songs with their covers, which go to the album, and
 likes it, as anywhere in the app, and right-clicking it gives the menu songs have everywhere, apart from **Add to
 queue**: a song queued there would play in the middle of the DJ's set.
 
+A song's info button says why it's there: what your listening shows (on repeat lately, one of your most played,
+when you last played or liked it) and, for a song the model looked up, its genres, when and where it came out, how
+well known it is, what it's sung in, artists like it, and a few lines about the artist. A set from a template keeps
+what was looked up before the model gave out.
+
 ### Picking as it goes
 
 With **Pick songs as it goes** on (Settings → AI DJ, off by default), the DJ still plans each set, but it only
