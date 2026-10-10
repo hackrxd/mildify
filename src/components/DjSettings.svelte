@@ -61,16 +61,21 @@
   const modelChoice = $derived(djSettings ? modelChoiceOf(djSettings) : "");
   const cloudModel = $derived(djSettings ? cloudModelOf(djSettings) : "");
 
-  function pickModel(value: string) {
+  /** The model being switched to, until the switch is saved: stopping the old model can take a moment. */
+  let switchingTo = $state<string | null>(null);
+
+  async function pickModel(value: string) {
     // A key typed for one provider isn't the next one's.
     apiKey = "";
-    dj.configure(choicePatch(value));
+    switchingTo = value;
+    await dj.configure(choicePatch(value));
+    if (switchingTo === value) switchingTo = null;
   }
 
   /** A change waiting on the answer to what Settings asked about it. */
   let pending = $state<{ change: DjChange; question: Question } | null>(null);
-  /** The model picker shows the model it's asking about, and its description, until that's answered. */
-  const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : modelChoice);
+  /** The model picker shows the model it's asking about or switching to, and its description, until that's settled. */
+  const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : (switchingTo ?? modelChoice));
 
   /** Makes `change`, once it's asked about it when it stops the DJ or can't be taken back. */
   function change(c: DjChange) {
