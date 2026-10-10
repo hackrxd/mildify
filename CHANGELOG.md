@@ -11,6 +11,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
 - "Speaking speed", in Settings → AI DJ: the DJ's voice can talk up to 20% slower or 30% faster.
+- "Hear it", beside the DJ's voice in Settings, plays a short line in that voice at the speed set.
 - Four more voices for the DJ: Nicole and Sky (American), Isabella and Lewis (British). Settings lists the voices by
   the package they download in, and asks before a voice that has to download first stops the DJ while it plays.
 - Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,

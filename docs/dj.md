@@ -215,7 +215,9 @@ from. The voices speak English, so a DJ told to speak another language will read
 Settings → AI DJ → **Voice** picks who reads the DJ's lines out: one of ten Kokoro voices, six American and four
 British, or one of two Light ones, quicker on a slow computer. They're listed by the package they download in, each
 with its size until it's downloaded; any voice in a package is ready once it's in. **Speaking speed** sets how fast
-it talks: from 20% slower to 30% faster than the voice's own pace. Like a new voice, a new speed comes in after any line the DJ already has
+it talks: from 20% slower to 30% faster than the voice's own pace. **Hear it**, beside the voice, plays a short line
+in it at that speed, once its package is downloaded, whether the DJ is on or not, but not while it talks; a line the
+DJ starts takes its place. Like a new voice, a new speed comes in after any line the DJ already has
 ready, and the music plays on.
 
 The voice says some things the way a host would rather than as they're spelled: "#1" as "number one", 1999 as
