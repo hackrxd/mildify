@@ -85,8 +85,9 @@ voice reads it into audio ahead of time. During a set's last song, the next set 
 
 Between sets, the DJ's talk is an **item of its own**, as long as the line takes. The player bar shows it like a
 song: the segment's name, "Your DJ", its own progress bar and length. Play/pause pauses the DJ (and any music
-under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces. Starting
-the DJ fades out whatever was playing, so its greeting is an item of its own too.
+under it), and next skips the rest of what it's saying. The queue lists it before the set it introduces, and a
+right-click on it there opens that set's menu. Starting the DJ fades out whatever was playing, so its greeting is
+an item of its own too.
 
 The DJ says hello once, at the start. After that it talks like a host mid-show: it's told which set this is and
 what it said lately, so it carries on instead of welcoming you again, and doesn't repeat itself. A model on your
