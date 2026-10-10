@@ -93,6 +93,11 @@
   const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : (switchingTo ?? modelChoice));
   /** The voice picker shows the voice it's asking about. */
   const shownVoice = $derived(pending?.change.kind === "voice" ? pending.change.choice : (djSettings?.voice ?? ""));
+  const shownVoiceChoice = $derived(djStatus?.voices.find((v) => v.id === shownVoice));
+  /** Why the voice shown can't be heard now, if it can't. */
+  const cantHear = $derived(
+    !shownVoiceChoice?.installed ? "It downloads with its group" : dj.speaking ? "Not while the DJ talks" : null,
+  );
 
   /** Makes `change`, once it's asked about it when it stops the DJ or can't be taken back. */
   function change(c: DjChange) {
@@ -397,15 +402,26 @@
         <span class="label">Voice</span>
         <span class="muted small">The voices speak English. Those in a group download together.</span>
       </span>
-      <select class="field" value={shownVoice} onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}>
-        {#each voiceGroups(djStatus?.voices ?? []) as group (group.name)}
-          <optgroup label={group.label}>
-            {#each group.voices as v (v.id)}
-              <option value={v.id}>{v.label}</option>
-            {/each}
-          </optgroup>
-        {/each}
-      </select>
+      <span class="buttons">
+        <select class="field" value={shownVoice} onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}>
+          {#each voiceGroups(djStatus?.voices ?? []) as group (group.name)}
+            <optgroup label={group.label}>
+              {#each group.voices as v (v.id)}
+                <option value={v.id}>{v.label}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+        <button
+          class="btn quiet"
+          type="button"
+          title={cantHear ?? "Hear this voice at the speed set"}
+          disabled={!!cantHear || !!dj.previewing}
+          onclick={() => shownVoiceChoice && dj.preview(shownVoiceChoice)}
+        >
+          {dj.previewing?.playing ? "Playing…" : dj.previewing ? "Loading…" : "Hear it"}
+        </button>
+      </span>
     </label>
     {#if pending?.change.kind === "voice"}
       {@render asking(pending)}
