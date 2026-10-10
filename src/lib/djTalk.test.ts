@@ -24,6 +24,7 @@ import {
   saysName,
   segmentSchema,
   sentences,
+  popularityWord,
   songFacts,
   type Angle,
   type SegmentAsk,
@@ -623,5 +624,20 @@ describe("fallbackPick", () => {
     expect(sizes.map((s) => s.length)).toEqual([3, 4, 5]);
     expect(sizes[2]).toEqual(choices.slice(0, 5));
     expect(fallbackPick(seg("onRepeat"), choices.slice(0, 2), { listener: null, previous }, last).songs).toHaveLength(2);
+  });
+});
+
+describe("popularityWord", () => {
+  it("says how well known a song is, from Spotify's popularity", () => {
+    expect([100, 70, 69, 45, 44, 20, 19, 0].map(popularityWord)).toEqual([
+      "a big hit",
+      "a big hit",
+      "well known",
+      "well known",
+      "a lesser-known track",
+      "a lesser-known track",
+      "a deep cut",
+      "a deep cut",
+    ]);
   });
 });
