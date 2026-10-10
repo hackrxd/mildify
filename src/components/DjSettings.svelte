@@ -13,6 +13,7 @@
     isCloud,
     modelChoiceOf,
     speedWords,
+    voiceGroups,
     VOICE_SPEED,
     type DjChange,
     type Question,
@@ -90,12 +91,15 @@
   let pending = $state<{ change: DjChange; question: Question } | null>(null);
   /** The model picker shows the model it's asking about or switching to, and its description, until that's settled. */
   const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : (switchingTo ?? modelChoice));
+  /** The voice picker shows the voice it's asking about. */
+  const shownVoice = $derived(pending?.change.kind === "voice" ? pending.change.choice : (djSettings?.voice ?? ""));
 
   /** Makes `change`, once it's asked about it when it stops the DJ or can't be taken back. */
   function change(c: DjChange) {
     pending = null;
-    // Back to the model in use, from one it was asking about.
+    // Back to the model or voice in use, from one it was asking about.
     if (c.kind === "model" && c.choice === modelChoice) return;
+    if (c.kind === "voice" && c.choice === djSettings?.voice) return;
     const question = djStatus ? askBefore(c, djStatus, dj.phase !== "off") : null;
     if (question) pending = { change: c, question };
     else make(c);
@@ -104,6 +108,7 @@
   function make(c: DjChange) {
     pending = null;
     if (c.kind === "model") pickModel(c.choice);
+    else if (c.kind === "voice") dj.configure({ voice: c.choice });
     else if (c.kind === "key") removeKey(c.provider);
     else if (c.kind === "forget") {
       dj.forget();
@@ -165,7 +170,7 @@
 {#snippet asking(asked: { change: DjChange; question: Question })}
   <ConfirmStrip
     {...asked.question}
-    danger={asked.change.kind !== "model"}
+    danger={asked.change.kind !== "model" && asked.change.kind !== "voice"}
     onconfirm={() => make(asked.change)}
     oncancel={() => (pending = null)}
   />
@@ -390,14 +395,21 @@
     <label class="row">
       <span>
         <span class="label">Voice</span>
-        <span class="muted small">The voices speak English.</span>
+        <span class="muted small">The voices speak English. Those in a group download together.</span>
       </span>
-      <select class="field" value={djSettings.voice} onchange={(e) => dj.configure({ voice: e.currentTarget.value })}>
-        {#each djStatus?.voices ?? [] as v (v.id)}
-          <option value={v.id}>{v.label}</option>
+      <select class="field" value={shownVoice} onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}>
+        {#each voiceGroups(djStatus?.voices ?? []) as group (group.name)}
+          <optgroup label={group.label}>
+            {#each group.voices as v (v.id)}
+              <option value={v.id}>{v.label}</option>
+            {/each}
+          </optgroup>
         {/each}
       </select>
     </label>
+    {#if pending?.change.kind === "voice"}
+      {@render asking(pending)}
+    {/if}
 
     <label class="row">
       <span>
