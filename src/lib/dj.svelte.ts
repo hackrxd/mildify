@@ -310,6 +310,8 @@ class Dj {
   #setIds = 0;
   /** Sets picked this session, for the model to know how far into the show it is. */
   #setsThisSession = 0;
+  /** The artists left out when each set of this session was picked, by its id. */
+  #leftOutAtPick = new Map<number, Set<string>>();
   /** How the model's lines this session have started, so the next starts another way. */
   #angles: Angle[] = [];
   /** The template the DJ talked from last this session, so the next is another. */
@@ -873,6 +875,7 @@ class Dj {
     this.#voiceWarned = false;
     this.#modelWarned = false;
     this.#setsThisSession = 0;
+    this.#leftOutAtPick.clear();
     this.#angles = [];
     this.#lastTemplate = null;
     this.said = [];
@@ -1034,6 +1037,7 @@ class Dj {
     const chosen = this.#chooseSegment(request);
     if (!chosen) return null;
     let { segment, choices } = chosen;
+    const leftOut = this.#avoid(request).skippedArtists;
     // Said until a set that says it is on its way: one given up on leaves it for the one picked instead.
     const skippedSet = this.#setSkipped ?? undefined;
     const listener = this.#listener();
@@ -1108,6 +1112,7 @@ class Dj {
     this.#segments.push(segment.id);
     const rest = choices.filter((c) => !pick.songs.includes(c));
     this.#setsThisSession++;
+    this.#leftOutAtPick.set(this.#setIds + 1, leftOut);
     return {
       id: ++this.#setIds,
       segment: segment.id,
@@ -1638,14 +1643,19 @@ class Dj {
   }
 
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
+    const avoid = this.#avoid(cur.request);
+    const before = this.#leftOutAtPick.get(cur.id) ?? new Set<string>();
     return nextInSet(
       {
         plan: cur.plan,
         choices: cur.choices,
-        pool: this.#pool,
+        // More like a song liked comes from the rest of the listening, leaving out all a set would.
+        pool: this.#pool.filter((c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a))),
         sofar,
-        played: new Set([...played, ...this.#memory.leftOutSongs()]),
-        skippedArtists: this.#avoid(cur.request).skippedArtists,
+        played,
+        // The set's own songs passed what was left out as it was picked, or were let in on purpose: only artists
+        // skipped since leave them out.
+        skippedArtists: new Set([...avoid.skippedArtists].filter((a) => !before.has(a))),
         reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
         skips: this.#setSkips,
         request: cur.request,

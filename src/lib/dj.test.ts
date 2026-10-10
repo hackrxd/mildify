@@ -2106,6 +2106,20 @@ describe("picking as it goes", () => {
     expect(before.songs[0].uri).toBe("spotify:track:t1");
   });
 
+  it("plays the songs a set was picked with, even an artist sitting out it had to pick for want of others", async () => {
+    annAnd(4);
+    const set = await liveStarted();
+    // Ann is skipped, and the set after this one has only Ann's songs to add to two others.
+    await playing(set.plan[1].uri, 0);
+    await untilNextSet();
+    const next = await nextSet();
+    expect(next.plan.map((s) => s.name)).toEqual(["Song 7", "Song 8", "Song 2"]);
+    await finish();
+    await playing(next.plan[1].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current!.songs.map((s) => s.name)).toEqual(["Song 7", "Song 8", "Song 2"]);
+  });
+
   it("talks from a template about a song the listener liked, when the model doesn't answer", async () => {
     twins();
     const set = await liveStarted();
@@ -3110,6 +3124,33 @@ describe("what it picks from", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(prompt()).toContain("something calm");
     expect(prompt()).toMatch(/^1\. Song 7 by Artist 7\b/m);
+  });
+
+  it("leaves an artist skipped while a set to pick as it goes was being picked out of the rest of that set", async () => {
+    annAnd(20);
+    let release = () => {};
+    const answer = backend.djGenerate.getMockImplementation()!;
+    backend.djGenerate
+      .mockImplementationOnce(answer)
+      .mockImplementationOnce(
+        () => new Promise((r) => (release = () => r({ name: "Live", songs: [2, 1, 3], talk: "Here we go, nice and easy." }))),
+      );
+    player.isPlaying = false;
+    await dj.start();
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    // The next set will be picked as it goes, from songs with Ann's among them; Ann is skipped as it's picked.
+    dj.setLive(true);
+    await playing(dj.upNext!.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await skipAnn();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    expect([next.live, next.plan.map((s) => s.name)]).toEqual([true, ["Song 7", "Song 2", "Song 8"]]);
+    await playOn();
+    const queued = backend.device.mock.calls.map(([c]) => c as { action: string; uri?: string }).filter((c) => c.action === "queue");
+    expect(queued.at(-1)?.uri).toBe("spotify:track:t8");
   });
 
   it("brings an artist sitting out back for a request that names them", async () => {
