@@ -3,7 +3,8 @@
 //! lacks the plugins for a WAV file (`gst-plugins-good`), and the DJ would say nothing.
 //!
 //! A thread of its own holds the output (a stream can't move between threads on every platform) and takes
-//! commands. It reports where the line is, a few times a second, and when it ends.
+//! commands. It reports where the line is, a few times a second, and when it ends. Through a session the output is
+//! held open: opening one can take long enough to clip a line's first word, on Bluetooth headphones most of all.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -20,7 +21,7 @@ const REPORT_EVERY: Duration = Duration::from_millis(250);
 /// How soon the end of a line is noticed.
 const POLL: Duration = Duration::from_millis(20);
 const IDLE_POLL: Duration = Duration::from_secs(1);
-/// The output is let go after this long without a line, so the DJ doesn't keep the audio device open.
+/// The output is let go after this long without a line, unless it's held, so the DJ doesn't keep the audio device open.
 const IDLE_CLOSE: Duration = Duration::from_secs(120);
 /// A line that hasn't moved on for this long isn't being played: the output died (a device unplugged with no
 /// sound server to move the stream). Longer than a sound server can take to start a new stream.
@@ -36,6 +37,8 @@ pub enum VoiceCommand {
     Resume,
     Gain { gain: f32 },
     Stop,
+    /// Keeps the output open, from now, between lines too, or lets it close once it's idle again.
+    Hold { on: bool },
 }
 
 /// What the voice tells the UI, as `dj-voice` events.
@@ -57,8 +60,17 @@ pub enum Cmd {
     Resume,
     Gain(f32),
     Stop,
-    /// Stops, and lets go of the output.
+    /// Opens the output and keeps it open, or lets it close once idle.
+    Hold(bool),
+    /// Stops, and lets go of the output, held or not.
     Close,
+}
+
+impl Cmd {
+    /// Whether the voice's thread starts for this: there's nothing to pause, stop or let go of without one.
+    fn starts_thread(&self) -> bool {
+        matches!(self, Cmd::Play { .. } | Cmd::Hold(true))
+    }
 }
 
 /// Where lines play: the default audio output in the app, a fake in tests.
@@ -141,8 +153,7 @@ impl Speaker {
             },
             None => cmd,
         };
-        // Nothing to pause or stop without one.
-        if !matches!(cmd, Cmd::Play { .. }) {
+        if !cmd.starts_thread() {
             return;
         }
         let (send, recv) = mpsc::channel();
@@ -199,6 +210,7 @@ fn run(
     let mut out: Option<Box<dyn Output>> = None;
     let mut line: Option<Line> = None;
     let mut idle_since = Instant::now();
+    let mut held = false;
     loop {
         let wait = if line.as_ref().is_some_and(|l| !l.paused) { POLL } else { IDLE_POLL.min(idle_close) };
         match rx.recv_timeout(wait) {
@@ -247,12 +259,24 @@ fn run(
                 line = None;
                 idle_since = Instant::now();
             }
+            Ok(Cmd::Hold(on)) => {
+                held = on;
+                idle_since = Instant::now();
+                if on && out.is_none() {
+                    // A line that finds no output says so; until then, there's no one to tell.
+                    match open() {
+                        Ok(o) => out = Some(o),
+                        Err(error) => log::warn!("DJ: couldn't open the audio output for the voice: {error}"),
+                    }
+                }
+            }
             Ok(Cmd::Close) => {
                 // A line cut off here still ends, for whoever is waiting on it.
                 if let Some(l) = line.take() {
                     report(VoiceEvent::Ended { id: l.id });
                 }
                 out = None;
+                held = false;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
@@ -283,7 +307,7 @@ fn run(
                 report(VoiceEvent::Playing { id: l.id, position_ms: ms(o.position()) });
             }
             Some(_) => {}
-            None if idle_since.elapsed() >= idle_close => out = None,
+            None if !held && idle_since.elapsed() >= idle_close => out = None,
             None => {}
         }
     }
@@ -481,6 +505,53 @@ mod tests {
         h.tx.send(Cmd::Pause).unwrap();
         h.told("pause");
         assert!(h.quiet(600));
+    }
+
+    #[test]
+    fn holds_the_output_open_between_lines_until_let_go() {
+        let h = harness(false, Duration::from_millis(150));
+        h.tx.send(Cmd::Hold(true)).unwrap();
+        // Opened ahead of the first line, with nothing to report.
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(h.fake.lock().unwrap().open);
+        assert!(h.quiet(10));
+        h.tx.send(line(1)).unwrap();
+        h.next();
+        h.fake.lock().unwrap().finished = true;
+        h.next();
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(h.fake.lock().unwrap().open, "closed while held");
+        // Let go of, it closes once idle again.
+        h.tx.send(Cmd::Hold(false)).unwrap();
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!h.fake.lock().unwrap().open);
+        // Closing lets go of a hold too.
+        h.tx.send(Cmd::Hold(true)).unwrap();
+        h.tx.send(Cmd::Close).unwrap();
+        h.tx.send(line(2)).unwrap();
+        h.next();
+        h.fake.lock().unwrap().finished = true;
+        h.next();
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!h.fake.lock().unwrap().open);
+    }
+
+    #[test]
+    fn a_hold_without_an_output_leaves_a_line_to_say_so() {
+        let h = harness(true, IDLE_CLOSE);
+        h.tx.send(Cmd::Hold(true)).unwrap();
+        assert!(h.quiet(200));
+        h.tx.send(line(5)).unwrap();
+        assert_eq!(h.next(), VoiceEvent::Failed { id: 5, error: "no output device".into() });
+    }
+
+    #[test]
+    fn starts_its_thread_only_for_a_line_or_a_hold() {
+        assert!(line(1).starts_thread());
+        assert!(Cmd::Hold(true).starts_thread());
+        for cmd in [Cmd::Hold(false), Cmd::Pause, Cmd::Resume, Cmd::Gain(0.5), Cmd::Stop, Cmd::Close] {
+            assert!(!cmd.starts_thread());
+        }
     }
 
     #[test]

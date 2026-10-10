@@ -780,6 +780,7 @@ impl Dj {
                     .ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
                 Cmd::Play { id, pcm, gain: gain.clamp(0.0, 1.0) }
             }
+            VoiceCommand::Hold { on } => Cmd::Hold(on),
             VoiceCommand::Pause => Cmd::Pause,
             VoiceCommand::Resume => Cmd::Resume,
             VoiceCommand::Gain { gain } => Cmd::Gain(gain.clamp(0.0, 1.0)),
