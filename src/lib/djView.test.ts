@@ -14,6 +14,7 @@ import {
   songWhy,
   speedWords,
   troubleNotes,
+  voiceGroups,
   voiceName,
   VOICE_SPEED,
 } from "./djView";
@@ -47,10 +48,14 @@ function status(patch: Partial<DjConfig> = {}): DjStatus {
     disk_bytes: 0,
     folder: "/dj",
     models: [
-      { id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1 },
-      { id: "qwen3-4b", label: "Qwen3 4B", detail: null, bytes: 2 },
+      { id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1, installed: true, group: null },
+      { id: "qwen3-4b", label: "Qwen3 4B", detail: null, bytes: 2, installed: false, group: null },
     ],
-    voices: [{ id: "michael", label: "Michael (American)", detail: null, bytes: 1 }],
+    voices: [
+      { id: "michael", label: "Michael (American)", detail: null, bytes: 103_248_205, installed: true, group: "Kokoro" },
+      { id: "lewis", label: "Lewis (British)", detail: null, bytes: 103_248_205, installed: true, group: "Kokoro" },
+      { id: "light-male", label: "Light (male, faster)", detail: null, bytes: 26_586_708, installed: false, group: "Light" },
+    ],
   };
 }
 
@@ -89,6 +94,15 @@ describe("names", () => {
     ]);
     expect([modelName(status()), voiceName(status())]).toEqual(["Qwen2.5 1.5B", "Michael (American)"]);
     expect([modelName(status({ model: "new-model" })), voiceName(status({ voice: "emma" }))]).toEqual(["new-model", "emma"]);
+  });
+
+  it("lists the voices by the package they download in", () => {
+    const groups = voiceGroups(status().voices);
+    expect(groups.map((g) => [g.label, g.installed, g.voices.map((v) => v.id)])).toEqual([
+      ["Kokoro (downloaded)", true, ["michael", "lewis"]],
+      ["Light (27 MB)", false, ["light-male"]],
+    ]);
+    expect(voiceGroups([{ id: "x", label: "X", detail: null, bytes: 2_000_000, installed: false, group: null }])[0].label).toBe("Voices (2 MB)");
   });
 
   it("says how fast the voice speaks against its usual pace", () => {
@@ -191,6 +205,19 @@ describe("askBefore", () => {
     expect(askBefore({ kind: "model", choice: "own" }, status(), true)?.text).toMatch(/^Switch the DJ to your own model server\? /);
     expect(askBefore({ kind: "model", choice: "anthropic" }, status(), true)?.text).toMatch(/^Switch the DJ to Anthropic\? /);
     expect(askBefore({ kind: "model", choice: "local:qwen2.5-1.5b" }, status(), true)).toBeNull();
+  });
+
+  it("asks before a voice that has to download, while the DJ plays, since it stops until it's in", () => {
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status(), true)).toEqual({
+      text: "Switch the DJ's voice to Light (male, faster)? Light voices download first, 27 MB, and the DJ stops until they're in.",
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    });
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status(), false)).toBeNull();
+    // Downloaded with the voice in use, or the one in use.
+    expect(askBefore({ kind: "voice", choice: "lewis" }, status(), true)).toBeNull();
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status({ voice: "light-male" }), true)).toBeNull();
+    expect(askBefore({ kind: "voice", choice: "nobody" }, status(), true)).toBeNull();
   });
 
   it("asks before removing the key the DJ is using, while it plays", () => {

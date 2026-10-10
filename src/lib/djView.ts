@@ -2,7 +2,7 @@
 // voice reads it out. Pure, so the wording is tested without a page.
 import { DAY_MS, type Candidate } from "./djPicks";
 import { monthYear, popularityWord, type TalkStyle } from "./djTalk";
-import type { DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
+import type { DjChoice, DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
 import { formatBytes } from "./util";
 
 export const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
@@ -55,6 +55,30 @@ export function modelName(status: DjStatus): string {
 
 export function voiceName(status: DjStatus): string {
   return status.voices.find((v) => v.id === status.settings.voice)?.label ?? status.settings.voice;
+}
+
+/** Voices that download together, as Settings lists them. */
+export interface VoiceGroup {
+  name: string;
+  /** "Kokoro (downloaded)", "Light (27 MB)". */
+  label: string;
+  installed: boolean;
+  voices: DjChoice[];
+}
+
+/** The voices by the package they download in, in the order they're listed. */
+export function voiceGroups(voices: DjChoice[]): VoiceGroup[] {
+  const groups: VoiceGroup[] = [];
+  for (const v of voices) {
+    const name = v.group ?? "Voices";
+    let group = groups.find((g) => g.name === name);
+    if (!group) {
+      group = { name, label: `${name} (${v.installed ? "downloaded" : formatBytes(v.bytes)})`, installed: v.installed, voices: [] };
+      groups.push(group);
+    }
+    group.voices.push(v);
+  }
+  return groups;
 }
 
 /** Settings' range for how fast the voice speaks, against its own pace: the backend's (src-tauri/src/dj/voice.rs). */
@@ -136,9 +160,14 @@ export function troubleNotes(trouble: { model: string | null; voice: string | nu
   return notes;
 }
 
-/** A change in Settings that can stop the DJ or can't be taken back: another model, its key removed, its files
- * deleted, or what it remembers forgotten. */
-export type DjChange = { kind: "model"; choice: string } | { kind: "key"; provider: DjCloud } | { kind: "files" } | { kind: "forget" };
+/** A change in Settings that can stop the DJ or can't be taken back: another model, a voice still to download, its
+ * key removed, its files deleted, or what it remembers forgotten. */
+export type DjChange =
+  | { kind: "model"; choice: string }
+  | { kind: "voice"; choice: string }
+  | { kind: "key"; provider: DjCloud }
+  | { kind: "files" }
+  | { kind: "forget" };
 
 /** What Settings asks under a setting before a change, and its two answers. */
 export interface Question {
@@ -153,9 +182,9 @@ function choiceName(choice: string, status: DjStatus): string {
   return settings.provider === "local" ? modelName({ ...status, settings }) : providerName(settings);
 }
 
-/** What Settings asks before `change`, or null to go ahead: another model or removing the key in use only while the
- * DJ plays, since either stops it; deleting its files always, gigabytes that take a while to download again; and
- * forgetting what it remembers always, which can't be taken back. */
+/** What Settings asks before `change`, or null to go ahead: another model, a voice that has to download first, or
+ * removing the key in use only while the DJ plays, since each stops it; deleting its files always, gigabytes that take
+ * a while to download again; and forgetting what it remembers always, which can't be taken back. */
 export function askBefore(change: DjChange, status: DjStatus, playing: boolean): Question | null {
   if (change.kind === "forget") {
     return {
@@ -176,6 +205,15 @@ export function askBefore(change: DjChange, status: DjStatus, playing: boolean):
     if (change.choice === modelChoiceOf(status.settings)) return null;
     return {
       text: `Switch the DJ to ${choiceName(change.choice, status)}? It stops playing to switch. Start it again from the DJ page.`,
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    };
+  }
+  if (change.kind === "voice") {
+    const voice = status.voices.find((v) => v.id === change.choice);
+    if (!voice || voice.installed || change.choice === status.settings.voice) return null;
+    return {
+      text: `Switch the DJ's voice to ${voice.label}? ${voice.group ?? "Its"} voices download first, ${formatBytes(voice.bytes)}, and the DJ stops until they're in.`,
       confirm: "Switch and stop",
       cancel: "Keep playing",
     };

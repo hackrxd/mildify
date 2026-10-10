@@ -95,7 +95,12 @@ export interface DjChoice {
   id: string;
   label: string;
   detail: string | null;
+  /** The size of its download, which a voice shares with the others in its group. */
   bytes: number;
+  /** Its download is in. */
+  installed: boolean;
+  /** A voice's package: the voices in one download together. */
+  group: string | null;
 }
 
 export interface DjStatus {
