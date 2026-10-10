@@ -1,10 +1,13 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { dj } from "../lib/dj.svelte";
+  import { dj, type DjSet } from "../lib/dj.svelte";
+  import { setMenu } from "../lib/djMenu";
   import { errorMessage } from "../lib/ipc";
+  import { contextMenu } from "../lib/menu.svelte";
   import { player } from "../lib/player.svelte";
   import { router } from "../lib/router.svelte";
   import * as sp from "../lib/spotify";
+  import { trackMenu } from "../lib/trackMenu";
   import type { Queue, Track } from "../lib/types";
   import { formatDuration, pickImage } from "../lib/util";
   import DjCover from "./DjCover.svelte";
@@ -48,14 +51,15 @@
   });
 </script>
 
-{#snippet djItem(name: string, durationMs: number, current = false)}
-  <li class="item" class:current>
+<!-- The DJ's item opens its set's menu; a song, the usual one without Add to queue, as it's queued already. -->
+{#snippet djItem(set: DjSet, durationMs: number, current = false)}
+  <li class="item" class:current {@attach contextMenu(() => setMenu(set))}>
     <button class="cover" onclick={() => router.go({ name: "dj" })} tabindex="-1">
       <DjCover size={42} />
       {#if current && !dj.paused}<span class="live"><Equalizer label="Your DJ is talking" /></span>{/if}
     </button>
     <span class="text">
-      <span class="name">{name}</span>
+      <span class="name">{set.name}</span>
       <span class="muted artists">Your DJ</span>
     </span>
     <span class="muted num dur">{formatDuration(durationMs)}</span>
@@ -63,7 +67,7 @@
 {/snippet}
 
 {#snippet item(t: Track, current = false)}
-  <li class="item" class:current>
+  <li class="item" class:current {@attach contextMenu(() => (t.uri.startsWith("spotify:track:") ? trackMenu(t, { queue: false }) : []))}>
     <button class="cover" onclick={() => t.album && router.go({ name: "album", id: t.album.id })} tabindex="-1">
       {#if pickImage(t.album?.images, 64)}<img src={pickImage(t.album?.images, 64)} alt="" loading="lazy" />{/if}
       {#if current && player.isPlaying}<span class="live"><Equalizer label="Playing" /></span>{/if}
@@ -90,7 +94,7 @@
     {:else}
       {#if dj.onAir}
         <h3>Now playing</h3>
-        <ul>{@render djItem(dj.onAir.name, dj.onAir.durationMs, true)}</ul>
+        <ul>{@render djItem(dj.onAir.set, dj.onAir.durationMs, true)}</ul>
       {:else if queue.currently_playing}
         <h3>Now playing</h3>
         <ul>{@render item(queue.currently_playing, true)}</ul>
@@ -99,10 +103,10 @@
       {#if upNext.length || djNext}
         <ul>
           {#each upNext as t, i (t.uri + i)}
-            {#if djNext && i === djAt}{@render djItem(djNext.name, djNext.speech?.durationMs ?? 0)}{/if}
+            {#if djNext && i === djAt}{@render djItem(djNext, djNext.speech?.durationMs ?? 0)}{/if}
             {@render item(t)}
           {/each}
-          {#if djNext && djAt >= upNext.length}{@render djItem(djNext.name, djNext.speech?.durationMs ?? 0)}{/if}
+          {#if djNext && djAt >= upNext.length}{@render djItem(djNext, djNext.speech?.durationMs ?? 0)}{/if}
         </ul>
       {:else}
         <p class="muted note">Nothing queued. Right-click a song and choose "Add to queue".</p>
