@@ -42,8 +42,10 @@ describe("ConfirmStrip", () => {
     button("Switch and stop").click();
     expect(onconfirm).toHaveBeenCalledOnce();
     expect(focused).toBe(trigger);
+    button("Keep playing").focus();
     button("Keep playing").click();
     expect(oncancel).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("cancels on Escape, and only on Escape", () => {
