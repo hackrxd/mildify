@@ -85,6 +85,18 @@ describe("loadListening", () => {
     await m.loadListening({ now: 0 });
     expect(sp.topTracksIn).toHaveBeenCalledTimes(18);
   });
+
+  it("reads again next time when part of the listening didn't come", async () => {
+    sp.savedTracks.mockRejectedValueOnce(new Error("rate limited"));
+    const thin = await m.loadListening({ user: "sam", now: 0 });
+    expect(thin.saved).toEqual([]);
+    const again = await m.loadListening({ user: "sam", now: 1 });
+    expect(again.saved.length).toBeGreaterThan(0);
+    expect(sp.topTracksIn).toHaveBeenCalledTimes(6);
+    // Whole, it's kept.
+    await m.loadListening({ user: "sam", now: 2 });
+    expect(sp.topTracksIn).toHaveBeenCalledTimes(6);
+  });
 });
 
 describe("olderPages", () => {

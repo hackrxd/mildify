@@ -18,12 +18,13 @@ let kept: { user: string; at: number; listening: Listening } | null = null;
 let smallPages = false;
 
 /** Everything the DJ reads about the user's listening; each part is optional, and all failing is an error. The same
- * user's, read less than half an hour ago, is read from what was kept. */
+ * user's, read whole less than half an hour ago, is read from what was kept. */
 export async function loadListening(opts: { user?: string; now?: number; random?: () => number } = {}): Promise<Listening> {
   const now = opts.now ?? Date.now();
   if (kept && opts.user !== undefined && kept.user === opts.user && now - kept.at < LISTENING_KEPT_MS) return kept.listening;
-  const listening = await read(opts.random ?? Math.random);
-  if (opts.user !== undefined) kept = { user: opts.user, at: now, listening };
+  const { listening, whole } = await read(opts.random ?? Math.random);
+  // A part that failed may be back next time.
+  if (opts.user !== undefined && whole) kept = { user: opts.user, at: now, listening };
   return listening;
 }
 
@@ -32,16 +33,20 @@ export function forgetListening() {
   kept = null;
 }
 
-async function read(random: () => number): Promise<Listening> {
+/** The listening, and whether every part of it came. */
+async function read(random: () => number): Promise<{ listening: Listening; whole: boolean }> {
   const parts = await Promise.allSettled([top("short_term"), top("medium_term"), top("long_term"), recent(), liked(random)]);
   if (parts.every((p) => p.status === "rejected")) throw (parts[0] as PromiseRejectedResult).reason;
   const [short, medium, long, played, saved] = parts.map((p) => (p.status === "fulfilled" ? p.value : []));
   return {
-    topShort: short as Track[],
-    topMedium: medium as Track[],
-    topLong: long as Track[],
-    recent: played as PlayHistory[],
-    saved: saved as SavedTrack[],
+    listening: {
+      topShort: short as Track[],
+      topMedium: medium as Track[],
+      topLong: long as Track[],
+      recent: played as PlayHistory[],
+      saved: saved as SavedTrack[],
+    },
+    whole: parts.every((p) => p.status === "fulfilled"),
   };
 }
 
