@@ -189,6 +189,13 @@ describe("askBefore", () => {
     expect(askBefore({ kind: "key", provider: "gemini" }, openai, true)).toBeNull();
   });
 
+  it("always asks before forgetting what the DJ remembers", () => {
+    for (const playing of [true, false]) {
+      expect(askBefore({ kind: "forget" }, status(), playing)).toMatchObject({ confirm: "Forget it", cancel: "Keep it" });
+    }
+    expect(askBefore({ kind: "forget" }, status(), false)?.text).toMatch(/^Forget what your DJ remembers\? /);
+  });
+
   it("always asks before removing the DJ's files", () => {
     const files = { ...status(), disk_bytes: 1_300_000_000 };
     expect(askBefore({ kind: "files" }, files, false)).toEqual({

@@ -126,8 +126,9 @@ export function troubleNotes(trouble: { model: string | null; voice: string | nu
   return notes;
 }
 
-/** A change in Settings that can stop the DJ: another model, its key removed, or its files deleted. */
-export type DjChange = { kind: "model"; choice: string } | { kind: "key"; provider: DjCloud } | { kind: "files" };
+/** A change in Settings that can stop the DJ or can't be taken back: another model, its key removed, its files
+ * deleted, or what it remembers forgotten. */
+export type DjChange = { kind: "model"; choice: string } | { kind: "key"; provider: DjCloud } | { kind: "files" } | { kind: "forget" };
 
 /** What Settings asks under a setting before a change, and its two answers. */
 export interface Question {
@@ -143,8 +144,16 @@ function choiceName(choice: string, status: DjStatus): string {
 }
 
 /** What Settings asks before `change`, or null to go ahead: another model or removing the key in use only while the
- * DJ plays, since either stops it; deleting its files always, gigabytes that take a while to download again. */
+ * DJ plays, since either stops it; deleting its files always, gigabytes that take a while to download again; and
+ * forgetting what it remembers always, which can't be taken back. */
 export function askBefore(change: DjChange, status: DjStatus, playing: boolean): Question | null {
+  if (change.kind === "forget") {
+    return {
+      text: "Forget what your DJ remembers? That's what it played, what you skipped and liked while it played, how its sets went and how it opened lately. It learns again as you listen.",
+      confirm: "Forget it",
+      cancel: "Keep it",
+    };
+  }
   if (change.kind === "files") {
     return {
       text: `Remove the DJ's files, ${formatBytes(status.disk_bytes)}? ${playing ? "It stops playing and turns off" : "The DJ turns off"}, and they download again when you turn it back on.`,
