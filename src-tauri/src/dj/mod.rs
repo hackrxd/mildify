@@ -765,6 +765,15 @@ impl Dj {
         Ok(voice::Setup { program, dir, voice: v, speed })
     }
 
+    /// A line's audio, ready to play at the loudness every line plays at.
+    fn playable(&self, id: u64) -> Result<voice::Pcm> {
+        let wav = self.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
+        let mut pcm =
+            voice::pcm(&wav).ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
+        voice::level(&mut pcm);
+        Ok(pcm)
+    }
+
     /// The WAV audio of a line `speak` made, or of the last preview.
     fn speech_audio(&self, id: u64) -> Option<Arc<Vec<u8>>> {
         let kept = self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone());
@@ -774,12 +783,7 @@ impl Dj {
     /// Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes.
     pub fn voice(&self, app: &AppHandle, command: VoiceCommand) -> Result<()> {
         let cmd = match command {
-            VoiceCommand::Play { id, gain } => {
-                let wav = self.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
-                let pcm = voice::pcm(&wav)
-                    .ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
-                Cmd::Play { id, pcm, gain: gain.clamp(0.0, 1.0) }
-            }
+            VoiceCommand::Play { id, gain } => Cmd::Play { id, pcm: self.playable(id)?, gain: gain.clamp(0.0, 1.0) },
             VoiceCommand::Hold { on } => Cmd::Hold(on),
             VoiceCommand::Pause => Cmd::Pause,
             VoiceCommand::Resume => Cmd::Resume,
@@ -1324,8 +1328,8 @@ mod tests {
         assert_eq!(d.status(&DjConfig::default()).disk_bytes, 0);
     }
 
-    /// A WAV of `ms` of silence, mono 16-bit at 24 kHz, as the voice program writes.
-    fn silence(ms: u32) -> Vec<u8> {
+    /// A WAV of `ms` of a quiet tone, mono 16-bit at 24 kHz, as the voice program writes.
+    fn quiet_line(ms: u32) -> Vec<u8> {
         let data = 24 * ms * 2;
         let mut w = Vec::new();
         w.extend_from_slice(b"RIFF");
@@ -1336,12 +1340,13 @@ mod tests {
         }
         w.extend_from_slice(b"data");
         w.extend_from_slice(&data.to_le_bytes());
-        w.resize(w.len() + data as usize, 0);
+        // Peaks at a 16th of full scale: 27 dB under it, the way loudness is measured.
+        w.extend((0..data / 2).flat_map(|i| (((i as f32 * 0.07).sin() * 2048.0) as i16).to_le_bytes()));
         w
     }
 
     /// The voice program and `voice`'s package, as downloaded. The program writes down what it's asked, one argument a
-    /// line, in the `asked.txt` it returns, and reads every line as a second of silence.
+    /// line, in the `asked.txt` it returns, and reads every line as a second of a quiet tone.
     #[cfg(unix)]
     fn fake_voice(d: &Dj, voice: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -1356,7 +1361,7 @@ cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(pkg.join("pkg")).unwrap();
         std::fs::write(pkg.join("pkg").join(v.kind.model_file()), "").unwrap();
-        std::fs::write(bin.join("line.wav"), silence(1000)).unwrap();
+        std::fs::write(bin.join("line.wav"), quiet_line(1000)).unwrap();
         let program = bin.join(manifest::TTS_PROGRAM);
         std::fs::write(&program, PROGRAM).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1389,6 +1394,11 @@ cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
         assert!(asked.contains(&"--sid=1") && asked.contains(&"--kitten-length-scale=0.800"), "{asked:?}");
         assert_eq!(asked[asked.len() - 2..], ["--", "Hi there."]);
         assert!(d.speech_audio(speech.id).is_some());
+        // Played at the loudness every line is: 4 dB up from the 27 under full scale it was read at.
+        let pcm = d.playable(speech.id).unwrap();
+        let rms = (pcm.samples.iter().map(|s| s * s).sum::<f32>() / pcm.samples.len() as f32).sqrt();
+        assert!((20.0 * rms.log10() + 23.0).abs() < 0.2, "{}", 20.0 * rms.log10());
+        assert!(d.playable(speech.id + 1000).is_err());
     }
 
     #[cfg(unix)]

@@ -304,6 +304,44 @@ fn wav_info(wav: &[u8]) -> Option<WavInfo> {
     Some(WavInfo { sample_rate: w.sample_rate, frames: (w.data.len() / frame) as u64 })
 }
 
+/// The loudness every line plays at, as RMS over its speech: about the middle of the Kokoro voices, which differ by
+/// 6 dB among themselves, and by 10 from the Light ones.
+const LEVEL_DBFS: f32 = -23.0;
+/// 20 ms stretches quieter than this are pauses, left out of the measure.
+const GATE_DBFS: f32 = -50.0;
+/// No sample goes over this.
+const CEILING_DBFS: f32 = -1.0;
+/// Nor is a line made more than this much louder: one that's nearly silent stays so.
+const MAX_GAIN_DB: f32 = 12.0;
+
+fn amplitude(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
+
+/// Turns a line up or down to `LEVEL_DBFS`, whichever voice read it, so the DJ sounds as loud with any voice. Its
+/// peaks stay under `CEILING_DBFS`.
+pub fn level(pcm: &mut Pcm) {
+    let frame = (pcm.sample_rate as usize / 50).max(1) * usize::from(pcm.channels.max(1));
+    let gate = f64::from(amplitude(GATE_DBFS)).powi(2);
+    let (mut sum, mut count) = (0f64, 0usize);
+    for chunk in pcm.samples.chunks(frame) {
+        let energy: f64 = chunk.iter().map(|s| f64::from(*s).powi(2)).sum();
+        if energy / chunk.len() as f64 > gate {
+            sum += energy;
+            count += chunk.len();
+        }
+    }
+    if count == 0 {
+        return;
+    }
+    let rms = (sum / count as f64).sqrt() as f32;
+    let peak = pcm.samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+    let gain = (amplitude(LEVEL_DBFS) / rms).min(amplitude(CEILING_DBFS) / peak).min(amplitude(MAX_GAIN_DB));
+    for s in &mut pcm.samples {
+        *s *= gain;
+    }
+}
+
 /// A line's audio, ready to play: interleaved samples between -1 and 1.
 pub struct Pcm {
     pub channels: u16,
@@ -408,6 +446,52 @@ mod tests {
         assert!(pcm(&wav_with(6, 1, 8, 16, &[0, 0])).is_none());
         assert!(pcm(&wav_with(1, 0, 16, 16, &ints)).is_none());
         assert!(pcm(b"not a wav file at all").is_none());
+    }
+
+    /// The RMS of `samples` over its speech, in dBFS, as `level` measures it at 24 kHz.
+    fn speech_dbfs(samples: &[f32]) -> f32 {
+        let kept: Vec<f32> =
+            samples.chunks(480).filter(|c| c.iter().map(|s| s * s).sum::<f32>() / c.len() as f32 > 1e-5).flatten().copied().collect();
+        10.0 * (kept.iter().map(|s| s * s).sum::<f32>() / kept.len() as f32).log10()
+    }
+
+    /// A second of a tone at `amp`, then `pause` seconds of silence.
+    fn tone(amp: f32, pause: f32) -> Pcm {
+        let mut samples: Vec<f32> = (0..24_000).map(|i| (i as f32 * 0.07).sin() * amp).collect();
+        samples.resize(samples.len() + (24_000.0 * pause) as usize, 0.0);
+        Pcm { channels: 1, sample_rate: 24_000, samples }
+    }
+
+    #[test]
+    fn brings_every_line_to_one_loudness_leaving_pauses_out() {
+        // From 6 dB under the level to 14 over it.
+        for (amp, pause) in [(0.05, 0.0), (0.5, 0.0), (0.05, 3.0), (0.3, 1.0)] {
+            let mut line = tone(amp, pause);
+            level(&mut line);
+            let loudness = speech_dbfs(&line.samples);
+            assert!((loudness - LEVEL_DBFS).abs() < 0.1, "{amp} {pause}: {loudness}");
+            // Pauses stay silent.
+            assert!(line.samples[24_000..].iter().all(|s| *s == 0.0));
+        }
+    }
+
+    #[test]
+    fn keeps_peaks_under_the_ceiling_and_a_near_silent_line_quiet() {
+        // Quiet, with one click: turning it up to the level would clip.
+        let mut clicky = tone(0.01, 0.0);
+        clicky.samples[100] = 0.4;
+        level(&mut clicky);
+        let peak = clicky.samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+        assert!((peak - amplitude(CEILING_DBFS)).abs() < 1e-4, "{peak}");
+        // Barely there: turned up no more than the most it may be.
+        let mut faint = tone(0.006, 0.0);
+        level(&mut faint);
+        let gained = faint.samples.iter().fold(0f32, |m, s| m.max(s.abs())) / 0.006;
+        assert!((gained - amplitude(MAX_GAIN_DB)).abs() < 0.01, "{gained}");
+        // Nothing but silence stays as it is.
+        let mut silent = tone(0.0, 1.0);
+        level(&mut silent);
+        assert!(silent.samples.iter().all(|s| *s == 0.0));
     }
 
     #[test]
@@ -529,3 +613,4 @@ mod tests {
         assert_eq!(scale("michael", f32::NAN), "--kokoro 1.000");
     }
 }
+
