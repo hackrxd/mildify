@@ -849,6 +849,8 @@ class Dj {
     this.phase = "starting";
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
+    // Its voice's output stays open until it stops.
+    this.#voice.hold();
     // The DJ plays here; music on another device would play on under its voice.
     if (player.isPlaying && !player.isLocal) player.togglePlay();
     try {

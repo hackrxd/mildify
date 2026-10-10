@@ -188,7 +188,9 @@ export type DjVoiceCommand =
   | { action: "pause" }
   | { action: "resume" }
   | { action: "gain"; gain: number }
-  | { action: "stop" };
+  | { action: "stop" }
+  /** Keeps the sound output open between lines too, or lets it close once idle; closing the voice lets go of it. */
+  | { action: "hold"; on: boolean };
 
 /** A `dj-voice` event: the line playing this far in (as it starts, then a few times a second), done, or unplayable. */
 export type DjVoiceEvent =

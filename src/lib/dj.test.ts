@@ -124,6 +124,7 @@ class FakeVoice {
   forget = vi.fn(() => {
     this.sounding = false;
   });
+  hold = vi.fn();
   /** The line plays out, or fails to. */
   end(error?: string) {
     this.sounding = false;
@@ -1213,6 +1214,18 @@ describe("starting", () => {
     expect(dj.phase).toBe("off");
     expect(toasts.show).toHaveBeenCalled();
     expect(sp.topTracksIn).not.toHaveBeenCalled();
+    expect(voice.hold).not.toHaveBeenCalled();
+  });
+
+  it("holds its voice's output open from the start, until it lets go of its voice as it stops", async () => {
+    player.isPlaying = false;
+    const starting = dj.start();
+    // Before the first set is even picked.
+    expect(voice.hold).toHaveBeenCalledTimes(1);
+    expect(backend.djGenerate).not.toHaveBeenCalled();
+    await starting;
+    dj.stop();
+    expect(backend.djRelease).toHaveBeenCalled();
   });
 
   it("greets as an item of its own, and brings the first song in near the end of the line", async () => {

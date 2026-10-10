@@ -99,6 +99,12 @@ export class Voice {
     return this.#running ? this.#at + performance.now() - this.#since : this.#at;
   }
 
+  /** Opens the sound output now and keeps it open between lines, until the DJ lets go of its voice
+   * (`djRelease`): opening it as a line starts can clip the line's first word. */
+  hold() {
+    backend.djVoice({ action: "hold", on: true }).catch(() => {});
+  }
+
   /** Lets go of the line without stopping it: another took its place on the output. Its `onEnd` isn't called. */
   forget() {
     this.#clear();
