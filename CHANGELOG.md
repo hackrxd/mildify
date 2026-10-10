@@ -53,9 +53,14 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
   DJ's settings, instead of only in a notice that goes away.
 - The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
+- The DJ's voice says numbers, symbols and some artists' names the way a host would: "#1" as "number one", 1999 as
+  "nineteen ninety-nine", "the 90s" as "the nineties", "feat." as "featuring", and SZA, A$AP Rocky and P!nk as
+  they're said. The captions still show them as they're written.
 
 ### Fixed
 
+- The DJ's voice no longer stops mid-sentence after an initial or an abbreviation, as in J. Cole or Mr. Brightside,
+  and its captions no longer break there.
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
 - A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
   app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.

@@ -216,6 +216,12 @@ Settings → AI DJ → **Voice** picks who reads the DJ's lines out, and **Speak
 to 30% faster than the voice's own pace. Like a new voice, a new speed comes in after any line the DJ already has
 ready, and the music plays on.
 
+The voice says some things the way a host would rather than as they're spelled: "#1" as "number one", 1999 as
+"nineteen ninety-nine" and 2011 as "twenty eleven", "the 90s" as "the nineties", 2:00 as "two o'clock", "feat." as
+"featuring", AC/DC without its slash, and artists who spell their names their own way, such as SZA, A$AP Rocky, P!nk,
+Ke$ha and deadmau5. The captions show the words as they're written. An initial or an abbreviation, as in J. Cole or
+Mr. Brightside, doesn't end a sentence, in the voice or in the captions.
+
 ## What it downloads
 
 Everything comes from the projects' own releases and goes in a `dj` folder in the app's data directory
