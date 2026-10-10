@@ -87,14 +87,25 @@ window focus re-reads the folders, so edits apply live. `--safe-mode` loads none
 **AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
 while `config.dj.enabled` (`install.rs`: resumable, SHA-256 pinned in `manifest.rs`, models from a fixed Hugging
-Face commit, unpacked beside its folder and moved in once complete). `engine.rs` runs `llama-server` on a random loopback
-port with an API key, `--jinja` and `--offline`. `chat.rs` asks it, the user's own OpenAI-style server, or a cloud
+Face commit, unpacked beside its folder and moved in once complete; a folder `known_ids` doesn't name for this computer
+goes). `engine.rs` runs `llama-server` on a random loopback
+port with an API key, `--jinja` and `--offline`: on the graphics card `--list-devices` names (llama.cpp's Vulkan build on
+Windows and Linux x64, Metal on Apple silicon) while `DjConfig.gpu` allows, and with `--device none` on the processor
+otherwise, or once the card failed to load the model or stopped running it (`card_failed`, for the app's run, until the
+setting changes). `DjStatus.runs_on` says where, and `dj_generate`/`dj_warm` send a `dj-status` when a load changes it.
+`chat.rs` asks it, the user's own OpenAI-style server, or a cloud
 provider (`DjConfig.provider`: OpenAI, Gemini through its OpenAI-compatible endpoint, Anthropic's Messages API)
 with the user's key, which `secrets.rs` keeps in the system keychain (`keyring`; a 0600 file without one) and never
 hands the UI (`DjConfig.api_keys` only flags which are saved, so the keychain is read, off the async workers, only
 when a cloud model is asked); `voice.rs` reads lines to WAV
-and times each sentence from the program's per-sentence sample counts, and `speaker.rs` plays them on the default
-output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events). Not through the web view:
+at `DjConfig.voice_speed` (the program's length scale)
+and times each sentence from the program's per-sentence sample counts. What it's given is each caption sentence as it's
+said (`say.rs`: "#1", years, decades, symbols, abbreviations, initials and stylised names), with captions split where
+the program splits (`split_sentences`, `say::keeps_going`), so the counts match. `speaker.rs` plays lines, each
+`level`led to one loudness, on the default
+output through rodio, as the music plays (`dj_voice`, reporting back in `dj-voice` events), and holds the output open
+through a session (`hold`); `dj_preview` reads a voice's sample line apart from the DJ's lines (`dj.preview`, never
+while it talks). Not through the web view:
 WebKitGTK's Web Audio needs GStreamer plugins that many systems lack. The UI does the rest: `djPicks.ts` builds
 segments from top tracks, recent plays and liked songs (read by `djListening.ts`: top tracks 50 a page, the newest
 likes and a random page from each half of the rest, kept half an hour per user when it all came), and `djTalk.ts` asks for
