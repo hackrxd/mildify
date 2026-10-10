@@ -62,6 +62,10 @@ export const ARTIST_SKIP_HALF_LIFE = 4 * DAY;
 export const LOVE_HALF_LIFE = 90 * DAY;
 /** A featured artist's share in the skip of a song they're on; the main artist's is 1. */
 export const FEATURED_SKIP = 0.35;
+/** A song is left out while its skips count this much: for a half-life after a skip. */
+const SONG_LEFT_OUT = 0.5;
+/** An artist is left out while their skips count this much: for a day after two skips as the main artist. */
+const ARTIST_LEFT_OUT = 2 * Math.pow(0.5, DAY / ARTIST_SKIP_HALF_LIFE);
 
 /** How a set went. */
 export interface SetRecord {
@@ -219,6 +223,17 @@ export class DjMemory {
   /** How much skipping `name`'s songs still counts: fading over days, a featured artist's skips less. */
   artistSkip(name: string, now = Date.now()): number {
     return (this.#artistSkips.get(name) ?? []).reduce((n, [at, w]) => n + w * fade(at, now, ARTIST_SKIP_HALF_LIFE), 0);
+  }
+
+  /** Songs skipped too lately to offer again: once in the last three weeks, twice in the last six. */
+  leftOutSongs(now = Date.now()): Set<string> {
+    return new Set([...this.#songSkips.keys()].filter((uri) => this.songSkip(uri, now) >= SONG_LEFT_OUT));
+  }
+
+  /** Artists skipped too much lately to offer again: twice as the main artist in the last day, three times in the
+   * last three days. */
+  leftOutArtists(now = Date.now()): Set<string> {
+    return new Set([...this.#artistSkips.keys()].filter((name) => this.artistSkip(name, now) >= ARTIST_LEFT_OUT));
   }
 
   /** How much the listener has liked `name`'s songs while the DJ played them, fading over months. */

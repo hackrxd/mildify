@@ -81,6 +81,22 @@ describe("DjMemory", () => {
     expect(() => m.unskipped(song("spotify:track:z", "Main"))).not.toThrow();
   });
 
+  it("leaves out a song skipped in the last three weeks, and an artist skipped twice in the last day", () => {
+    const HOUR = DAY / 24;
+    const m = new DjMemory(now);
+    m.skipped(song("spotify:track:a", "Ann"), now - 20 * DAY);
+    m.skipped(song("spotify:track:b", "Bo", "Featured"), now - 23 * HOUR);
+    m.skipped(song("spotify:track:c", "Bo", "Featured"), now - 22 * HOUR);
+    m.skipped(song("spotify:track:d", "Cy"), now - 22 * DAY);
+    for (let i = 0; i < 3; i++) m.skipped(song(`spotify:track:e${i}`, "Di"), now - 3 * DAY);
+    expect([...m.leftOutSongs(now)]).toEqual(["spotify:track:a", "spotify:track:b", "spotify:track:c", "spotify:track:e0", "spotify:track:e1", "spotify:track:e2"]);
+    expect([...m.leftOutArtists(now)].sort()).toEqual(["Bo", "Di"]);
+    // A day after Bo's second skip, Bo's back, and so is Di, half a day later; Ann's song three weeks after its skip.
+    expect([...m.leftOutArtists(now + 3 * HOUR)]).toEqual(["Di"]);
+    expect([...m.leftOutArtists(now + 12 * HOUR)]).toEqual([]);
+    expect([...m.leftOutSongs(now + 2 * DAY)]).not.toContain("spotify:track:a");
+  });
+
   it("counts likes toward the artists, fading over months", () => {
     const m = new DjMemory(now);
     m.liked(song("spotify:track:a", "Main", "Featured"), now);
