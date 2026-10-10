@@ -21,9 +21,9 @@ The DJ reads your listening through the Spotify Web API, the same way the rest o
 - what you played recently,
 - your liked songs: the newest 50, and 50 from each half of the rest, from somewhere else each session.
 
-That's six requests in all. What it read serves a session started within half an hour, so stopping and starting
-the DJ doesn't read it again. If Spotify refuses 50 top tracks at a time, as it may for a development-mode app, the
-DJ reads them in pages of 20 instead.
+That's seven requests in all. When all of it came, what it read serves a session started within half an hour, so
+stopping and starting the DJ doesn't read it again. If Spotify refuses 50 top tracks at a time, as it may for a
+development-mode app, the DJ reads them in pages of 20 instead, ten requests in all.
 
 From these it builds segments, the way Spotify's DJ does: **On repeat**, **Your favorites lately**,
 **Throwbacks** (all-time favorites and songs you liked long ago), **Fresh in your library** and
@@ -35,8 +35,9 @@ names the segment and writes what to say. It's only allowed to use those facts, 
 Songs the DJ played in the last three days aren't picked again at the start of a session. When you skip a DJ
 song before halfway, its artist sits out the next two sets the DJ picks, and the rest of the session once you've
 skipped them twice. A featured artist doesn't sit out. A song you skipped stays out for three weeks, and an artist
-you skipped twice stays out for a day, in the sessions after too. Ask for an artist by name and they're back. When
-nothing else is left, the DJ plays songs you skipped again rather than stop.
+you skipped twice stays out for a day, in the sessions after too. Ask for an artist by their whole name, or a song
+by its title or album, and it's back. When nothing else is left, the DJ plays songs you skipped again rather than
+stop.
 
 When a segment has more songs than it offers, it leans toward the ones you'll more likely want: songs your listening
 shows several ways, and by artists you liked while the DJ played them. It offers less of what you skipped, and of
@@ -60,9 +61,9 @@ commits to one song at a time: while a song plays, it picks the next and lines i
 you do changes what comes next:
 
 - **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it for the rest of
-  the set: more by that artist, or from that album, even from outside the set. Each like can run the set a song
-  longer, up to two, while there's more like it to play. It can change the song it lined up until about 35
-  seconds before the one playing ends, when the player starts loading it.
+  the set: more by that artist, or from that album, even from outside the set. A like before the set's last song
+  starts can run it a song longer, up to two, while there's more like it to play. It can change the song it lined
+  up until about 35 seconds before the one playing ends, when the player starts loading it.
 - The DJ doesn't play an artist twice running, counting everyone a song credits, unless you liked or asked for
   more of them.
 - **Skip a song** before halfway and its artist sits out the rest of the set, and the next two. Skip two in a set
@@ -283,16 +284,16 @@ Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ### What it remembers
 
-The DJ remembers, from one session to the next:
+The DJ remembers, for each Spotify account, from one session to the next:
 - what it played, for a month;
 - what you skipped and liked while it played, for up to a year, fading as it goes;
 - how its sets went, for two months;
-- how it opened lately.
+- how it opened its last ten sessions, for a month, without the name it called you.
 
-It's kept in the app's own storage on this computer, at most 128 KB, and never sent anywhere. A model on your
-computer or your own server is told how the DJ opened lately, so it greets you some other way. A cloud model is
-told nothing from earlier sessions. Settings → AI DJ → **What your DJ remembers** → **Forget it** clears it all.
-Removing the DJ's files doesn't.
+It's kept in the app's own storage on this computer, at most 128 KB, and nothing of it goes to Spotify. A model on
+your computer or your own model server is told how the DJ opened lately, so it greets you some other way. A cloud
+model is told nothing from earlier sessions. Settings → AI DJ → **What your DJ remembers** → **Forget it** clears
+it for the account signed in. Removing the DJ's files doesn't.
 
 ## Platforms
 
