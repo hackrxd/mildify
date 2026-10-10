@@ -10,7 +10,8 @@ language model and voice, so only what you picked downloads. Turning it off stop
 model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once you've said so under the button.
 
 Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
-shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it.
+shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it. A voice
+from a package that isn't downloaded yet does stop it, without asking first, while it downloads.
 
 ## What it plays
 
