@@ -189,16 +189,35 @@ export interface SetSoFar {
   sofar: Candidate[];
   played: Set<string>;
   skippedArtists: Set<string>;
+  /** Likes and skips in this set; the skips of the whole session. */
   reactions: Reactions;
   /** Songs skipped in this set. */
   skips: number;
+  /** What the listener asked for, when the set is their request. */
+  request?: string | null;
+}
+
+/** How many songs past its plan a set picked as it goes can run, for likes in it. */
+export const RUN_ON = 2;
+
+/** Whether two songs credit an artist in common. */
+export function sharesArtist(a: Candidate, b: Candidate): boolean {
+  return a.artists.some((x) => b.artists.includes(x));
+}
+
+/** How many songs a set picked as it goes plays: as many as its `plan`, and one more for each of its `likes`, up to
+ * RUN_ON more, while there are `more` songs like those liked to play. */
+export function setCap(plan: number, likes: number, more: boolean): number {
+  return Math.max(plan, 1) + (more ? Math.min(RUN_ON, likes) : 0);
 }
 
 /** The set's next song, picked while the one before it plays; null when the set should end with it. The plan
- * comes first, but a song the listener liked pulls its artist and album forward, a skipped artist sits out, and
- * the same artist twice running is avoided unless they asked for more of it. */
-export function nextInSet(p: SetSoFar): Candidate | null {
-  if (p.skips >= SKIPS_TO_MOVE_ON || p.sofar.length >= Math.max(p.plan.length, 1)) return null;
+ * comes first, but a song the listener liked pulls its artist and album forward, and lets the set run on; a skipped
+ * artist sits out, and the same artist twice running is avoided unless the listener liked or asked for more of
+ * them. Of the songs from outside the plan, with what the DJ knows of the listener's `taste`, those they'll more
+ * likely want lean forward. */
+export function nextInSet(p: SetSoFar, taste?: Taste): Candidate | null {
+  if (p.skips >= SKIPS_TO_MOVE_ON) return null;
   const used = new Set(p.sofar.map((s) => s.uri));
   const liked = p.reactions.liked.slice(0, 3);
   const close = p.pool.filter((c) => liked.some((l) => kinship(c, l) >= 3));
@@ -208,9 +227,12 @@ export function nextInSet(p: SetSoFar): Candidate | null {
     seen.add(c.uri);
     return !c.artists.some((a) => p.skippedArtists.has(a));
   });
+  const more = options.some((c) => liked.some((l) => sharesArtist(c, l)));
+  if (p.sofar.length >= setCap(p.plan.length, p.reactions.liked.length, more)) return null;
   const last = p.sofar[p.sofar.length - 1];
-  // Liking the song playing asks for more of its artist.
-  const moreOfLast = !!last && liked.some((l) => l.artists[0] === last.artists[0]);
+  const asked = p.request ? asksFor(p.request) : () => false;
+  // Liking the song playing, or asking for its artist, asks for more of them.
+  const moreOfLast = !!last && (liked.some((l) => sharesArtist(l, last)) || last.artists.some(asked));
   let best: Candidate | null = null;
   let top = -Infinity;
   for (const c of options) {
@@ -218,7 +240,9 @@ export function nextInSet(p: SetSoFar): Candidate | null {
     let score = planned >= 0 ? 2 - planned * 0.1 : 0;
     // The latest like counts most.
     liked.forEach((l, i) => (score += kinship(c, l) / (i + 1)));
-    if (last && !moreOfLast && c.artists[0] === last.artists[0]) score -= 2;
+    if (last && !moreOfLast && sharesArtist(c, last)) score -= 2;
+    // The plan was picked by taste already: it decides between the songs from outside it.
+    if (taste && planned < 0) score += songScore(c, taste) / 4;
     if (score > top) {
       top = score;
       best = c;

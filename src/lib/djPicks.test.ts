@@ -11,7 +11,10 @@ import {
   requestChoices,
   requestScore,
   requestSegment,
+  RUN_ON,
   SEGMENTS,
+  setCap,
+  sharesArtist,
   shuffled,
   SKIPS_TO_MOVE_ON,
   songScore,
@@ -437,6 +440,60 @@ describe("picking as it goes", () => {
 
   it("ends the set when nothing's left to pick", () => {
     expect(nextInSet(ask({ choices: [], pool: [], played: new Set([a.uri, b.uri, c.uri]) }))).toBeNull();
+  });
+
+  it("runs on past its plan after a like, a song for each, up to two, while there's more like it", () => {
+    const ann3 = song("ann3", "Ann");
+    const ann4 = song("ann4", "Ann");
+    const pool = [a, b, c, d, ann2, ann3, ann4];
+    const after = (sofar: Candidate[], liked: Candidate[]) =>
+      nextInSet(ask({ pool, sofar, played: new Set(sofar.map((s) => s.uri)), reactions: { liked, skipped: [] } }));
+    expect(after([a, b, c], [a])).toBe(ann2);
+    expect(after([a, b, c, ann2], [a])).toBeNull();
+    expect(after([a, b, c, ann2], [ann2, a])).toBe(ann3);
+    expect(after([a, b, c, ann2, ann3], [ann2, a])).toBeNull();
+    // Nothing left like the song liked: the set ends with its plan.
+    expect(after([a, b, c], [b])).toBeNull();
+  });
+
+  it("caps a set at its plan, and a song more for each like while there's more like it, up to two", () => {
+    expect(setCap(3, 0, true)).toBe(3);
+    expect(setCap(3, 1, true)).toBe(4);
+    expect(setCap(3, 5, true)).toBe(3 + RUN_ON);
+    expect(setCap(3, 2, false)).toBe(3);
+    expect(setCap(0, 0, false)).toBe(1);
+  });
+
+  it("counts every artist a song credits when it keeps an artist from playing twice running", () => {
+    const feat = song("feat", "Cy", { artists: ["Cy", "Bo"] });
+    expect(sharesArtist(feat, b)).toBe(true);
+    expect(sharesArtist(feat, a)).toBe(false);
+    expect(nextInSet(ask({ plan: [b, feat, c], sofar: [b], played: new Set([b.uri]) }))).toBe(c);
+    // Liking a song by anyone on the one playing asks for more of all of them.
+    const cy2 = song("cy2", "Cy");
+    const playingFeat = { plan: [feat, cy2, d], choices: [], pool: [feat, cy2, d], sofar: [feat], played: new Set([feat.uri]) };
+    expect(nextInSet(ask(playingFeat))).toBe(d);
+    expect(nextInSet(ask({ ...playingFeat, reactions: { liked: [song("x", "Bo")], skipped: [] } }))).toBe(cy2);
+  });
+
+  it("plays an artist the set's request names twice running", () => {
+    const bo2 = song("bo2", "Bo");
+    const set = { plan: [b, bo2, c], sofar: [b], played: new Set([b.uri]) };
+    expect(nextInSet(ask({ ...set, request: "more Bo please" }))).toBe(bo2);
+    expect(nextInSet(ask({ ...set, request: "something calm" }))).toBe(c);
+  });
+
+  it("goes by the listener's taste among the songs from outside the plan, and leaves the plan's order alone", () => {
+    const eve = song("eve", "Eve");
+    const loves = (name: string): Taste => ({ ...quiet, artistLove: (n) => (n === name ? 2 : 0) });
+    // At the plan's end, with a like that lets it run on, the two songs like it are told apart by taste.
+    const ann3 = song("ann3", "Ann");
+    const run = { pool: [a, b, c, ann2, ann3], sofar: [a, b, c], played: new Set([a.uri, b.uri, c.uri]), reactions: { liked: [a], skipped: [] } };
+    expect(nextInSet(ask(run))).toBe(ann2);
+    expect(nextInSet(ask(run), { ...quiet, playedAgo: (uri) => (uri === ann2.uri ? 0 : null) })).toBe(ann3);
+    // A loved artist off the plan doesn't jump it, and a skip doesn't move the plan's songs around.
+    expect(nextInSet(ask({ choices: [d, eve] }), loves("Eve"))).toBe(b);
+    expect(nextInSet(ask(), { ...quiet, songSkip: (uri) => (uri === b.uri ? 1 : 0) })).toBe(b);
   });
 
   it("weighs a song by how close it is to one liked", () => {
