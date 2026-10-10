@@ -2070,6 +2070,42 @@ describe("picking as it goes", () => {
     expect(queued().at(-1)).toBe(asked.plan[1].uri);
   });
 
+  it("runs a set on a song past its plan for a like, while there's more like it", async () => {
+    annAnd(20);
+    likedState.saved.set("spotify:track:t1", false);
+    const set = await liveStarted();
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    await untilNextSet();
+    expect(set.plan).toHaveLength(3);
+    expect(dj.current!.songs.map((s) => s.name)).toEqual(["Song 1", "Song 2", "Song 3", "Song 4"]);
+  });
+
+  it("plays an artist a set asked for names twice running", async () => {
+    annAnd(20);
+    await liveStarted();
+    dj.request("more Ann please");
+    await untilNextSet();
+    const asked = await nextSet();
+    expect(asked.plan.map((s) => s.artists[0])).toEqual(["Ann", "Ann", "Ann"]);
+    expect(queued().at(-1)).toBe(asked.plan[1].uri);
+  });
+
+  it("lines up, of the songs like one liked, one it hasn't played lately first", async () => {
+    annAnd(20);
+    const before = await liveStarted();
+    dj.stop();
+    vi.setSystemTime(Date.now() + 4 * 24 * 60 * 60 * 1000);
+    likedState.saved.set("spotify:track:t2", false);
+    const set = await liveStarted();
+    expect(set.songs[0].name).toBe("Song 2");
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    // The song played days ago is as like the one liked as the others are, but it comes after them.
+    expect(queued().at(-1)).toBe("spotify:track:t3");
+    expect(before.songs[0].uri).toBe("spotify:track:t1");
+  });
+
   it("talks from a template about a song the listener liked, when the model doesn't answer", async () => {
     twins();
     const set = await liveStarted();

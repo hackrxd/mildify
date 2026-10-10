@@ -1635,16 +1635,20 @@ class Dj {
   }
 
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
-    return nextInSet({
-      plan: cur.plan,
-      choices: cur.choices,
-      pool: this.#pool,
-      sofar,
-      played: new Set([...played, ...this.#memory.leftOutSongs()]),
-      skippedArtists: this.#avoid(cur.request).skippedArtists,
-      reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
-      skips: this.#setSkips,
-    });
+    return nextInSet(
+      {
+        plan: cur.plan,
+        choices: cur.choices,
+        pool: this.#pool,
+        sofar,
+        played: new Set([...played, ...this.#memory.leftOutSongs()]),
+        skippedArtists: this.#avoid(cur.request).skippedArtists,
+        reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
+        skips: this.#setSkips,
+        request: cur.request,
+      },
+      this.#memory,
+    );
   }
 
   /** Puts `pick` after `sofar`, in the set and in the player's queue, in place of whatever was lined up. */
