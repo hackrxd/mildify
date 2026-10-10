@@ -82,6 +82,8 @@ export async function copyText(text: string): Promise<void> {
   } catch {
     // Older WebKitGTK builds reject the async clipboard; execCommand still works there.
   }
+  // Selecting it takes the focus, which goes back where it was after.
+  const focused = document.activeElement;
   const area = document.createElement("textarea");
   area.value = text;
   area.setAttribute("readonly", "");
@@ -90,5 +92,6 @@ export async function copyText(text: string): Promise<void> {
   area.select();
   const ok = document.execCommand("copy");
   area.remove();
+  if (focused instanceof HTMLElement && focused.isConnected) focused.focus();
   if (!ok) throw new Error("Couldn't copy to the clipboard");
 }
