@@ -146,7 +146,8 @@ impl Engine {
     ) -> Result<Target> {
         self.notice_card_stopped();
         if let Some(name) = card.filter(|_| self.card_failed().is_none()) {
-            match self.load(model, log, Device::Gpu, self.card_load_timeout, |port, key| spawn(port, key, Device::Gpu)).await {
+            let on_card = |port: u16, key: &str| spawn(port, key, Device::Gpu);
+            match self.load(model, log, Device::Gpu, self.card_load_timeout, on_card).await {
                 Ok(target) => {
                     *self.runs_on.lock().unwrap() = Some(RunsOn { card: Some(name), card_failed: None });
                     return Ok(target);
@@ -178,7 +179,8 @@ impl Engine {
         let Some(s) = slot.as_mut().filter(|s| s.device == Device::Gpu && s.loaded) else { return };
         if let Ok(Some(status)) = s.child.try_wait() {
             let said = last_line(&s.log).map(|l| format!(". {l}")).unwrap_or_default();
-            *self.card_failed.lock().unwrap() = Some(format!("The DJ's model stopped on the graphics card ({status}){said}"));
+            let why = format!("The DJ's model stopped on the graphics card ({status}){said}");
+            *self.card_failed.lock().unwrap() = Some(why);
         }
     }
 
@@ -736,7 +738,10 @@ mod tests {
         let ours = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let load = tokio::spawn({
             let (e, ours) = (e.clone(), ours.clone());
-            async move { e.load(Path::new("/m.gguf"), &log_path(), Device::Cpu, LOAD_TIMEOUT, |port, _| answering(port, ours.clone())).await }
+            async move {
+                let spawn = |port, _: &str| answering(port, ours.clone());
+                e.load(Path::new("/m.gguf"), &log_path(), Device::Cpu, LOAD_TIMEOUT, spawn).await
+            }
         });
         tokio::time::sleep(Duration::from_millis(700)).await;
         assert!(!load.is_finished(), "taken for loaded by another server's /health");
@@ -794,7 +799,12 @@ mod tests {
 
     #[test]
     fn finds_the_graphics_card_llama_cpp_would_use() {
-        let listed = "load_backend: loaded CPU backend\nAvailable devices:\n  Vulkan0: NVIDIA GeForce RTX 3060 (12288 MiB, 11515 MiB free)\n  Vulkan1: AMD Radeon Graphics (RADV RENOIR) (2048 MiB, 1900 MiB free)\n";
+        let listed = concat!(
+            "load_backend: loaded CPU backend\n",
+            "Available devices:\n",
+            "  Vulkan0: NVIDIA GeForce RTX 3060 (12288 MiB, 11515 MiB free)\n",
+            "  Vulkan1: AMD Radeon Graphics (RADV RENOIR) (2048 MiB, 1900 MiB free)\n",
+        );
         assert_eq!(first_card(listed).as_deref(), Some("NVIDIA GeForce RTX 3060"));
         let second = "Available devices:\n  Vulkan0: AMD Radeon Graphics (RADV RENOIR) (2048 MiB, 1900 MiB free)\n";
         assert_eq!(first_card(second).as_deref(), Some("AMD Radeon Graphics (RADV RENOIR)"));
@@ -972,7 +982,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mildify-engine-{}", crate::config::random_hex(8)));
         std::fs::create_dir_all(&dir).unwrap();
         let server = dir.join("llama-server");
-        std::fs::write(&server, "#!/bin/sh\necho asked >> \"$(dirname \"$0\")/asked\"\nprintf 'Available devices:\\n  Vulkan0: Test Card (100 MiB, 90 MiB free)\\n'\n").unwrap();
+        const SERVER: &str = r#"#!/bin/sh
+echo asked >> "$(dirname "$0")/asked"
+printf 'Available devices:\n  Vulkan0: Test Card (100 MiB, 90 MiB free)\n'
+"#;
+        std::fs::write(&server, SERVER).unwrap();
         std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
         let e = Engine::default();
         let mut card = None;
