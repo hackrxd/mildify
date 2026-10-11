@@ -402,7 +402,13 @@ describe("extensionNotes", () => {
       },
     ]);
     expect(extensionNotes([], [], 600)).toEqual([]);
-    const short = { owner: { name: "DJ log" }, segment: { label: "Short songs" } };
-    expect(extensionNotes([a], [a], 600, [short]).map((n) => n.what)).toEqual(["Tells it: “Keep it light.”", "Adds a segment: Short songs"]);
+    const short = { owner: { name: "DJ log" }, segment: { label: "Short songs", brief: "songs under three minutes" } };
+    const named = { owner: { name: "Moods" }, segment: { label: "Calm", brief: "Calm" } };
+    expect(extensionNotes([a], [a], 600, [short, named]).map((n) => n.what)).toEqual([
+      "Tells it: “Keep it light.”",
+      "Adds a segment, Short songs: “songs under three minutes”",
+      // A segment told nothing more than its name.
+      "Adds a segment: Calm",
+    ]);
   });
 });
