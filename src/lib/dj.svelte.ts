@@ -45,6 +45,7 @@ import {
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
+import { djExtensions } from "./djExtensions.svelte";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, previewLine, voiceNote } from "./djView";
@@ -1107,6 +1108,7 @@ class Dj {
       listener,
       previous: prev,
       instructions: this.instructions,
+      extensionInstructions: djExtensions.promptInstructions().map((x) => x.text),
       opening,
       setNumber: this.#setsThisSession + 1,
       earlier: this.#earlier(local),

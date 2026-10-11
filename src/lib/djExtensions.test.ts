@@ -88,6 +88,8 @@ function tracker() {
   let on = true;
   return {
     live: () => on,
+    /** How many undos it holds. */
+    held: () => undo.length,
     track: vi.fn((fn: () => void) => {
       undo.push(fn);
       return () => {
@@ -275,12 +277,72 @@ describe("set actions", () => {
   });
 });
 
+describe("instructions", () => {
+  const a = { id: "a.js", name: "A" };
+  const b = { id: "b.js", name: "B" };
+  const given = () => m.djExtensions.instructions.map((x) => `${x.owner.name}: ${x.text}`);
+
+  it("are one set per extension, kept in the order first given", () => {
+    m.djExtensions.setInstructions(a, "Keep it light.");
+    m.djExtensions.setInstructions(b, "No explicit songs.");
+    m.djExtensions.setInstructions(a, "  Keep it short.  ");
+    expect(given()).toEqual(["A: Keep it short.", "B: No explicit songs."]);
+    // Taken back, and given again: last.
+    expect(m.djExtensions.setInstructions(a, "   ")).toBeNull();
+    expect(given()).toEqual(["B: No explicit songs."]);
+    m.djExtensions.setInstructions(a, "Keep it short.");
+    expect(given()).toEqual(["B: No explicit songs.", "A: Keep it short."]);
+  });
+
+  it("are capped", async () => {
+    const { EXTENSION_INSTRUCTIONS_MAX } = await import("./djTalk");
+    m.djExtensions.setInstructions(a, "x".repeat(EXTENSION_INSTRUCTIONS_MAX + 50));
+    expect(m.djExtensions.instructions[0].text).toHaveLength(EXTENSION_INSTRUCTIONS_MAX);
+  });
+
+  it("reach the model as far as they fit, the first given first", () => {
+    const owners = ["a", "b", "c", "d"].map((id) => ({ id, name: id }));
+    const lengths = [300, 250, 60, 40];
+    owners.forEach((o, i) => m.djExtensions.setInstructions(o, "x".repeat(lengths[i])));
+    expect(m.EXTENSION_INSTRUCTIONS_BUDGET).toBe(600);
+    // 60 more would make 610: it waits, and the 40 after it fits.
+    expect(m.djExtensions.promptInstructions().map((x) => x.owner.id)).toEqual(["a", "b", "d"]);
+    m.djExtensions.setInstructions(owners[1], "");
+    expect(m.djExtensions.promptInstructions().map((x) => x.owner.id)).toEqual(["a", "c", "d"]);
+  });
+
+  it("are given through ns.dj, and taken back by its remover or by turning the extension off", () => {
+    const { ns, t } = api();
+    const remove = ns.setInstructions("Keep it light.");
+    expect(given()).toEqual(["DJ log: Keep it light."]);
+    remove();
+    expect(given()).toEqual([]);
+    ns.setInstructions("Keep it short.");
+    t.turnOff();
+    expect(given()).toEqual([]);
+  });
+
+  it("given again replace the last, whose remover then does nothing, and don't pile up", () => {
+    const { ns, t } = api();
+    const first = ns.setInstructions("One.");
+    for (const text of ["Two.", "Three.", "Four."]) ns.setInstructions(text);
+    expect(given()).toEqual(["DJ log: Four."]);
+    first();
+    expect(given()).toEqual(["DJ log: Four."]);
+    expect(t.held()).toBe(1);
+    ns.setInstructions("");
+    expect(given()).toEqual([]);
+    expect(t.held()).toBe(0);
+  });
+});
+
 it("adds nothing once the extension is turned off", async () => {
   const { ns, dj, t, add } = api();
   t.turnOff();
   const fn = vi.fn();
-  const removers = [ns.on(fn), ns.addSetAction({ label: "Late", action: () => {} })];
+  const removers = [ns.on(fn), ns.addSetAction({ label: "Late", action: () => {} }), ns.setInstructions("Late.")];
   expect(dj.listeners.size).toBe(0);
+  expect(m.djExtensions.instructions).toEqual([]);
   expect(add).not.toHaveBeenCalled();
   expect(t.track).not.toHaveBeenCalled();
   dj.emit({ type: "stopped" });

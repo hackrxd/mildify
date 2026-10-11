@@ -1,11 +1,13 @@
-// What extensions see of the AI DJ (`ns.dj`, docs/mods.md "The DJ"). They get copies of its sets, songs and lines:
-// frozen, so nothing an extension does changes what the DJ goes by, and the same copy for as long as the DJ keeps the
-// same thing, so a watcher can tell what changed. Its events reach them just after the DJ's own step, each listener
-// on its own: one that calls back into the DJ, or throws, can't upset that step or another listener. Never the DJ's
-// settings, keys, or what went wrong with its model, whose errors may quote a provider's.
+// What extensions see of the AI DJ, and what they add to it (`ns.dj`, docs/mods.md "The DJ"). They get copies of
+// its sets, songs and lines: frozen, so nothing an extension does changes what the DJ goes by, and the same copy for
+// as long as the DJ keeps the same thing, so a watcher can tell what changed. Its events reach them just after the
+// DJ's own step, each listener on its own: one that calls back into the DJ, or throws, can't upset that step or
+// another listener. Never the DJ's settings, keys, or what went wrong with its model, whose errors may quote a
+// provider's. What they add (`djExtensions`) the DJ reads as it picks each set, and the DJ page lists.
 
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate, Reason } from "./djPicks";
+import { EXTENSION_INSTRUCTIONS_MAX } from "./djTalk";
 import type { AddedItem } from "./menu.svelte";
 
 /** One of the DJ's songs. */
@@ -145,6 +147,55 @@ export function eventView(e: DjEvent): DjExtensionEvent {
   }
 }
 
+/** The extension asking, by its id and its name. */
+export interface Owner {
+  id: string;
+  name: string;
+}
+
+/** What all extensions' instructions can add up to in one prompt, so a model on this computer has room left. */
+export const EXTENSION_INSTRUCTIONS_BUDGET = 600;
+
+/** One extension's instructions for the DJ. */
+export interface ExtensionInstructions {
+  owner: Owner;
+  text: string;
+}
+
+/** What extensions add to the DJ. */
+class DjExtensions {
+  /** Each extension's instructions, in the order they were first given. */
+  instructions = $state.raw<ExtensionInstructions[]>([]);
+
+  /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any. */
+  setInstructions(owner: Owner, text: string): ExtensionInstructions | null {
+    const clean = text.trim().slice(0, EXTENSION_INSTRUCTIONS_MAX).trim();
+    const entry = clean ? { owner, text: clean } : null;
+    const had = this.instructions.some((x) => x.owner.id === owner.id);
+    if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
+    else this.instructions = this.instructions.flatMap((x) => (x.owner.id !== owner.id ? [x] : entry ? [entry] : []));
+    return entry;
+  }
+
+  /** Takes `entry` away, if it's still its extension's. */
+  removeInstructions(entry: ExtensionInstructions) {
+    this.instructions = this.instructions.filter((x) => x !== entry);
+  }
+
+  /** The instructions the model is told: in order, as many as fit in `EXTENSION_INSTRUCTIONS_BUDGET`. One that
+   * doesn't fit waits for room. */
+  promptInstructions(): ExtensionInstructions[] {
+    let room = EXTENSION_INSTRUCTIONS_BUDGET;
+    return this.instructions.filter((x) => {
+      if (x.text.length > room) return false;
+      room -= x.text.length;
+      return true;
+    });
+  }
+}
+
+export const djExtensions = new DjExtensions();
+
 /** The DJ, as far as extensions see it. */
 export interface DjSource {
   readonly phase: "off" | "starting" | "on";
@@ -181,12 +232,10 @@ export interface DjExtensionApi {
   on(fn: (event: DjExtensionEvent) => void): () => void;
   /** Adds an entry to every set's menu on the DJ page. Returns a remove function. */
   addSetAction(item: AddedItem<DjSetView>): () => void;
-}
-
-/** The extension asking, by its id and its name. */
-export interface Owner {
-  id: string;
-  name: string;
+  /** Tells the DJ how to talk or what to play, as the listener's own instructions do, after them: one set of
+   * instructions per extension, in place of any it gave before, up to `EXTENSION_INSTRUCTIONS_MAX` characters. An
+   * empty string takes them back. Returns a remove function. */
+  setInstructions(text: string): () => void;
 }
 
 /** How the API an extension is handed keeps track of what it adds: `track` takes how to undo something, to run when
@@ -205,6 +254,8 @@ export function djApi(
   addSetAction: (item: AddedItem<DjSet>) => () => void,
 ): DjExtensionApi {
   const none = () => {};
+  /** Takes back the extension's instructions before these: they're replaced, and that remover has nothing to do. */
+  let untrackInstructions = none;
   return Object.freeze({
     get phase() {
       return dj.phase;
@@ -262,6 +313,14 @@ export function djApi(
           action: (set) => action(setView(set)),
         }),
       );
+    },
+    setInstructions(text: string) {
+      if (!live()) return none;
+      const entry = djExtensions.setInstructions(owner, String(text ?? ""));
+      const before = untrackInstructions;
+      untrackInstructions = entry ? track(() => djExtensions.removeInstructions(entry)) : none;
+      before();
+      return untrackInstructions;
     },
   });
 }

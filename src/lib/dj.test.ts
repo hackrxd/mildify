@@ -313,6 +313,16 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("passes on what extensions tell it, until they take it back", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    const given = djExtensions.setInstructions({ id: "x.js", name: "X" }, "Keep it light.");
+    await started();
+    expect(lastPrompt()[0].content).toContain('"""\nKeep it light.\n"""');
+    djExtensions.removeInstructions(given!);
+    await askAgain();
+    expect(lastPrompt()[0].content).not.toContain("Keep it light.");
+  });
+
   it("calls the listener by the first name on their account, or by what they asked to be called", async () => {
     const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
     await started();
