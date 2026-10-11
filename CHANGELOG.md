@@ -7,6 +7,12 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ### Added
 
+- Minor release bump for the branded lyrics button and recent playback polish.
+
+## 1.4.0 - 2026-10-11
+
+### Added
+
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
