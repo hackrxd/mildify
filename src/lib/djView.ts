@@ -2,6 +2,7 @@
 // voice reads it out. Pure, so the wording is tested without a page.
 import { DAY_MS, type Candidate } from "./djPicks";
 import { monthYear, popularityWord, type TalkStyle } from "./djTalk";
+import type { DjStage } from "./dj.svelte";
 import type { DjChoice, DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
 import { formatBytes, lowerFirst } from "./util";
 
@@ -370,4 +371,45 @@ export function extensionNotes(
       note: null,
     })),
   ];
+}
+
+/** A step of getting the first set ready, as the DJ page lists it while the DJ starts. */
+export interface ReadyStep {
+  label: string;
+  state: "done" | "now" | "later";
+}
+
+const STAGES: DjStage[] = ["listening", "lookingUp", "writing", "voicing"];
+
+/** The steps of getting the first set ready that apply here, and how far each has got: `stage` is how far the pick
+ * has got (none once it's picked), and the model on this computer loads alongside. */
+export function readySteps(r: {
+  stage: DjStage | null;
+  status: DjStatus | null;
+  talk: TalkStyle;
+  modelLoaded: boolean;
+}): ReadyStep[] {
+  const at = r.stage ? STAGES.indexOf(r.stage) : STAGES.length;
+  const step = (label: string, stage: DjStage): ReadyStep => {
+    const i = STAGES.indexOf(stage);
+    return { label, state: i < at ? "done" : i === at ? "now" : "later" };
+  };
+  const steps = [step("Looking through your listening", "listening")];
+  if (r.status?.settings.provider === "local") {
+    steps.push({ label: "Loading its model", state: r.modelLoaded ? "done" : at > 0 ? "now" : "later" });
+  }
+  if (r.status?.tools) steps.push(step("Looking up some of the songs", "lookingUp"));
+  steps.push(step("Writing what to say", "writing"));
+  if (r.talk !== "silent") steps.push(step("Recording its voice", "voicing"));
+  return steps;
+}
+
+/** What picking the next set is busy with, for the DJ page while a set plays. */
+export function stageText(stage: DjStage): string {
+  return {
+    listening: "Looking through your listening…",
+    lookingUp: "Looking up some songs…",
+    writing: "Writing what to say…",
+    voicing: "Recording its voice…",
+  }[stage];
 }
