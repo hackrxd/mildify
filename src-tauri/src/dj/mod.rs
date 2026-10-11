@@ -546,6 +546,8 @@ impl Dj {
     pub async fn remove(&self) -> Result<()> {
         self.cancel_install();
         self.engine.stop().await;
+        // Downloaded again, the model may well load on the card.
+        self.engine.reset_device();
         self.songs.clear();
         // Let a cancelled download close its file first (Windows can't delete open files).
         let _done = tokio::time::timeout(Duration::from_secs(5), self.installing.lock()).await;
@@ -1378,6 +1380,14 @@ mod tests {
         d.songs.keep(&SongInfo { uri: "spotify:track:a".into(), ..Default::default() }, true, false, 0);
         d.remove().await.unwrap();
         assert_eq!(d.songs.kept("spotify:track:a", false), None);
+    }
+
+    #[tokio::test]
+    async fn removing_the_djs_files_gives_the_graphics_card_another_chance() {
+        let d = dj();
+        d.engine.ran_on(engine::RunsOn { card: None, card_failed: Some("It stopped".into()) });
+        d.remove().await.unwrap();
+        assert_eq!(d.runs_on(), None);
     }
 
     #[tokio::test]

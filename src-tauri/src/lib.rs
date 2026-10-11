@@ -324,7 +324,8 @@ async fn dj_configure(
         // What's downloading isn't what's needed any more; partial downloads are kept.
         state.dj.cancel_install();
     }
-    if new.gpu != old.gpu {
+    // A card that failed one model, or with the setting as it was, gets another chance.
+    if new.gpu != old.gpu || new.model != old.model {
         state.dj.reset_device();
     }
     if !new.keeps_model(&old) {
