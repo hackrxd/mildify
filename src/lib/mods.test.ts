@@ -1,5 +1,6 @@
 import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DjSet } from "./dj.svelte";
 import type { ModInfo, ModList } from "./ipc";
 import type { ExtensionApi } from "./mods.svelte";
 
@@ -16,6 +17,25 @@ vi.mock("./player.svelte", () => ({ player: { name: "player" } }));
 vi.mock("./router.svelte", () => ({ router: { name: "router" } }));
 vi.mock("./session.svelte", () => ({ session: { name: "session" } }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "9.9.9" }));
+/** The DJ's listeners, which a test can tell what happens. */
+const djListeners = vi.hoisted(() => new Set<(e: unknown) => void>());
+vi.mock("./dj.svelte", () => ({
+  dj: {
+    phase: "on",
+    ready: true,
+    current: null,
+    upNext: null,
+    onAir: null,
+    said: [],
+    speaking: false,
+    showing: false,
+    requested: null,
+    on: (fn: (e: unknown) => void) => {
+      djListeners.add(fn);
+      return () => void djListeners.delete(fn);
+    },
+  },
+}));
 
 let mods: typeof import("./mods.svelte").mods;
 let modUrl: typeof import("./mods.svelte").modUrl;
@@ -75,6 +95,7 @@ beforeEach(() => {
   show.mockReset();
   modules = {};
   imported = [];
+  djListeners.clear();
 });
 
 afterEach(() => {
@@ -316,6 +337,8 @@ describe("extensions", () => {
       ns!.addPage({ id: "late", label: "Late", render: () => {} }),
       ns!.addTrackMenuItem({ label: "Late", action: () => {} }),
       ns!.watch(effect),
+      ns!.dj.on(effect),
+      ns!.dj.addSetAction({ label: "Late", action: () => {} }),
     ];
     ns!.toasts.show("still here");
     ns!.onUnload(unloaded);
@@ -325,10 +348,40 @@ describe("extensions", () => {
     expect(mods.pages).toEqual([]);
     expect(mods.trackMenuItems).toEqual([]);
     expect(effect).not.toHaveBeenCalled();
+    expect(djListeners.size).toBe(0);
+    const { setMenu } = await import("./djMenu");
+    expect(setMenu({ id: 1, name: "Set", songs: [] } as unknown as DjSet).map((i) => i.label)).not.toContain("Late");
     expect(show).not.toHaveBeenCalledWith("still here", "info");
     // Its own clean-up still runs, at once.
     expect(unloaded).toHaveBeenCalledOnce();
     for (const remove of removers) remove();
+  });
+
+  it("see the DJ, hear what happens in its sessions, and add to its sets' menus, until turned off", async () => {
+    list.extensions = [mod("log.js")];
+    localStorage.setItem("nativify:extensions", '["log.js"]');
+    const heard: string[] = [];
+    let ns: ExtensionApi | undefined;
+    modules["log.js"] = {
+      default: (api: ExtensionApi) => {
+        ns = api;
+        api.dj.on((e) => void heard.push(e.type));
+        api.dj.addSetAction({ label: "Log this set", action: () => {} });
+      },
+    };
+    await boot();
+    await mods.startExtensions();
+    const { setMenu } = await import("./djMenu");
+    const set = { id: 1, name: "Set 1", songs: [] } as unknown as DjSet;
+    expect(ns!.dj.phase).toBe("on");
+    expect(setMenu(set).map((i) => i.label)).toContain("Log this set");
+    for (const fn of djListeners) fn({ type: "stopped" });
+    await Promise.resolve();
+    expect(heard).toEqual(["stopped"]);
+
+    await mods.setEnabled("log.js", false);
+    expect(djListeners.size).toBe(0);
+    expect(setMenu(set).map((i) => i.label)).not.toContain("Log this set");
   });
 
   it("removers returned by the API only run once", async () => {
