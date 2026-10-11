@@ -441,6 +441,39 @@ describe("extensions", () => {
     expect(el.textContent).toContain("You skipped Song 1 by Artist 1");
     if (typeof close === "function") close();
 
+    // Its segment is songs under three minutes.
+    const fits = djExtensions.segments[0].segment.fits;
+    expect(fits({ ...song, durationMs: 179_000 } as never)).toBe(true);
+    expect(fits({ ...song, durationMs: 181_000 } as never)).toBe(false);
+
+    // Its entry in a set's menu copies the songs' links: through the async clipboard, or where that's refused, a
+    // selected text box.
+    const { setMenu } = await import("./djMenu");
+    const set = { id: 1, name: "Set 1", songs: [song, { ...song, uri: "spotify:track:2" }] } as unknown as DjSet;
+    const links = "https://open.spotify.com/track/1\nhttps://open.spotify.com/track/2";
+    const copyLinks = () => setMenu(set).find((i) => i.label === "Copy song links")!.action();
+    const writeText = vi.fn(async (text: string) => void text);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    let selected = "";
+    const execCommand = vi.fn(() => ((selected = document.querySelector("textarea")!.value), true));
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    try {
+      copyLinks();
+      await vi.waitFor(() => expect(show).toHaveBeenCalledWith("Copied 2 song links", "info"));
+      expect(writeText).toHaveBeenCalledWith(links);
+      expect(execCommand).not.toHaveBeenCalled();
+      writeText.mockRejectedValue(new Error("NotAllowedError"));
+      show.mockClear();
+      copyLinks();
+      await vi.waitFor(() => expect(show).toHaveBeenCalledWith("Copied 2 song links", "info"));
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(selected).toBe(links);
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+      Reflect.deleteProperty(document, "execCommand");
+    }
+
     await mods.setEnabled("dj-log.js", false);
     expect(mods.pages).toEqual([]);
     expect(djExtensions.segments).toEqual([]);

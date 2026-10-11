@@ -8,6 +8,21 @@
 /** How many entries the log keeps. */
 const KEEP = 100;
 
+/** Puts text on the clipboard. Older WebKitGTK builds refuse the async API; a hidden text box still works there. */
+async function copy(text) {
+  try {
+    return await navigator.clipboard.writeText(text);
+  } catch {
+    const area = Object.assign(document.createElement("textarea"), { value: text, readOnly: true });
+    area.style.cssText = "position: fixed; opacity: 0; pointer-events: none";
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (!ok) throw new Error("Couldn't copy to the clipboard");
+  }
+}
+
 export default function (ns) {
   /** What happened, newest first, kept across restarts. */
   let log = ns.storage.get("log") ?? [];
@@ -49,7 +64,7 @@ export default function (ns) {
     label: "Copy song links",
     action: async (set) => {
       const links = set.songs.map((song) => `https://open.spotify.com/track/${song.uri.split(":")[2]}`);
-      await navigator.clipboard.writeText(links.join("\n"));
+      await copy(links.join("\n"));
       ns.toasts.show(`Copied ${links.length} song links`);
     },
   });
