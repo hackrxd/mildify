@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GaveUp, NextSet } from "./djNext";
+import { GaveUp, NextSet, SetQueue } from "./djNext";
 
 /** A promise with its settling in the test's hands. */
 function deferred<T>() {
@@ -127,5 +127,116 @@ describe("NextSet", () => {
     // The old wait runs out its own time.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(((await waited) as Error).message).toBe("the model took too long");
+  });
+});
+
+describe("SetQueue", () => {
+  /** Lets what's on its way get there. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  /** A queue over a player whose adds and clears the test sees, with an add held until let go when said. */
+  function queue(hold?: string) {
+    const q = new SetQueue<string>();
+    const sent: string[] = [];
+    const held = deferred<void>();
+    const add = (uri: string) => {
+      sent.push(uri);
+      return uri === hold ? held.promise : Promise.resolve();
+    };
+    const clear = () => {
+      sent.push("clear");
+      return Promise.resolve();
+    };
+    return { q, sent, add, clear, release: () => held.resolve() };
+  }
+
+  it("says how much of the set it was given is queued, and nothing of any other", async () => {
+    const { q, sent, add } = queue();
+    expect(q.idle).toBe(true);
+    q.add("a", ["1", "2"], add);
+    expect(q.of("a")).toBe("pending");
+    expect(q.of("b")).toBe("no");
+    expect(q.of(null)).toBe("no");
+    expect(q.adding).toBe("a");
+    expect(q.idle).toBe(false);
+    await q.settled;
+    expect(sent).toEqual(["1", "2"]);
+    expect(q.of("a")).toBe("done");
+    expect(q.adding).toBeNull();
+  });
+
+  it("says when the player refused the set", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const q = new SetQueue<string>();
+    q.add("a", ["1"], () => Promise.reject(new Error("refused")));
+    await q.settled;
+    expect(q.of("a")).toBe("failed");
+    expect(q.adding).toBeNull();
+    warn.mockRestore();
+  });
+
+  it("takes a set back out: the rest of it stops, and the clear comes after what was on its way", async () => {
+    const { q, sent, add, clear, release } = queue("1");
+    q.add("a", ["1", "2"], add);
+    await settle();
+    expect(sent).toEqual(["1"]);
+    q.remove("a", clear);
+    expect(q.of("a")).toBe("no");
+    expect(q.adding).toBeNull();
+    release();
+    await q.settled;
+    expect(sent).toEqual(["1", "clear"]);
+  });
+
+  it("puts nothing of a set taken out before its turn in the player's queue", async () => {
+    const { q, sent, add } = queue();
+    q.add("a", ["1"], add);
+    q.remove("a", null);
+    await q.settled;
+    expect(sent).toEqual([]);
+    expect(q.idle).toBe(true);
+  });
+
+  it("clears only for the set it holds, and lets another set's songs go on in", async () => {
+    const { q, sent, add, clear, release } = queue("1");
+    q.add("a", ["1", "2"], add);
+    await settle();
+    // "a" came in before all of it was there, and the set picked to follow it is let go of.
+    q.remove("b", clear);
+    expect(q.adding).toBe("a");
+    release();
+    await q.settled;
+    expect(sent).toEqual(["1", "2"]);
+  });
+
+  it("queues what comes after a clear once the clear is through", async () => {
+    const { q, sent, add } = queue();
+    q.add("a", ["1"], add);
+    await q.settled;
+    const cleared = deferred<void>();
+    q.remove("a", () => {
+      sent.push("clear");
+      return cleared.promise;
+    });
+    q.add("b", ["2"], add);
+    await settle();
+    expect(sent).toEqual(["1", "clear"]);
+    cleared.resolve();
+    await q.settled;
+    expect(sent).toEqual(["1", "clear", "2"]);
+    expect(q.of("b")).toBe("done");
+  });
+
+  it("forgets the set: nothing of it reads as queued, and the rest of it doesn't go in", async () => {
+    const { q, sent, add, release } = queue("1");
+    q.add("a", ["1", "2"], add);
+    await settle();
+    q.forget();
+    expect(q.of("a")).toBe("no");
+    expect(q.idle).toBe(true);
+    release();
+    await q.settled;
+    expect(sent).toEqual(["1"]);
+    expect(q.of("a")).toBe("no");
   });
 });

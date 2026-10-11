@@ -1,5 +1,6 @@
 // The set after the one playing, on its way: picked one at a time, a newer pick making the one under way stale (a
-// request, a skipped set), with the wait for the model cut short when the music can't wait for it.
+// request, a skipped set), with the wait for the model cut short when the music can't wait for it; then put in the
+// player's queue after the last song of the set playing.
 
 /** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
 export class GaveUp extends Error {}
@@ -61,5 +62,80 @@ export class NextSet {
   reset() {
     this.letGo();
     this.#rush = null;
+  }
+}
+
+/** How much of a set is in the player's queue: none, its songs on their way, all of them, or none: refused. */
+export type Queued = "no" | "pending" | "done" | "failed";
+
+/** The next set's songs in the player's queue, after the last song of the set playing, so it follows without a gap.
+ * What it knows is about the set it was given: any other reads as not queued. Its changes to the player's queue go
+ * one after another, so what's taken out is out before anything else goes in. */
+export class SetQueue<S> {
+  #queued: { set: S; state: Exclude<Queued, "no"> } | null = null;
+  #adding: S | null = null;
+  #changes: Promise<void> = Promise.resolve();
+
+  /** How much of `set` is in the player's queue. */
+  of(set: S | null): Queued {
+    return this.#queued && this.#queued.set === set ? this.#queued.state : "no";
+  }
+
+  /** The set whose songs are on their way into the player's queue. One that comes in before they're all there still
+   * gets the rest. */
+  get adding(): S | null {
+    return this.#adding;
+  }
+
+  /** Nothing queued, and nothing on its way. */
+  get idle(): boolean {
+    return !this.#queued && !this.#adding;
+  }
+
+  /** Settles once the changes on their way to the player's queue have landed. */
+  get settled(): Promise<void> {
+    return this.#changes;
+  }
+
+  /** Puts `set`'s songs (`uris`) in the player's queue with `add`, one after another, after the changes on their way. */
+  add(set: S, uris: readonly string[], add: (uri: string) => Promise<unknown>) {
+    this.#queued = { set, state: "pending" };
+    this.#adding = set;
+    this.#changes = this.#changes.then(() => this.#add(set, uris, add));
+  }
+
+  async #add(set: S, uris: readonly string[], add: (uri: string) => Promise<unknown>) {
+    // Let go of while it waited its turn.
+    if (this.#adding !== set) return;
+    try {
+      for (const uri of uris) {
+        // Let go of meanwhile: the rest of it isn't wanted.
+        if (this.#adding !== set) return;
+        await add(uri);
+      }
+      // A set that came in meanwhile isn't the one queued any more: the next one is queued in its turn.
+      if (this.#queued?.set === set) this.#queued.state = "done";
+    } catch (e) {
+      console.warn("DJ: couldn't queue the next set:", e);
+      if (this.#queued?.set === set) this.#queued.state = "failed";
+    } finally {
+      // Done with it: nothing is on its way into the queue any more.
+      if (this.#adding === set) this.#adding = null;
+    }
+  }
+
+  /** Takes `set` back out: what's on its way stops, and what made it in comes out through `clear` (none when the
+   * player is elsewhere), before anything else goes in. */
+  remove(set: S | null, clear: (() => Promise<unknown>) | null) {
+    if (this.#adding === set) this.#adding = null;
+    if (clear && this.of(set) !== "no") this.#changes = this.#changes.then(() => clear().then(() => {}, () => {}));
+    this.#queued = null;
+  }
+
+  /** Nothing of the set is in the player's queue any more (it was cleared, or the session ended), and none of the
+   * rest goes in. */
+  forget() {
+    this.#queued = null;
+    this.#adding = null;
   }
 }
