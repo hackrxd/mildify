@@ -24,8 +24,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   list. Its "Skip this set" button shows only while the set can be skipped.
 - Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
   menu.
-- Extensions can follow the AI DJ, what it plays and says and what happens while it plays, and add entries to the
-  menus of its sets.
+- Extensions can follow the AI DJ, what it plays and says and what happens while it plays, add entries to the
+  menus of its sets, and give it instructions, which the DJ page lists under yours.
 - Your DJ remembers, on this computer and for each Spotify account, what it played and what you skipped and liked
   while it played. With a model on your computer or your own server, it also greets you some other way than it did
   lately. Settings → AI DJ can forget it.
