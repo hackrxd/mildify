@@ -19,6 +19,7 @@ import {
   voiceGroups,
   voiceName,
   VOICE_SPEED,
+  extensionNotes,
 } from "./djView";
 import type { Candidate } from "./djPicks";
 import type { DjConfig, DjSongInfo, DjStatus } from "./ipc";
@@ -355,5 +356,21 @@ describe("songWhy", () => {
     expect(songWhy(song(), found({ languages: ["zxx"] }), NOW).found).toEqual(["Instrumental"]);
     expect(songWhy(song(), found({ languages: ["en", "ja", "xx"] }), NOW).found).toEqual(["Sung in Japanese"]);
     expect(songWhy(song(), found({ artist_bio: "   " }), NOW).bio).toBeNull();
+  });
+});
+
+describe("extensionNotes", () => {
+  it("says what each extension tells the DJ, and when it isn't passed on", () => {
+    const a = { owner: { name: "DJ log" }, text: "Keep it light." };
+    const b = { owner: { name: "Moods" }, text: "Play calm songs." };
+    expect(extensionNotes([a, b], [a], 600)).toEqual([
+      { name: "DJ log", what: "Tells it: “Keep it light.”", note: null },
+      {
+        name: "Moods",
+        what: "Tells it: “Play calm songs.”",
+        note: "Not passed on for now: extensions' instructions can add up to 600 characters in all.",
+      },
+    ]);
+    expect(extensionNotes([], [], 600)).toEqual([]);
   });
 });
