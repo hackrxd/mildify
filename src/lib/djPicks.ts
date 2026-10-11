@@ -93,7 +93,8 @@ function validDate(s: string | null | undefined): Date | null {
   return d && Number.isFinite(d.getTime()) ? d : null;
 }
 
-export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover" | "request";
+/** The DJ's own segments, and an extension's ("ext:<extension>/<its id>"). */
+export type SegmentId = "onRepeat" | "favorites" | "throwbacks" | "fresh" | "rediscover" | "request" | `ext:${string}`;
 
 export interface Segment {
   id: SegmentId;
@@ -104,6 +105,8 @@ export interface Segment {
   /** How the template talk introduces it ("Up next, …"). */
   phrase: string;
   fits(c: Candidate): boolean;
+  /** The extension it's from, by name; none for the DJ's own. */
+  from?: string;
 }
 
 export const SEGMENTS: Segment[] = [
@@ -542,14 +545,16 @@ export function requestChoices(
   return [...named, ...spread(rest, REQUEST_CHOICES - named.length)];
 }
 
-/** The next segment: one that has songs left, not one of the last two, the opener first when it can be. */
+/** The next segment: one that has songs left, not one of the last two, the opener first when it can be. Segments
+ * `extra` to the DJ's own (an extension's) take their turns with them, but open the show only when none of the DJ's
+ * own can. */
 export function nextSegment(
   history: SegmentId[],
   pool: Candidate[],
   avoid: Avoid,
-  random: () => number = Math.random,
+  { random = Math.random, extra = [] }: { random?: () => number; extra?: Segment[] } = {},
 ): Segment | null {
-  const usable = SEGMENTS.filter((s) => choicesFor(s, pool, avoid, () => 0).length >= MIN_CHOICES);
+  const usable = [...SEGMENTS, ...extra].filter((s) => choicesFor(s, pool, avoid, () => 0).length >= MIN_CHOICES);
   if (!usable.length) return null;
   if (!history.length) return usable[0];
   const fresh = usable.filter((s) => !history.slice(-2).includes(s.id));
