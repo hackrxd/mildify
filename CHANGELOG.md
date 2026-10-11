@@ -16,7 +16,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - With "Pick songs as it goes" on, going back a song from a set's last one no longer pauses the next set's first song
   for a moment as it comes in, and the DJ no longer starts talking over the singer at the end of the song it went
   back to.
-- Asking your DJ for something just after skipping into its next set no longer stops that set after its first song.
+- Asking your DJ for something just as its next set comes in no longer stops that set after its first song.
 
 ## 1.4.0 - 2026-10-11
 
