@@ -3,6 +3,7 @@ import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate } from "./djPicks";
 import type { DjSongView } from "./djExtensions.svelte";
 import type { AddedItem } from "./menu.svelte";
+import { SEGMENT_BRIEF_MAX } from "./djTalk";
 
 let m: typeof import("./djExtensions.svelte");
 
@@ -296,10 +297,13 @@ describe("instructions", () => {
     expect(given()).toEqual(["B: No explicit songs.", "A: Keep it short."]);
   });
 
-  it("are capped", async () => {
+  it("are capped, never in the middle of a character", async () => {
     const { EXTENSION_INSTRUCTIONS_MAX } = await import("./djTalk");
     m.djExtensions.setInstructions(a, "x".repeat(EXTENSION_INSTRUCTIONS_MAX + 50));
     expect(m.djExtensions.instructions[0].text).toHaveLength(EXTENSION_INSTRUCTIONS_MAX);
+    // Half an emoji isn't valid JSON for the backend, which would turn the whole request away.
+    m.djExtensions.setInstructions(a, "x".repeat(EXTENSION_INSTRUCTIONS_MAX - 1) + "😀");
+    expect(m.djExtensions.instructions[0].text).toBe("x".repeat(EXTENSION_INSTRUCTIONS_MAX - 1));
   });
 
   it("reach the model as far as they fit, the first given first", () => {
@@ -372,6 +376,13 @@ describe("segments", () => {
     expect(entry.segment.phrase).toBe("some short songs");
     expect(m.djExtensions.addSegment(a, { ...short, id: "y", phrase: "z".repeat(200) }).segment.phrase).toHaveLength(m.SEGMENT_PHRASE_MAX);
     expect(m.djExtensions.addSegment(a, { ...short, id: "z", label: " " }).segment.label).toBe("z");
+    // Never cut in the middle of a character.
+    const wide = "x".repeat(m.SEGMENT_LABEL_MAX - 1) + "𠀀";
+    const phrase = "x".repeat(m.SEGMENT_PHRASE_MAX - 1) + "𠀀";
+    const cut = m.djExtensions.addSegment(a, { ...short, id: "y", label: wide, phrase, brief: "y".repeat(SEGMENT_BRIEF_MAX - 1) + "😀" });
+    expect(cut.segment.label).toBe("x".repeat(m.SEGMENT_LABEL_MAX - 1));
+    expect(cut.segment.phrase).toBe("x".repeat(m.SEGMENT_PHRASE_MAX - 1));
+    expect(cut.segment.brief).toBe("y".repeat(SEGMENT_BRIEF_MAX - 1));
   });
 
   it("are up to three an extension, one with the same id replacing it", () => {

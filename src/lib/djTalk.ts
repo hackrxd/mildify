@@ -142,10 +142,16 @@ function isOpening(ask: SegmentAsk): boolean {
   return ask.opening ?? !ask.previous;
 }
 
+/** `text` cut to at most `max` UTF-16 units without leaving half a character: a lone surrogate isn't valid JSON for
+ * the backend, which would turn the whole request away. */
+export function cut(text: string, max: number): string {
+  return text.slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
+}
+
 /** Someone else's words, cut to `max` and set between triple quotes they can't close: any run of quote marks
  * in them becomes one. Nothing when there's nothing but space and quote marks. */
 export function fence(text: string, max: number): string[] {
-  const inside = text.trim().slice(0, max).replace(/"{2,}/g, '"').trim();
+  const inside = cut(text.trim(), max).replace(/"{2,}/g, '"').trim();
   return inside.replace(/"/g, "").trim() ? ['"""', inside, '"""'] : [];
 }
 

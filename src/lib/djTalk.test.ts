@@ -4,6 +4,7 @@ import {
   earlierLines,
   cleanName,
   cleanTalk,
+  cut,
   facts,
   fallbackPick,
   finishTalk,
@@ -195,6 +196,13 @@ describe("segmentMessages", () => {
     expect(fence('  ""  ', 10)).toEqual([]);
     expect(fence("calm", 10)).toEqual(['"""', "calm", '"""']);
     expect(fence('a""b', 10)).toEqual(['"""', 'a"b', '"""']);
+  });
+
+  it("cuts text without leaving half a character, which the backend would turn away", () => {
+    expect(cut("ab😀c", 3)).toBe("ab");
+    expect(cut("ab😀c", 4)).toBe("ab😀");
+    expect(cut("ab", 10)).toBe("ab");
+    expect(fence("x".repeat(9) + "😀", 10)).toEqual(['"""', "x".repeat(9), '"""']);
   });
 
   it("passes on the listener's instructions, fenced and capped", () => {

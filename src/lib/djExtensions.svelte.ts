@@ -7,7 +7,7 @@
 
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate, Reason, Segment, SegmentId } from "./djPicks";
-import { cleanTalk, EXTENSION_INSTRUCTIONS_MAX, SEGMENT_BRIEF_MAX } from "./djTalk";
+import { cleanTalk, cut, EXTENSION_INSTRUCTIONS_MAX, SEGMENT_BRIEF_MAX } from "./djTalk";
 import type { AddedItem } from "./menu.svelte";
 
 /** One of the DJ's songs. */
@@ -199,7 +199,7 @@ class DjExtensions {
 
   /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any. */
   setInstructions(owner: Owner, text: string): ExtensionInstructions | null {
-    const clean = text.trim().slice(0, EXTENSION_INSTRUCTIONS_MAX).trim();
+    const clean = cut(text.trim(), EXTENSION_INSTRUCTIONS_MAX).trim();
     const entry = clean ? { owner, text: clean } : null;
     const had = this.instructions.some((x) => x.owner.id === owner.id);
     if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
@@ -226,9 +226,9 @@ class DjExtensions {
     const id: SegmentId = `ext:${owner.id}/${own}`;
     const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
     if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
-    const label = cleanTalk(String(spec.label ?? "")).slice(0, SEGMENT_LABEL_MAX).trim() || own.slice(0, SEGMENT_LABEL_MAX);
-    const brief = String(spec.brief ?? "").trim().slice(0, SEGMENT_BRIEF_MAX).trim() || label;
-    const phrase = cleanTalk(String(spec.phrase ?? "")).slice(0, SEGMENT_PHRASE_MAX).trim() || label;
+    const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || cut(own, SEGMENT_LABEL_MAX);
+    const brief = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim() || label;
+    const phrase = cut(cleanTalk(String(spec.phrase ?? "")), SEGMENT_PHRASE_MAX).trim() || label;
     let failed = false;
     const segment: Segment = {
       id,
