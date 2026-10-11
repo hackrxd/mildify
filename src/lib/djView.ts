@@ -233,7 +233,7 @@ export function askBefore(change: DjChange, status: DjStatus, playing: boolean):
     const voice = status.voices.find((v) => v.id === change.choice);
     if (!voice || voice.installed || change.choice === status.settings.voice) return null;
     return {
-      text: `Switch the DJ's voice to ${voice.label}? ${voice.group ?? "Its"} voices download first, ${formatBytes(voice.bytes)}, and the DJ stops until they're in.`,
+      text: `Switch the DJ's voice to ${voice.label}? ${voice.group ?? "Its"} voices download first, ${formatBytes(voice.bytes)}, so the DJ stops. Start it again from the DJ page once they're in.`,
       confirm: "Switch and stop",
       cancel: "Keep playing",
     };

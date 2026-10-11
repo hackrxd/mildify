@@ -233,7 +233,7 @@ describe("askBefore", () => {
 
   it("asks before a voice that has to download, while the DJ plays, since it stops until it's in", () => {
     expect(askBefore({ kind: "voice", choice: "light-male" }, status(), true)).toEqual({
-      text: "Switch the DJ's voice to Light (male, faster)? Light voices download first, 27 MB, and the DJ stops until they're in.",
+      text: "Switch the DJ's voice to Light (male, faster)? Light voices download first, 27 MB, so the DJ stops. Start it again from the DJ page once they're in.",
       confirm: "Switch and stop",
       cancel: "Keep playing",
     });
