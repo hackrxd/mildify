@@ -3398,6 +3398,21 @@ describe("events", () => {
     const first = await started();
     expect(dj.current).toBe(first);
   });
+
+  it("reach extensions just after each step, with copies of what the DJ has", async () => {
+    const { djApi, setView } = await import("./djExtensions.svelte");
+    const undo: (() => void)[] = [];
+    const tracker = { track: (fn: () => void) => (undo.push(fn), fn), live: () => true };
+    const ns = djApi(dj, { id: "log.js", name: "DJ log" }, tracker, () => () => {});
+    const heard: string[] = [];
+    ns.on((e) => void heard.push("set" in e && e.set ? `${e.type} ${e.set.name}` : e.type));
+    const first = await started();
+    expect(heard).toEqual(["set-picked Set 1", "line-spoken", "set-started Set 1", "song-started Set 1", "set-picked Set 2"]);
+    expect(ns.current).toBe(setView(first));
+    expect(ns.upNext?.name).toBe("Set 2");
+    expect(ns.said.map((l) => l.talk)).toEqual([first.talk]);
+    for (const fn of undo) fn();
+  });
 });
 
 describe("hearing a voice before picking it", () => {

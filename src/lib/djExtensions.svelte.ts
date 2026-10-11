@@ -1,0 +1,267 @@
+// What extensions see of the AI DJ (`ns.dj`, docs/mods.md "The DJ"). They get copies of its sets, songs and lines:
+// frozen, so nothing an extension does changes what the DJ goes by, and the same copy for as long as the DJ keeps the
+// same thing, so a watcher can tell what changed. Its events reach them just after the DJ's own step, each listener
+// on its own: one that calls back into the DJ, or throws, can't upset that step or another listener. Never the DJ's
+// settings, keys, or what went wrong with its model, whose errors may quote a provider's.
+
+import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
+import type { Candidate, Reason } from "./djPicks";
+import type { AddedItem } from "./menu.svelte";
+
+/** One of the DJ's songs. */
+export interface DjSongView {
+  uri: string;
+  name: string;
+  artists: readonly string[];
+  album: string;
+  /** The year its album came out. */
+  year: string | null;
+  durationMs: number;
+  explicit: boolean;
+  /** How it's in the listener's listening: on repeat lately, a favorite, played lately, liked lately or long ago. */
+  reasons: readonly Reason[];
+  /** When the listener liked it, as an ISO date, if they did. */
+  likedAt: string | null;
+  /** When they last played it, as an ISO date, if lately. */
+  playedAt: string | null;
+}
+
+/** One of the DJ's sets. A set picked as it goes is a new copy each time it grows, with the same `id`. */
+export interface DjSetView {
+  id: number;
+  name: string;
+  /** The segment it's from: "onRepeat", "favorites", "throwbacks", "fresh", "rediscover", or "request". */
+  segment: string;
+  /** Its songs: for a set picked as it goes, those played, playing, and lined up next. */
+  songs: readonly DjSongView[];
+  /** What the DJ says to bring it in. */
+  talk: string;
+  /** Written by the model, or from a template. */
+  byModel: boolean;
+  /** Picked song by song as it plays (Settings → AI DJ, "Pick songs as it goes"). */
+  live: boolean;
+  /** What the listener asked for, when the set is their request. */
+  request: string | null;
+}
+
+/** A line the DJ said. */
+export interface DjLineView {
+  /** The set it brought in, and that set's name. */
+  setId: number;
+  name: string;
+  talk: string;
+  byModel: boolean;
+  /** Read aloud; false when it was only shown. */
+  spoken: boolean;
+}
+
+/** The DJ's talk, as an item of its own in the player. */
+export interface DjOnAirView {
+  /** The set it brings in. */
+  setId: number;
+  name: string;
+  durationMs: number;
+  /** The song it leads into. */
+  next: DjSongView;
+}
+
+/** What happens in a session, as extensions hear of it. */
+export type DjExtensionEvent =
+  | { type: "set-picked" | "set-started" | "set-skipped"; set: DjSetView }
+  | { type: "song-started"; song: DjSongView; set: DjSetView | null }
+  | { type: "song-skipped" | "song-unskipped" | "song-liked"; song: DjSongView }
+  | { type: "line-spoken" | "line-withdrawn"; line: DjLineView }
+  | { type: "stopped" };
+
+const songs = new WeakMap<Candidate, DjSongView>();
+const sets = new WeakMap<DjSet, DjSetView>();
+const lines = new WeakMap<SaidLine, DjLineView>();
+const lineLists = new WeakMap<readonly SaidLine[], readonly DjLineView[]>();
+const onAirs = new WeakMap<OnAir, DjOnAirView>();
+
+/** `key`'s copy, frozen, made once: the DJ replaces what it changes, so a copy is good for as long as what it's of. */
+function copy<K extends object, V>(cache: WeakMap<K, V>, key: K, make: (key: K) => V): V {
+  let v = cache.get(key);
+  if (!v) {
+    v = Object.freeze(make(key));
+    cache.set(key, v);
+  }
+  return v;
+}
+
+export function songView(c: Candidate): DjSongView {
+  return copy(songs, c, (c) => ({
+    uri: c.uri,
+    name: c.name,
+    artists: Object.freeze([...c.artists]),
+    album: c.album,
+    year: c.year,
+    durationMs: c.durationMs,
+    explicit: c.explicit,
+    reasons: Object.freeze([...c.reasons]),
+    likedAt: c.likedAt?.toISOString() ?? null,
+    playedAt: c.playedAt?.toISOString() ?? null,
+  }));
+}
+
+export function setView(s: DjSet): DjSetView {
+  return copy(sets, s, (s) => ({
+    id: s.id,
+    name: s.name,
+    segment: s.segment,
+    songs: Object.freeze(s.songs.map(songView)),
+    talk: s.talk,
+    byModel: s.byModel,
+    live: s.live,
+    request: s.request,
+  }));
+}
+
+export function lineView(l: SaidLine): DjLineView {
+  return copy(lines, l, (l) => ({ setId: l.setId, name: l.name, talk: l.talk, byModel: l.byModel, spoken: l.spoken }));
+}
+
+function onAirView(o: OnAir): DjOnAirView {
+  return copy(onAirs, o, (o) => ({ setId: o.set.id, name: o.name, durationMs: o.durationMs, next: songView(o.next) }));
+}
+
+export function eventView(e: DjEvent): DjExtensionEvent {
+  switch (e.type) {
+    case "set-picked":
+    case "set-started":
+    case "set-skipped":
+      return Object.freeze({ type: e.type, set: setView(e.set) });
+    case "song-started":
+      return Object.freeze({ type: e.type, song: songView(e.song), set: e.set && setView(e.set) });
+    case "song-skipped":
+    case "song-unskipped":
+    case "song-liked":
+      return Object.freeze({ type: e.type, song: songView(e.song) });
+    case "line-spoken":
+    case "line-withdrawn":
+      return Object.freeze({ type: e.type, line: lineView(e.line) });
+    case "stopped":
+      return Object.freeze({ type: e.type });
+  }
+}
+
+/** The DJ, as far as extensions see it. */
+export interface DjSource {
+  readonly phase: "off" | "starting" | "on";
+  readonly ready: boolean;
+  readonly current: DjSet | null;
+  readonly upNext: DjSet | null;
+  readonly onAir: OnAir | null;
+  readonly said: SaidLine[];
+  readonly speaking: boolean;
+  readonly showing: boolean;
+  readonly requested: string | null;
+  on(fn: (event: DjEvent) => void): () => void;
+}
+
+/** `ns.dj`. Its state is reactive, as `ns.player`'s is: read it in `ns.watch`. */
+export interface DjExtensionApi {
+  /** "off", "starting" (getting its first set ready) or "on". */
+  readonly phase: "off" | "starting" | "on";
+  /** Turned on, with everything it needs downloaded and set up. */
+  readonly ready: boolean;
+  /** The set playing now, and the one after it once it's picked. */
+  readonly current: DjSetView | null;
+  readonly upNext: DjSetView | null;
+  /** The DJ's talk while it's on. */
+  readonly onAir: DjOnAirView | null;
+  /** What it said this session, oldest first. */
+  readonly said: readonly DjLineView[];
+  /** Its voice is reading a line out; or a line shows without it (Just play, or the voice failed). */
+  readonly speaking: boolean;
+  readonly showing: boolean;
+  /** What the listener asked the next set to be, until a set for it comes on. */
+  readonly requested: string | null;
+  /** Calls `fn` with each thing that happens in a session, just after it happens. Returns a function that stops it. */
+  on(fn: (event: DjExtensionEvent) => void): () => void;
+  /** Adds an entry to every set's menu on the DJ page. Returns a remove function. */
+  addSetAction(item: AddedItem<DjSetView>): () => void;
+}
+
+/** The extension asking, by its id and its name. */
+export interface Owner {
+  id: string;
+  name: string;
+}
+
+/** How the API an extension is handed keeps track of what it adds: `track` takes how to undo something, to run when
+ * the extension is turned off, and returns its remover; `live` is false once it's turned off, when nothing more is
+ * added. */
+export interface Tracker {
+  track: (undo: () => void) => () => void;
+  live: () => boolean;
+}
+
+/** `ns.dj` for the extension `owner`. `addSetAction` adds to the DJ page's set menus (djMenu.ts). */
+export function djApi(
+  dj: DjSource,
+  owner: Owner,
+  { track, live }: Tracker,
+  addSetAction: (item: AddedItem<DjSet>) => () => void,
+): DjExtensionApi {
+  const none = () => {};
+  return Object.freeze({
+    get phase() {
+      return dj.phase;
+    },
+    get ready() {
+      return dj.ready;
+    },
+    get current() {
+      return dj.current && setView(dj.current);
+    },
+    get upNext() {
+      return dj.upNext && setView(dj.upNext);
+    },
+    get onAir() {
+      return dj.onAir && onAirView(dj.onAir);
+    },
+    get said() {
+      return copy(lineLists, dj.said, (said) => said.map(lineView));
+    },
+    get speaking() {
+      return dj.speaking;
+    },
+    get showing() {
+      return dj.showing;
+    },
+    get requested() {
+      return dj.requested;
+    },
+    on(fn: (event: DjExtensionEvent) => void) {
+      if (!live()) return none;
+      let listening = true;
+      const off = dj.on((e) => {
+        const event = eventView(e);
+        queueMicrotask(() => {
+          if (!listening) return;
+          try {
+            fn(event);
+          } catch (err) {
+            console.error(`[${owner.name}] a DJ event listener failed`, err);
+          }
+        });
+      });
+      return track(() => {
+        listening = false;
+        off();
+      });
+    },
+    addSetAction(item: AddedItem<DjSetView>) {
+      if (!live()) return none;
+      const { label, when, action } = item;
+      return track(
+        addSetAction({
+          label: typeof label === "function" ? (set) => label(setView(set)) : label,
+          when: when && ((set) => when(setView(set))),
+          action: (set) => action(setView(set)),
+        }),
+      );
+    },
+  });
+}
