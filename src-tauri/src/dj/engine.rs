@@ -455,6 +455,7 @@ fn spawn(server: &Path, model: &Path, port: u16, key: &str, log: &Path, device: 
 pub const NO_WINDOW: u32 = 0x0800_0000;
 
 /// What `llama-server` lists of the devices it can run a model on, without loading one; none when it can't be asked.
+/// It lists them on its standard output.
 async fn list_devices(server: &Path) -> Option<String> {
     let mut cmd = tokio::process::Command::new(server);
     cmd.arg("--list-devices")
@@ -464,7 +465,7 @@ async fn list_devices(server: &Path) -> Option<String> {
     #[cfg(windows)]
     cmd.creation_flags(NO_WINDOW);
     let out = tokio::time::timeout(LIST_TIMEOUT, cmd.output()).await.ok()?.ok()?;
-    Some(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The first graphics card in `--list-devices`' answer, by its description: "  Vulkan0: NVIDIA GeForce RTX 3060
