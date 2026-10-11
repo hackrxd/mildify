@@ -6,8 +6,8 @@
 // provider's. What they add (`djExtensions`) the DJ reads as it picks each set, and the DJ page lists.
 
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
-import type { Candidate, Reason } from "./djPicks";
-import { EXTENSION_INSTRUCTIONS_MAX } from "./djTalk";
+import type { Candidate, Reason, Segment, SegmentId } from "./djPicks";
+import { cleanTalk, EXTENSION_INSTRUCTIONS_MAX, SEGMENT_BRIEF_MAX } from "./djTalk";
 import type { AddedItem } from "./menu.svelte";
 
 /** One of the DJ's songs. */
@@ -32,8 +32,11 @@ export interface DjSongView {
 export interface DjSetView {
   id: number;
   name: string;
-  /** The segment it's from: "onRepeat", "favorites", "throwbacks", "fresh", "rediscover", or "request". */
+  /** The segment it's from: "onRepeat", "favorites", "throwbacks", "fresh", "rediscover", "request", or an
+   * extension's ("ext:<extension id>/<its id>"). */
   segment: string;
+  /** The extension whose segment it is, by name; null for the DJ's own. */
+  from: string | null;
   /** Its songs: for a set picked as it goes, those played, playing, and lined up next. */
   songs: readonly DjSongView[];
   /** What the DJ says to bring it in. */
@@ -111,6 +114,7 @@ export function setView(s: DjSet): DjSetView {
     id: s.id,
     name: s.name,
     segment: s.segment,
+    from: s.from,
     songs: Object.freeze(s.songs.map(songView)),
     talk: s.talk,
     byModel: s.byModel,
@@ -162,6 +166,32 @@ export interface ExtensionInstructions {
   text: string;
 }
 
+/** A segment an extension adds: a kind of set the DJ plays from the listener's own songs. */
+export interface DjSegmentSpec {
+  /** Unique within the extension: adding one with the same id replaces it. */
+  id: string;
+  /** Its name, when the model doesn't give one. */
+  label: string;
+  /** What it is, for the model ("songs under three minutes"). */
+  brief: string;
+  /** How a template line brings it in ("some short songs"); the label by default. */
+  phrase?: string;
+  /** Whether one of the listener's songs belongs in it. */
+  fits: (song: DjSongView) => boolean;
+}
+
+/** How long an extension's segment's name and phrase can be. */
+export const SEGMENT_LABEL_MAX = 40;
+export const SEGMENT_PHRASE_MAX = 80;
+/** How many segments one extension can add. */
+export const EXTENSION_SEGMENTS_MAX = 3;
+
+/** A segment an extension added, as the DJ plays it. */
+export interface ExtensionSegment {
+  owner: Owner;
+  segment: Segment;
+}
+
 /** What extensions add to the DJ. */
 class DjExtensions {
   /** Each extension's instructions, in the order they were first given. */
@@ -180,6 +210,56 @@ class DjExtensions {
   /** Takes `entry` away, if it's still its extension's. */
   removeInstructions(entry: ExtensionInstructions) {
     this.instructions = this.instructions.filter((x) => x !== entry);
+  }
+
+  /** The segments extensions added, in the order they were first added. */
+  segments = $state.raw<ExtensionSegment[]>([]);
+
+  /** Adds `owner`'s segment `spec`, in place of the one with the same id. Throws for one with no id or `fits`, or one
+   * past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say; a `fits` that throws doesn't fit,
+   * and is reported once. */
+  addSegment(owner: Owner, spec: DjSegmentSpec): ExtensionSegment {
+    const own = String(spec?.id ?? "").trim();
+    if (!own) throw new Error("A DJ segment needs an id");
+    const fits = spec.fits;
+    if (typeof fits !== "function") throw new Error("A DJ segment needs a fits(song) function");
+    const id: SegmentId = `ext:${owner.id}/${own}`;
+    const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
+    if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
+    const label = cleanTalk(String(spec.label ?? "")).slice(0, SEGMENT_LABEL_MAX).trim() || own.slice(0, SEGMENT_LABEL_MAX);
+    const brief = String(spec.brief ?? "").trim().slice(0, SEGMENT_BRIEF_MAX).trim() || label;
+    const phrase = cleanTalk(String(spec.phrase ?? "")).slice(0, SEGMENT_PHRASE_MAX).trim() || label;
+    let failed = false;
+    const segment: Segment = {
+      id,
+      label,
+      brief,
+      phrase,
+      from: owner.name,
+      fits: (c) => {
+        try {
+          return !!fits(songView(c));
+        } catch (e) {
+          if (!failed) console.error(`[${owner.name}] the DJ segment "${label}" couldn't tell whether a song fits`, e);
+          failed = true;
+          return false;
+        }
+      },
+    };
+    const entry = { owner, segment };
+    const had = this.segments.some((x) => x.segment.id === id);
+    this.segments = had ? this.segments.map((x) => (x.segment.id === id ? entry : x)) : [...this.segments, entry];
+    return entry;
+  }
+
+  /** Takes `entry` away, if it's still there. */
+  removeSegment(entry: ExtensionSegment) {
+    this.segments = this.segments.filter((x) => x !== entry);
+  }
+
+  /** The segments extensions added, for the DJ to take turns with its own. */
+  promptSegments(): Segment[] {
+    return this.segments.map((x) => x.segment);
   }
 
   /** The instructions the model is told: in order, as many as fit in `EXTENSION_INSTRUCTIONS_BUDGET`. One that
@@ -236,6 +316,9 @@ export interface DjExtensionApi {
    * instructions per extension, in place of any it gave before, up to `EXTENSION_INSTRUCTIONS_MAX` characters. An
    * empty string takes them back. Returns a remove function. */
   setInstructions(text: string): () => void;
+  /** Adds a kind of set the DJ plays from the listener's own songs, taking turns with its own; up to
+   * `EXTENSION_SEGMENTS_MAX`, and one with the same id replaces it. Returns a remove function. */
+  addSegment(spec: DjSegmentSpec): () => void;
 }
 
 /** How the API an extension is handed keeps track of what it adds: `track` takes how to undo something, to run when
@@ -256,6 +339,8 @@ export function djApi(
   const none = () => {};
   /** Takes back the extension's instructions before these: they're replaced, and that remover has nothing to do. */
   let untrackInstructions = none;
+  /** The same for each of its segments, by id. */
+  const untrackSegment = new Map<string, () => void>();
   return Object.freeze({
     get phase() {
       return dj.phase;
@@ -321,6 +406,15 @@ export function djApi(
       untrackInstructions = entry ? track(() => djExtensions.removeInstructions(entry)) : none;
       before();
       return untrackInstructions;
+    },
+    addSegment(spec: DjSegmentSpec) {
+      if (!live()) return none;
+      const entry = djExtensions.addSegment(owner, spec);
+      const before = untrackSegment.get(entry.segment.id);
+      const remove = track(() => djExtensions.removeSegment(entry));
+      untrackSegment.set(entry.segment.id, remove);
+      before?.();
+      return remove;
     },
   });
 }

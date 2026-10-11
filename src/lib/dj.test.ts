@@ -3425,6 +3425,35 @@ describe("events", () => {
   });
 });
 
+describe("an extension's segments", () => {
+  const lastPrompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0];
+  const owner = { id: "x.js", name: "X" };
+
+  it("take turns with the DJ's own after the opening, and the model hears them in the extension's words", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, { id: "all", label: "Everything", brief: "anything at all", fits: () => true });
+    const first = await started();
+    expect(first).toMatchObject({ segment: "onRepeat", from: null });
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/all", from: "X" });
+    expect(lastPrompt()[1].content).toContain('This segment comes from an extension the listener turned on, in its words:\n"""\nanything at all\n"""');
+  });
+
+  it("are left out when the extension can't tell which songs fit, and the show goes on", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, {
+      id: "broken",
+      label: "Broken",
+      brief: "broken",
+      fits: () => {
+        throw new Error("oops");
+      },
+    });
+    await started();
+    expect(dj.upNext?.segment).toBe("onRepeat");
+    expect(dj.phase).toBe("on");
+  });
+});
+
 describe("hearing a voice before picking it", () => {
   const lewis = { id: "lewis", label: "Lewis (British)", detail: null, bytes: 1, installed: true, group: "Kokoro" };
   let preview: FakeVoice;

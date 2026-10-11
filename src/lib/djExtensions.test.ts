@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate } from "./djPicks";
+import type { DjSongView } from "./djExtensions.svelte";
 import type { AddedItem } from "./menu.svelte";
 
 let m: typeof import("./djExtensions.svelte");
@@ -34,6 +35,7 @@ function set(id: number, songs = [song(1), song(2)]): DjSet {
   return {
     id,
     segment: "onRepeat",
+    from: null,
     name: `Set ${id}`,
     songs,
     live: false,
@@ -114,7 +116,7 @@ describe("copies", () => {
   it("are frozen, and leave out what the DJ keeps to itself", () => {
     const s = set(1);
     const view = m.setView(s);
-    expect(Object.keys(view).sort()).toEqual(["byModel", "id", "live", "name", "request", "segment", "songs", "talk"]);
+    expect(Object.keys(view).sort()).toEqual(["byModel", "from", "id", "live", "name", "request", "segment", "songs", "talk"]);
     expect(view).toMatchObject({ id: 1, name: "Set 1", segment: "onRepeat", talk: "Here's one you've had on repeat." });
     expect(Object.isFrozen(view)).toBe(true);
     expect(Object.isFrozen(view.songs)).toBe(true);
@@ -327,12 +329,95 @@ describe("instructions", () => {
     const first = ns.setInstructions("One.");
     for (const text of ["Two.", "Three.", "Four."]) ns.setInstructions(text);
     expect(given()).toEqual(["DJ log: Four."]);
+    expect(t.held()).toBe(1);
     first();
     expect(given()).toEqual(["DJ log: Four."]);
-    expect(t.held()).toBe(1);
     ns.setInstructions("");
     expect(given()).toEqual([]);
     expect(t.held()).toBe(0);
+  });
+});
+
+describe("segments", () => {
+  const a = { id: "a.js", name: "A" };
+  const short = { id: "short", label: "Short songs", brief: "songs under three minutes", fits: (s: DjSongView) => s.durationMs < 180_000 };
+  const ids = () => m.djExtensions.segments.map((x) => x.segment.id);
+
+  it("are named for their extension, and tell which of the listener's songs fit from copies of them", () => {
+    const seen: DjSongView[] = [];
+    const entry = m.djExtensions.addSegment(a, { ...short, fits: (s) => (seen.push(s), short.fits(s)) });
+    expect(entry.segment).toMatchObject({ id: "ext:a.js/short", label: "Short songs", brief: "songs under three minutes", phrase: "Short songs", from: "A" });
+    const long = song(1);
+    expect(entry.segment.fits(long)).toBe(false);
+    expect(entry.segment.fits({ ...long, durationMs: 120_000 })).toBe(true);
+    expect(seen[0]).toBe(m.songView(long));
+    expect(Object.isFrozen(seen[0])).toBe(true);
+    // Whatever it answers that's true-ish fits.
+    expect(m.djExtensions.addSegment(a, { ...short, fits: () => 1 as unknown as boolean }).segment.fits(long)).toBe(true);
+    // An id can't pass for one of the DJ's own.
+    expect(m.djExtensions.addSegment(a, { ...short, id: "request" }).segment.id).toBe("ext:a.js/request");
+  });
+
+  it("have their names and phrases cleaned for the DJ to say, and capped", () => {
+    const entry = m.djExtensions.addSegment(a, {
+      id: "x",
+      label: "  **Short** songs 🎵 " + "x".repeat(60),
+      brief: "  ",
+      phrase: "some *short* songs",
+      fits: () => true,
+    });
+    expect(entry.segment.label).toBe(("Short songs " + "x".repeat(60)).slice(0, m.SEGMENT_LABEL_MAX));
+    // Without a brief, it's what its name says.
+    expect(entry.segment.brief).toBe(entry.segment.label);
+    expect(entry.segment.phrase).toBe("some short songs");
+    expect(m.djExtensions.addSegment(a, { ...short, id: "y", phrase: "z".repeat(200) }).segment.phrase).toHaveLength(m.SEGMENT_PHRASE_MAX);
+    expect(m.djExtensions.addSegment(a, { ...short, id: "z", label: " " }).segment.label).toBe("z");
+  });
+
+  it("are up to three an extension, one with the same id replacing it", () => {
+    for (const id of ["one", "two", "three"]) m.djExtensions.addSegment(a, { ...short, id });
+    expect(() => m.djExtensions.addSegment(a, { ...short, id: "four" })).toThrow("up to 3 DJ segments");
+    m.djExtensions.addSegment(a, { ...short, id: "two", label: "Shorter" });
+    expect(m.djExtensions.segments.map((x) => x.segment.label)).toEqual(["Short songs", "Shorter", "Short songs"]);
+    // Another extension has three of its own.
+    m.djExtensions.addSegment({ id: "b.js", name: "B" }, short);
+    expect(m.djExtensions.promptSegments().map((s) => s.id)).toEqual(["ext:a.js/one", "ext:a.js/two", "ext:a.js/three", "ext:b.js/short"]);
+  });
+
+  it("need an id and a fits function", () => {
+    expect(() => m.djExtensions.addSegment(a, { ...short, id: " " })).toThrow("needs an id");
+    expect(() => m.djExtensions.addSegment(a, { ...short, fits: undefined as never })).toThrow("fits(song)");
+    expect(ids()).toEqual([]);
+  });
+
+  it("don't fit a song when they can't tell, and say so once", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const entry = m.djExtensions.addSegment(a, {
+      ...short,
+      fits: () => {
+        throw new Error("oops");
+      },
+    });
+    expect(entry.segment.fits(song(1))).toBe(false);
+    expect(entry.segment.fits(song(2))).toBe(false);
+    expect(error).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith('[A] the DJ segment "Short songs" couldn\'t tell whether a song fits', expect.any(Error));
+  });
+
+  it("are added through ns.dj, and taken away by its remover or by turning the extension off", () => {
+    const { ns, t } = api();
+    const remove = ns.addSegment(short);
+    expect(ids()).toEqual(["ext:log.js/short"]);
+    remove();
+    expect(ids()).toEqual([]);
+    const first = ns.addSegment(short);
+    ns.addSegment({ ...short, label: "Shorter" });
+    // The one replaced doesn't pile up, and has nothing left to take away.
+    expect(t.held()).toBe(1);
+    first();
+    expect(m.djExtensions.segments.map((x) => x.segment.label)).toEqual(["Shorter"]);
+    t.turnOff();
+    expect(ids()).toEqual([]);
   });
 });
 
@@ -340,9 +425,15 @@ it("adds nothing once the extension is turned off", async () => {
   const { ns, dj, t, add } = api();
   t.turnOff();
   const fn = vi.fn();
-  const removers = [ns.on(fn), ns.addSetAction({ label: "Late", action: () => {} }), ns.setInstructions("Late.")];
+  const removers = [
+    ns.on(fn),
+    ns.addSetAction({ label: "Late", action: () => {} }),
+    ns.setInstructions("Late."),
+    ns.addSegment({ id: "late", label: "Late", brief: "late", fits: () => true }),
+  ];
   expect(dj.listeners.size).toBe(0);
   expect(m.djExtensions.instructions).toEqual([]);
+  expect(m.djExtensions.segments).toEqual([]);
   expect(add).not.toHaveBeenCalled();
   expect(t.track).not.toHaveBeenCalled();
   dj.emit({ type: "stopped" });

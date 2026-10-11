@@ -133,6 +133,8 @@ export interface DjSet {
   /** The same while a set picked as it goes grows song by song (each step is a new object). */
   id: number;
   segment: SegmentId;
+  /** The extension whose segment it's from, by name; null for the DJ's own. */
+  from: string | null;
   name: string;
   /** The songs to play. A set picked as it goes has the ones played and playing, and the one lined up next. */
   songs: Candidate[];
@@ -1173,6 +1175,7 @@ class Dj {
     return {
       id: ++this.#setIds,
       segment: segment.id,
+      from: segment.from ?? null,
       name: pick.name,
       songs,
       live,
@@ -1222,16 +1225,17 @@ class Dj {
     return this.#ordinarySegment();
   }
 
-  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. When
-   * everything's been played, it starts over, leaving out only what's playing now and what's skipped; when that
-   * leaves too little, only what's playing now. */
+  /** The next of the usual segments, extensions' among them, and its choices; none when the listening has nothing
+   * left for one. When everything's been played, it starts over, leaving out only what's playing now and what's
+   * skipped; when that leaves too little, only what's playing now. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
     const playing = new Set(this.current?.songs.map((s) => s.uri) ?? []);
     // Starting over leaves out the song in the player too: an opening set starting with it couldn't tell it began.
     if (player.track) playing.add(player.track.uri);
     const ways = [this.#avoid(), this.#avoid(null, playing), { played: playing, skippedArtists: new Set<string>() }];
+    const extra = djExtensions.promptSegments();
     for (const avoid of ways) {
-      const segment = nextSegment(this.#segments, this.#pool, avoid);
+      const segment = nextSegment(this.#segments, this.#pool, avoid, { extra });
       if (!segment) continue;
       if (avoid !== ways[0]) this.#played = new Set(playing);
       return { segment, choices: choicesFor(segment, this.#pool, avoid, Math.random, this.#memory) };

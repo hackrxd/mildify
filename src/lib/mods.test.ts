@@ -340,6 +340,7 @@ describe("extensions", () => {
       ns!.dj.on(effect),
       ns!.dj.addSetAction({ label: "Late", action: () => {} }),
       ns!.dj.setInstructions("Late."),
+      ns!.dj.addSegment({ id: "late", label: "Late", brief: "late", fits: () => true }),
     ];
     ns!.toasts.show("still here");
     ns!.onUnload(unloaded);
@@ -354,13 +355,14 @@ describe("extensions", () => {
     expect(setMenu({ id: 1, name: "Set", songs: [] } as unknown as DjSet).map((i) => i.label)).not.toContain("Late");
     const { djExtensions } = await import("./djExtensions.svelte");
     expect(djExtensions.instructions).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
     expect(show).not.toHaveBeenCalledWith("still here", "info");
     // Its own clean-up still runs, at once.
     expect(unloaded).toHaveBeenCalledOnce();
     for (const remove of removers) remove();
   });
 
-  it("see the DJ, hear what happens in its sessions, add to its sets' menus and tell it things, until turned off", async () => {
+  it("see the DJ, hear what happens in its sessions, add to its sets' menus, tell it things and add segments, until turned off", async () => {
     list.extensions = [mod("log.js")];
     localStorage.setItem("nativify:extensions", '["log.js"]');
     const heard: string[] = [];
@@ -371,6 +373,7 @@ describe("extensions", () => {
         api.dj.on((e) => void heard.push(e.type));
         api.dj.addSetAction({ label: "Log this set", action: () => {} });
         api.dj.setInstructions("Keep it light.");
+        api.dj.addSegment({ id: "short", label: "Short songs", brief: "songs under three minutes", fits: (s) => s.durationMs < 180_000 });
       },
     };
     await boot();
@@ -380,6 +383,7 @@ describe("extensions", () => {
     const set = { id: 1, name: "Set 1", songs: [] } as unknown as DjSet;
     expect(ns!.dj.phase).toBe("on");
     expect(djExtensions.instructions.map((x) => [x.owner, x.text])).toEqual([[{ id: "log.js", name: "log" }, "Keep it light."]]);
+    expect(djExtensions.segments.map((x) => x.segment.id)).toEqual(["ext:log.js/short"]);
     expect(setMenu(set).map((i) => i.label)).toContain("Log this set");
     for (const fn of djListeners) fn({ type: "stopped" });
     await Promise.resolve();
@@ -388,6 +392,7 @@ describe("extensions", () => {
     await mods.setEnabled("log.js", false);
     expect(djListeners.size).toBe(0);
     expect(djExtensions.instructions).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
     expect(setMenu(set).map((i) => i.label)).not.toContain("Log this set");
   });
 
