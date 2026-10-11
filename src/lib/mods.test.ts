@@ -1,4 +1,6 @@
+import { flushSync } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DjSet } from "./dj.svelte";
 import type { ModInfo, ModList } from "./ipc";
 import type { ExtensionApi } from "./mods.svelte";
 
@@ -15,6 +17,25 @@ vi.mock("./player.svelte", () => ({ player: { name: "player" } }));
 vi.mock("./router.svelte", () => ({ router: { name: "router" } }));
 vi.mock("./session.svelte", () => ({ session: { name: "session" } }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "9.9.9" }));
+/** The DJ's listeners, which a test can tell what happens. */
+const djListeners = vi.hoisted(() => new Set<(e: unknown) => void>());
+vi.mock("./dj.svelte", () => ({
+  dj: {
+    phase: "on",
+    ready: true,
+    current: null,
+    upNext: null,
+    onAir: null,
+    said: [],
+    speaking: false,
+    showing: false,
+    requested: null,
+    on: (fn: (e: unknown) => void) => {
+      djListeners.add(fn);
+      return () => void djListeners.delete(fn);
+    },
+  },
+}));
 
 let mods: typeof import("./mods.svelte").mods;
 let modUrl: typeof import("./mods.svelte").modUrl;
@@ -74,6 +95,7 @@ beforeEach(() => {
   show.mockReset();
   modules = {};
   imported = [];
+  djListeners.clear();
 });
 
 afterEach(() => {
@@ -291,6 +313,172 @@ describe("extensions", () => {
     expect(mods.trackMenuItems).toEqual([]);
     expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
     expect(localStorage.getItem("nativify:extensions")).toBe("[]");
+  });
+
+  it("can't add anything once turned off, from a timer or callback left behind", async () => {
+    list.extensions = [mod("a.js")];
+    localStorage.setItem("nativify:extensions", '["a.js"]');
+    let ns: ExtensionApi | undefined;
+    modules["a.js"] = { default: (api: ExtensionApi) => void (ns = api) };
+    await boot();
+    await mods.startExtensions();
+    const ipc = await import("./ipc");
+    void ns!.api("GET", "/me");
+    expect(ipc.api).toHaveBeenCalledWith("GET", "/me", undefined);
+    vi.mocked(ipc.api).mockClear();
+    await mods.setEnabled("a.js", false);
+    // Nothing more goes to Spotify for it.
+    await expect(ns!.api("GET", "/me/player/queue")).rejects.toMatchObject({ kind: "cancelled" });
+    expect(ipc.api).not.toHaveBeenCalled();
+    const effect = vi.fn();
+    const unloaded = vi.fn();
+    const removers = [
+      ns!.addStyle(".late { color: red }"),
+      ns!.addPage({ id: "late", label: "Late", render: () => {} }),
+      ns!.addTrackMenuItem({ label: "Late", action: () => {} }),
+      ns!.watch(effect),
+      ns!.dj.on(effect),
+      ns!.dj.addSetAction({ label: "Late", action: () => {} }),
+      ns!.dj.setInstructions("Late."),
+      ns!.dj.addSegment({ id: "late", label: "Late", brief: "late", fits: () => true }),
+    ];
+    ns!.toasts.show("still here");
+    ns!.onUnload(unloaded);
+    flushSync();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.querySelector("style[data-nativify-extension]")).toBeNull();
+    expect(mods.pages).toEqual([]);
+    expect(mods.trackMenuItems).toEqual([]);
+    expect(effect).not.toHaveBeenCalled();
+    expect(djListeners.size).toBe(0);
+    const { setMenu } = await import("./djMenu");
+    expect(setMenu({ id: 1, name: "Set", songs: [] } as unknown as DjSet).map((i) => i.label)).not.toContain("Late");
+    const { djExtensions } = await import("./djExtensions.svelte");
+    expect(djExtensions.instructions).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
+    expect(show).not.toHaveBeenCalledWith("still here", "info");
+    // Its own clean-up still runs, at once.
+    expect(unloaded).toHaveBeenCalledOnce();
+    for (const remove of removers) remove();
+  });
+
+  it("see the DJ, hear what happens in its sessions, add to its sets' menus, tell it things and add segments, until turned off", async () => {
+    list.extensions = [mod("log.js")];
+    localStorage.setItem("nativify:extensions", '["log.js"]');
+    const heard: string[] = [];
+    let ns: ExtensionApi | undefined;
+    modules["log.js"] = {
+      default: (api: ExtensionApi) => {
+        ns = api;
+        api.dj.on((e) => void heard.push(e.type));
+        api.dj.addSetAction({ label: "Log this set", action: () => {} });
+        api.dj.setInstructions("Keep it light.");
+        api.dj.addSegment({ id: "short", label: "Short songs", brief: "songs under three minutes", fits: (s) => s.durationMs < 180_000 });
+      },
+    };
+    await boot();
+    await mods.startExtensions();
+    const { setMenu } = await import("./djMenu");
+    const { djExtensions } = await import("./djExtensions.svelte");
+    const set = { id: 1, name: "Set 1", songs: [] } as unknown as DjSet;
+    expect(ns!.dj.phase).toBe("on");
+    expect(djExtensions.instructions.map((x) => [x.owner, x.text])).toEqual([[{ id: "log.js", name: "log" }, "Keep it light."]]);
+    expect(djExtensions.segments.map((x) => x.segment.id)).toEqual(["ext:log.js/short"]);
+    expect(setMenu(set).map((i) => i.label)).toContain("Log this set");
+    for (const fn of djListeners) fn({ type: "stopped" });
+    await Promise.resolve();
+    expect(heard).toEqual(["stopped"]);
+
+    await mods.setEnabled("log.js", false);
+    expect(djListeners.size).toBe(0);
+    expect(djExtensions.instructions).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
+    expect(setMenu(set).map((i) => i.label)).not.toContain("Log this set");
+  });
+
+  it("can change what they add to the DJ from inside a watcher, without setting it off again", async () => {
+    list.extensions = [mod("w.js")];
+    localStorage.setItem("nativify:extensions", '["w.js"]');
+    const runs = vi.fn();
+    modules["w.js"] = {
+      default: (ns: ExtensionApi) => {
+        ns.watch(() => {
+          runs();
+          ns.dj.setInstructions(`Keep it light, run ${runs.mock.calls.length}.`);
+          ns.dj.addSegment({ id: "short", label: "Short songs", brief: "songs under three minutes", fits: () => true });
+        });
+      },
+    };
+    await boot();
+    await mods.startExtensions();
+    flushSync();
+    expect(mods.states["w.js"]).toBe("on");
+    expect(runs).toHaveBeenCalledOnce();
+    const { djExtensions } = await import("./djExtensions.svelte");
+    expect(djExtensions.instructions.map((x) => x.text)).toEqual(["Keep it light, run 1."]);
+    expect(djExtensions.segments.map((x) => x.segment.id)).toEqual(["ext:w.js/short"]);
+  });
+
+  it("the DJ log example works with the API, and leaves nothing behind", async () => {
+    list.extensions = [mod("dj-log.js")];
+    localStorage.setItem("nativify:extensions", '["dj-log.js"]');
+    // Plain JavaScript, as extensions are: run here, not type-checked.
+    const example = "../../docs/mods/extensions/dj-log.js";
+    modules["dj-log.js"] = await import(/* @vite-ignore */ example);
+    await boot();
+    await mods.startExtensions();
+    expect(mods.states["dj-log.js"]).toBe("on");
+    const { djExtensions } = await import("./djExtensions.svelte");
+    expect(djExtensions.segments.map((x) => x.segment.label)).toEqual(["Short songs"]);
+    expect(djExtensions.instructions.map((x) => x.text)).toEqual(["Keep your lines short and upbeat."]);
+    const el = document.createElement("div");
+    const close = mods.page("dj-log.js/log")!.render(el);
+    flushSync();
+    expect(el.textContent).toContain("Nothing yet");
+    const song = { uri: "spotify:track:1", name: "Song 1", artists: ["Artist 1"], album: "", year: null, durationMs: 1, explicit: false, reasons: [], likedAt: null, playedAt: null };
+    for (const fn of djListeners) fn({ type: "song-skipped", song });
+    await Promise.resolve();
+    expect(el.textContent).toContain("You skipped Song 1 by Artist 1");
+    if (typeof close === "function") close();
+
+    // Its segment is songs under three minutes.
+    const fits = djExtensions.segments[0].segment.fits;
+    expect(fits({ ...song, durationMs: 179_000 } as never)).toBe(true);
+    expect(fits({ ...song, durationMs: 181_000 } as never)).toBe(false);
+
+    // Its entry in a set's menu copies the songs' links: through the async clipboard, or where that's refused, a
+    // selected text box.
+    const { setMenu } = await import("./djMenu");
+    const set = { id: 1, name: "Set 1", songs: [song, { ...song, uri: "spotify:track:2" }] } as unknown as DjSet;
+    const links = "https://open.spotify.com/track/1\nhttps://open.spotify.com/track/2";
+    const copyLinks = () => setMenu(set).find((i) => i.label === "Copy song links")!.action();
+    const writeText = vi.fn(async (text: string) => void text);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    let selected = "";
+    const execCommand = vi.fn(() => ((selected = document.querySelector("textarea")!.value), true));
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    try {
+      copyLinks();
+      await vi.waitFor(() => expect(show).toHaveBeenCalledWith("Copied 2 song links", "info"));
+      expect(writeText).toHaveBeenCalledWith(links);
+      expect(execCommand).not.toHaveBeenCalled();
+      writeText.mockRejectedValue(new Error("NotAllowedError"));
+      show.mockClear();
+      copyLinks();
+      await vi.waitFor(() => expect(show).toHaveBeenCalledWith("Copied 2 song links", "info"));
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(selected).toBe(links);
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(navigator, "clipboard");
+      Reflect.deleteProperty(document, "execCommand");
+    }
+
+    await mods.setEnabled("dj-log.js", false);
+    expect(mods.pages).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
+    expect(djExtensions.instructions).toEqual([]);
+    expect(djListeners.size).toBe(0);
   });
 
   it("removers returned by the API only run once", async () => {

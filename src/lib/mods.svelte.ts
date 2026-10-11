@@ -4,7 +4,11 @@
 import { getVersion } from "@tauri-apps/api/app";
 import type { IconName } from "../components/Icon.svelte";
 import { builtinThemes } from "../themes";
-import { api, backend, errorMessage, type ModInfo, type ModKind, type ModList } from "./ipc";
+import { dj } from "./dj.svelte";
+import { djApi, type DjExtensionApi } from "./djExtensions.svelte";
+import { addSetAction } from "./djMenu";
+import { api, backend, errorMessage, type AppError, type ModInfo, type ModKind, type ModList } from "./ipc";
+import { addedItems, type AddedItem } from "./menu.svelte";
 import { player } from "./player.svelte";
 import { router } from "./router.svelte";
 import { session } from "./session.svelte";
@@ -17,12 +21,7 @@ const QUICK_CSS_KEY = "nativify:quickCss";
 const STORAGE_PREFIX = "nativify:ext:";
 
 /** A context menu entry an extension adds to every track. */
-export interface TrackMenuItem {
-  label: string | ((track: SimpleTrack | Track) => string);
-  action: (track: SimpleTrack | Track) => void;
-  /** Hide the entry for tracks it doesn't apply to. */
-  when?: (track: SimpleTrack | Track) => boolean;
-}
+export type TrackMenuItem = AddedItem<SimpleTrack | Track>;
 
 /** A page an extension adds to the sidebar. */
 export interface ExtensionPage {
@@ -47,7 +46,7 @@ export interface ExtensionApi {
   player: typeof player;
   router: typeof router;
   session: typeof session;
-  /** Calls the Spotify Web API through the backend (see ipc.ts). */
+  /** Calls the Spotify Web API through the backend (see ipc.ts). Rejects once the extension is turned off. */
   api: typeof api;
   toasts: { show: (message: string, tone?: "info" | "error") => void };
   /** Runs `fn` now and again whenever app state it read changes. Returns a stop function. */
@@ -61,6 +60,8 @@ export interface ExtensionApi {
   };
   addTrackMenuItem: (item: TrackMenuItem) => () => void;
   addPage: (page: ExtensionPage) => () => void;
+  /** The AI DJ: what it plays and says, as copies, what happens in a session, and entries for its sets' menus. */
+  dj: DjExtensionApi;
   /** Runs when the extension is turned off or reloaded. */
   onUnload: (fn: () => void) => void;
 }
@@ -212,24 +213,7 @@ class Mods {
 
   /** The context menu entries extensions add for this track. */
   trackMenu(track: SimpleTrack | Track) {
-    return this.trackMenuItems
-      .filter((item) => {
-        try {
-          return item.when?.(track) ?? true;
-        } catch {
-          return false;
-        }
-      })
-      .map((item) => ({
-        label: typeof item.label === "function" ? item.label(track) : item.label,
-        action: () => {
-          try {
-            item.action(track);
-          } catch (e) {
-            toasts.error(e);
-          }
-        },
-      }));
+    return addedItems(this.trackMenuItems, track);
   }
 
   page(key: string) {
@@ -356,6 +340,10 @@ class Mods {
   }
 
   #api(mod: ModInfo, url: string, running: Running): ExtensionApi {
+    // Once turned off (or edited, or reloaded), the API it was handed adds nothing: a timer or callback the
+    // extension left behind can't put things back that nothing would take away again.
+    const live = () => this.#running.get(mod.id) === running;
+    const none = () => {};
     const track = (fn: () => void) => {
       running.cleanups.push(fn);
       let done = false;
@@ -373,15 +361,22 @@ class Mods {
       player,
       router,
       session,
-      api,
-      toasts: { show: (message, tone = "info") => toasts.show(message, tone) },
+      // A timer left running would otherwise spend the requests the app shares with every extension.
+      api: <T>(method: string, path: string, opts?: Parameters<typeof api>[2]) =>
+        live()
+          ? api<T>(method, path, opts)
+          : Promise.reject<T>({ kind: "cancelled", message: "This extension is turned off.", status: null } satisfies AppError),
+      toasts: { show: (message, tone = "info") => void (live() && toasts.show(message, tone)) },
       watch: (fn) =>
-        track(
-          $effect.root(() => {
-            $effect(fn);
-          }),
-        ),
+        live()
+          ? track(
+              $effect.root(() => {
+                $effect(fn);
+              }),
+            )
+          : none,
       addStyle: (css) => {
+        if (!live()) return none;
         const style = document.createElement("style");
         style.dataset.nativifyExtension = mod.id;
         style.textContent = css;
@@ -394,16 +389,20 @@ class Mods {
         remove: (k) => save(key(k), null),
       },
       addTrackMenuItem: (item) => {
+        if (!live()) return none;
         const entry = { ...item, extension: mod.id };
         this.trackMenuItems = [...this.trackMenuItems, entry];
         return track(() => (this.trackMenuItems = this.trackMenuItems.filter((i) => i !== entry)));
       },
       addPage: (page) => {
+        if (!live()) return none;
         const registered: RegisteredPage = { ...page, key: `${mod.id}/${page.id}`, extension: mod.id };
         this.pages = [...this.pages.filter((p) => p.key !== registered.key), registered];
         return track(() => (this.pages = this.pages.filter((p) => p !== registered)));
       },
-      onUnload: (fn) => void running.cleanups.push(fn),
+      dj: djApi(dj, { id: mod.id, name: mod.name }, { track, live }, addSetAction),
+      // Already unloaded: it runs now.
+      onUnload: (fn) => (live() ? void running.cleanups.push(fn) : fn()),
     };
   }
 }

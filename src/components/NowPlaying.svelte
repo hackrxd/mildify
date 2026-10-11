@@ -95,12 +95,12 @@
           </button>
         {/if}
       {/key}
-      {#if dj.speaking && router.current.name !== "lyrics"}
+      {#if (dj.speaking || dj.showing) && router.current.name !== "lyrics"}
         <DjCaption />
       {:else}
         <DeckLyric />
       {/if}
-    {:else if dj.speaking}
+    {:else if dj.speaking || dj.showing}
       <DjCaption />
     {:else}
       <p class="idle muted">Pick something to play.</p>

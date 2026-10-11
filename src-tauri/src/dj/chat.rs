@@ -14,6 +14,10 @@ use crate::error::{AppError, Result};
 
 /// Writing one segment's picks and intro, on a CPU.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(240);
+/// A busy or rate-limited server is asked once more after this, unless it says how long to wait.
+const RETRY_WAIT: Duration = Duration::from_secs(2);
+/// Past this, it isn't asked again: the DJ can't wait that long for a set.
+const RETRY_AT_MOST: Duration = Duration::from_secs(10);
 /// Room to answer for cloud models, which may think first; only what's used is billed.
 const CLOUD_MAX_TOKENS: u32 = 8000;
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -135,26 +139,37 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
         Api::Anthropic => anthropic_body(target, messages, &ask),
         _ => openai_body(target, messages, &ask, max_tokens),
     };
-    let mut request = http.post(&target.url).json(&body).timeout(ANSWER_TIMEOUT);
-    if let Some(key) = &target.key {
-        request = match target.api {
-            Api::Anthropic => request.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
-            _ => request.bearer_auth(key),
-        };
-    }
-    if target.api == Api::Anthropic && ANTHROPIC_FALLBACK_MODELS.contains(&target.model.as_str()) {
-        request = request.header("anthropic-beta", "server-side-fallback-2026-07-01");
-    }
-    let resp = request.send().await.map_err(|e| match target.api {
-        Api::Local => AppError::Http(e),
-        Api::Own => AppError::Other(format!("Couldn't reach your model server at {}: {e}", target.url)),
-        api => AppError::Other(format!("Couldn't reach {}: {e}", api.name())),
-    })?;
-    let status = resp.status().as_u16();
-    let text = resp.text().await?;
-    if !(200..300).contains(&status) {
-        return Err(refused(target.api, status, &error_message(&text)));
-    }
+    let request = || {
+        let mut request = http.post(&target.url).json(&body).timeout(ANSWER_TIMEOUT);
+        if let Some(key) = &target.key {
+            request = match target.api {
+                Api::Anthropic => request.header("x-api-key", key).header("anthropic-version", ANTHROPIC_VERSION),
+                _ => request.bearer_auth(key),
+            };
+        }
+        if target.api == Api::Anthropic && ANTHROPIC_FALLBACK_MODELS.contains(&target.model.as_str()) {
+            request = request.header("anthropic-beta", "server-side-fallback-2026-07-01");
+        }
+        request
+    };
+    let mut asked = 0;
+    let text = loop {
+        asked += 1;
+        let resp = request().send().await.map_err(|e| unreachable(target, &e))?;
+        let status = resp.status().as_u16();
+        let retry_after = resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let text = resp.text().await.map_err(|e| unreachable(target, &e))?;
+        if (200..300).contains(&status) {
+            break text;
+        }
+        match retry_wait(status, retry_after.as_deref(), &error_message(&text)) {
+            Some(wait) if asked < 2 => {
+                log::info!("DJ: {} answered {status}; asking again in {:.1} s", target.api.name(), wait.as_secs_f64());
+                tokio::time::sleep(wait).await;
+            }
+            _ => return Err(refused(target.api, status, &text, target.key.as_deref(), seconds(retry_after.as_deref()))),
+        }
+    };
     let answer = match target.api {
         Api::Anthropic => anthropic_answer(&text)?,
         _ => openai_answer(&text)?,
@@ -169,16 +184,74 @@ pub async fn chat(http: &reqwest::Client, target: &Target, messages: &[Message],
     }
 }
 
-/// An error answer, said the way the user can act on it.
-fn refused(api: Api, status: u16, message: &str) -> AppError {
+/// A request that got no answer, said the way the user can act on it: too slow, nothing there, or what went wrong
+/// underneath.
+fn unreachable(target: &Target, e: &reqwest::Error) -> AppError {
+    let who = target.api.name();
+    let said = if e.is_timeout() {
+        format!("{who} took too long to answer")
+    } else if e.is_connect() && target.api == Api::Local {
+        format!("{who} isn't running")
+    } else if e.is_connect() && target.api == Api::Own {
+        format!("Nothing is answering at {}", target.url)
+    } else {
+        let whom = match target.api {
+            Api::Local => "the DJ's model".to_owned(),
+            Api::Own => format!("your model server at {}", target.url),
+            api => api.name().to_owned(),
+        };
+        format!("Couldn't reach {whom}: {}", innermost(e))
+    };
+    AppError::Other(masked(&said, target.key.as_deref()))
+}
+
+/// What went wrong at the bottom of `e`: "Connection reset by peer", not "error sending request for url (…)".
+fn innermost(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut cause = e;
+    while let Some(next) = cause.source() {
+        cause = next;
+    }
+    cause.to_string()
+}
+
+/// An error answer (`body`), said the way the user can act on it, with the `key` it was sent with hidden, and how
+/// many seconds the server asked to `wait`, when it did.
+fn refused(api: Api, status: u16, body: &str, key: Option<&str>, wait: Option<f64>) -> AppError {
     let who = api.name();
-    AppError::Other(match (api.cloud(), status) {
+    let message = masked(&error_message(body), key);
+    let mut said = match (api.cloud(), status) {
         (true, 401 | 403) => format!("{who} didn't accept your API key: {message}"),
         (true, 402) => format!("Your {who} account is out of credit: {message}"),
         (true, 429) => format!("{who} is limiting your key (too many requests, or out of credit): {message}"),
         (true, 500..) => format!("{who} is having trouble right now ({status}): {message}"),
         _ => format!("{who} answered {status}: {message}"),
-    })
+    };
+    if let Some(secs) = wait.filter(|s| *s >= 1.0) {
+        said.push_str(&format!(" (try again in {secs:.0} s)"));
+    }
+    AppError::Other(said)
+}
+
+/// How long to wait before asking once more, when an answer may well come then: a busy or rate-limited server's,
+/// soon enough. Never for an account out of quota or credit, which waiting doesn't fix.
+fn retry_wait(status: u16, retry_after: Option<&str>, message: &str) -> Option<Duration> {
+    if !matches!(status, 429 | 500 | 502 | 503 | 504 | 529) {
+        return None;
+    }
+    let message = message.to_lowercase();
+    if ["insufficient_quota", "exceeded your current quota", "billing", "credit"].iter().any(|w| message.contains(w)) {
+        return None;
+    }
+    let wait = match seconds(retry_after) {
+        Some(secs) => Duration::try_from_secs_f64(secs).ok()?,
+        None => RETRY_WAIT,
+    };
+    (wait <= RETRY_AT_MOST).then_some(wait)
+}
+
+/// The seconds in a `Retry-After` header.
+fn seconds(retry_after: Option<&str>) -> Option<f64> {
+    retry_after?.trim().parse::<f64>().ok().filter(|s| s.is_finite() && *s >= 0.0)
 }
 
 /// Cloud models are given only the schema features every provider takes; the answer is checked anyway.
@@ -286,9 +359,18 @@ fn parse(body: &str) -> Result<Value> {
 }
 
 /// `choices[0].message` of a chat completion: its text, and any tool calls (whose arguments are a JSON string).
+/// A refusal, or an answer cut off at the token limit, is no answer.
 fn openai_answer(body: &str) -> Result<Answer> {
     let v = parse(body)?;
     let message = &v["choices"][0]["message"];
+    if message["refusal"].as_str().is_some_and(|r| !r.trim().is_empty()) {
+        return Err(AppError::Other("The model declined to answer".into()));
+    }
+    match v["choices"][0]["finish_reason"].as_str() {
+        Some("length") => return Err(AppError::Other("The model ran out of room to answer".into())),
+        Some("content_filter") => return Err(AppError::Other("The model declined to answer".into())),
+        _ => {}
+    }
     let calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .into_iter()
@@ -350,6 +432,27 @@ fn json_in(content: &str) -> Option<Value> {
     serde_json::from_str::<Value>(content.get(start..=end)?).ok().filter(Value::is_object)
 }
 
+/// `text` with the key, and anything shaped like a provider's API key, shown only by its last four characters.
+fn masked(text: &str, key: Option<&str>) -> String {
+    let mut out = text.to_owned();
+    if let Some(key) = key.filter(|k| k.len() >= 8) {
+        out = out.replace(key, &hidden(key));
+    }
+    out.split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .map(|piece| {
+            let word = piece.trim_end_matches(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+            let looks_like_key =
+                word.len() >= 20 && ["sk-", "sk_", "AIza", "xai-", "gsk_"].iter().any(|p| word.starts_with(p));
+            if looks_like_key { piece.replacen(word, &hidden(word), 1) } else { piece.to_owned() }
+        })
+        .collect()
+}
+
+fn hidden(key: &str) -> String {
+    let tail: String = key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    format!("…{tail}")
+}
+
 /// The message in an error body: `{"error": {"message"}}`, `{"error": "…"}`, or Gemini's `[{"error": …}]`.
 fn error_message(text: &str) -> String {
     serde_json::from_str::<Value>(text)
@@ -384,11 +487,11 @@ pub async fn models(http: &reqwest::Client, api: Api, key: &str) -> Result<Vec<M
         .timeout(Duration::from_secs(20))
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Couldn't reach {}: {e}", api.name())))?;
+        .map_err(|e| AppError::Other(masked(&format!("Couldn't reach {}: {e}", api.name()), Some(key))))?;
     let status = resp.status().as_u16();
     let text = resp.text().await?;
     if !(200..300).contains(&status) {
-        return Err(refused(api, status, &error_message(&text)));
+        return Err(refused(api, status, &text, Some(key), None));
     }
     Ok(model_list(api, &parse(&text)?))
 }
@@ -461,11 +564,11 @@ pub async fn anthropic_effort(http: &reqwest::Client, key: &str, model: &str) ->
         .timeout(Duration::from_secs(20))
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Couldn't reach Anthropic: {e}")))?;
+        .map_err(|e| AppError::Other(masked(&format!("Couldn't reach Anthropic: {e}"), Some(key))))?;
     let status = resp.status().as_u16();
     let text = resp.text().await?;
     if !(200..300).contains(&status) {
-        return Err(refused(Api::Anthropic, status, &error_message(&text)));
+        return Err(refused(Api::Anthropic, status, &text, Some(key), None));
     }
     Ok(takes_effort(&parse(&text)?))
 }
@@ -611,6 +714,29 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_off_or_refused_completion_says_so() {
+        let cut = r#"{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"{\"songs\":[1,"}}]}"#;
+        assert_eq!(openai_answer(cut).unwrap_err().to_string(), "The model ran out of room to answer");
+        let refusal = r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":null,"refusal":"I can't help with that."}}]}"#;
+        assert_eq!(openai_answer(refusal).unwrap_err().to_string(), "The model declined to answer");
+        let filtered = r#"{"choices":[{"finish_reason":"content_filter","message":{"role":"assistant","content":"x"}}]}"#;
+        assert_eq!(openai_answer(filtered).unwrap_err().to_string(), "The model declined to answer");
+        let fine = r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{}","refusal":null}}]}"#;
+        assert!(openai_answer(fine).is_ok());
+    }
+
+    #[test]
+    fn hides_keys_in_what_a_provider_says() {
+        let key = "sk-proj-abcdefghijklmnopqrstuvwxyz1234";
+        assert_eq!(masked(&format!("Incorrect API key provided: {key}."), Some(key)), "Incorrect API key provided: …1234.");
+        // A key the provider names that isn't the one sent, by its shape.
+        assert_eq!(masked("bad key AIzaSyA1234567890abcdefghijklmnop here", None), "bad key …mnop here");
+        assert_eq!(masked("sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWX", None), "…UVWX");
+        // Ordinary words and short ids stay.
+        assert_eq!(masked("model sk-1 not found (request req_011CfjPXcS9wguPMcLBay9Vv)", None), "model sk-1 not found (request req_011CfjPXcS9wguPMcLBay9Vv)");
+    }
+
+    #[test]
     fn reads_anthropic_text_and_tool_use_blocks() {
         let body = r#"{"stop_reason":"tool_use","content":[
             {"type":"thinking","thinking":""},
@@ -638,13 +764,27 @@ mod tests {
         assert_eq!(error_message(r#"{"error":{"message":"model not found"}}"#), "model not found");
         assert_eq!(error_message(r#"[{"error":{"code":400,"message":"API key not valid"}}]"#), "API key not valid");
         assert_eq!(error_message("Bad Gateway"), "Bad Gateway");
-        let e = refused(Api::OpenAi, 401, "Incorrect API key").to_string();
+        let e = refused(Api::OpenAi, 401, "Incorrect API key", None, None).to_string();
         assert!(e.contains("OpenAI didn't accept your API key"), "{e}");
-        let e = refused(Api::Anthropic, 429, "rate_limit_error").to_string();
+        let e = refused(Api::Anthropic, 429, "rate_limit_error", None, Some(30.0)).to_string();
+        assert!(e.ends_with("rate_limit_error (try again in 30 s)"), "{e}");
         assert!(e.contains("Anthropic is limiting your key"), "{e}");
-        let e = refused(Api::Own, 404, "model not found").to_string();
-        assert!(e.contains("Your model server answered 404"), "{e}");
+        let e = refused(Api::Own, 404, r#"{"error":{"message":"model not found"}}"#, None, None).to_string();
+        assert!(e.contains("Your model server answered 404: model not found"), "{e}");
         assert!(!e.contains("Spotify"));
+    }
+
+    #[test]
+    fn no_refusal_repeats_the_key_it_was_sent_with() {
+        // Listing a provider's models is the first thing a newly saved key is used for, and Settings shows what
+        // went wrong word for word.
+        let key = "proj0123456789abcdefghijklmn";
+        let body = format!(r#"{{"error":{{"message":"Key {key} is not valid"}}}}"#);
+        for api in [Api::OpenAi, Api::Gemini, Api::Anthropic] {
+            let e = refused(api, 401, &body, Some(key), None).to_string();
+            assert!(!e.contains(key), "{e}");
+            assert!(e.contains("Key …klmn is not valid"), "{e}");
+        }
     }
 
     #[test]
@@ -705,37 +845,97 @@ mod tests {
 
     /// Answers one request over loopback with `status` and `reply`, and hands back the request it got.
     pub(crate) async fn fake_server(status: u16, reply: String) -> (String, tokio::task::JoinHandle<String>) {
+        let (url, replies) = fake_replies(vec![(status, "", reply)]).await;
+        (url, tokio::spawn(async move { replies.await.unwrap().remove(0) }))
+    }
+
+    /// A server that gives each request in turn the next of `replies` (status, extra header lines, body), and hands
+    /// back the requests it got.
+    async fn fake_replies(replies: Vec<(u16, &'static str, String)>) -> (String, tokio::task::JoinHandle<Vec<String>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {
-            let (mut sock, _) = listener.accept().await.unwrap();
-            let mut buf = Vec::new();
-            let mut chunk = [0u8; 8192];
-            loop {
-                let n = sock.read(&mut chunk).await.unwrap();
-                buf.extend_from_slice(&chunk[..n]);
-                let text = String::from_utf8_lossy(&buf).into_owned();
-                if let Some(i) = text.find("\r\n\r\n") {
-                    let len: usize = text
-                        .lines()
-                        .map(str::to_ascii_lowercase)
-                        .find_map(|l| l.strip_prefix("content-length: ").map(|v| v.trim().parse().unwrap()))
-                        .unwrap_or(0);
-                    if buf.len() >= i + 4 + len || n == 0 {
-                        break;
+            let mut requests = Vec::new();
+            for (status, headers, reply) in replies {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = sock.read(&mut chunk).await.unwrap();
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).into_owned();
+                    if let Some(i) = text.find("\r\n\r\n") {
+                        let len: usize = text
+                            .lines()
+                            .map(str::to_ascii_lowercase)
+                            .find_map(|l| l.strip_prefix("content-length: ").map(|v| v.trim().parse().unwrap()))
+                            .unwrap_or(0);
+                        if buf.len() >= i + 4 + len || n == 0 {
+                            break;
+                        }
                     }
                 }
+                let head = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
+                    reply.len()
+                );
+                sock.write_all(head.as_bytes()).await.unwrap();
+                sock.write_all(reply.as_bytes()).await.unwrap();
+                requests.push(String::from_utf8_lossy(&buf).into_owned());
             }
-            let head = format!(
-                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                reply.len()
-            );
-            sock.write_all(head.as_bytes()).await.unwrap();
-            sock.write_all(reply.as_bytes()).await.unwrap();
-            String::from_utf8_lossy(&buf).into_owned()
+            requests
         });
         (format!("http://{addr}/v1/chat/completions"), handle)
+    }
+
+    #[test]
+    fn waits_a_little_for_a_busy_or_limiting_server_but_not_for_credit() {
+        assert_eq!(retry_wait(429, None, "Rate limit reached"), Some(RETRY_WAIT));
+        assert_eq!(retry_wait(529, Some("3"), "Overloaded"), Some(Duration::from_secs(3)));
+        assert_eq!(retry_wait(503, Some("0.5"), "busy"), Some(Duration::from_millis(500)));
+        assert_eq!(retry_wait(500, Some("soon"), "oops"), Some(RETRY_WAIT));
+        assert_eq!(retry_wait(429, Some("60"), "Rate limit reached"), None);
+        assert_eq!(retry_wait(429, Some("1e300"), "Rate limit reached"), None);
+        assert_eq!(retry_wait(429, None, "You exceeded your current quota, please check your plan and billing details."), None);
+        assert_eq!(retry_wait(400, None, "Your credit balance is too low to access the Anthropic API."), None);
+        assert_eq!(retry_wait(401, None, "Incorrect API key"), None);
+        assert_eq!(retry_wait(404, None, "model not found"), None);
+    }
+
+    #[tokio::test]
+    async fn asks_once_more_when_limited_or_busy() {
+        let s = schema();
+        let limited = r#"{"error":{"message":"Rate limit reached"}}"#.to_owned();
+        let (url, server) =
+            fake_replies(vec![(429, "retry-after: 0\r\n", limited.clone()), (200, "", completion(r#"{"songs":[1],"talk":"Hi"}"#))]).await;
+        let t = Target { url, ..target(Api::OpenAi) };
+        let answer = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap();
+        assert!(answer.json.is_some());
+        assert_eq!(server.await.unwrap().len(), 2);
+        // Busy twice: said after the second.
+        let busy = r#"{"error":{"message":"Overloaded"}}"#.to_owned();
+        let (url, server) = fake_replies(vec![(529, "retry-after: 0\r\n", busy.clone()), (529, "retry-after: 0\r\n", busy)]).await;
+        let t = Target { url, ..target(Api::Anthropic) };
+        let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert!(err.contains("Anthropic is having trouble right now (529): Overloaded"), "{err}");
+        assert_eq!(server.await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn asks_once_when_waiting_wouldnt_help() {
+        let s = schema();
+        let quota = r#"{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","code":"insufficient_quota"}}"#;
+        let (url, server) = fake_replies(vec![(429, "", quota.to_owned())]).await;
+        let err = chat(&reqwest::Client::new(), &Target { url, ..target(Api::OpenAi) }, &msgs(), Ask::Json(&s), 200).await.unwrap_err();
+        assert!(err.to_string().contains("OpenAI is limiting your key"), "{err}");
+        assert_eq!(server.await.unwrap().len(), 1);
+        // Too long a wait: said, with how long.
+        let limited = r#"{"error":{"message":"Rate limit reached"}}"#.to_owned();
+        let (url, server) = fake_replies(vec![(429, "retry-after: 60\r\n", limited)]).await;
+        let err = chat(&reqwest::Client::new(), &Target { url, ..target(Api::OpenAi) }, &msgs(), Ask::Json(&s), 200).await.unwrap_err();
+        assert!(err.to_string().ends_with("Rate limit reached (try again in 60 s)"), "{err}");
+        assert_eq!(server.await.unwrap().len(), 1);
     }
 
     fn completion(content: &str) -> String {
@@ -788,5 +988,37 @@ mod tests {
         let s = schema();
         let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
         assert!(err.contains("OpenAI didn't accept your API key: Incorrect API key provided"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn says_in_words_why_a_model_couldnt_be_reached() {
+        let (http, s) = (reqwest::Client::new(), schema());
+        // Nothing listens on port 1.
+        let own = chat(&http, &target(Api::Own), &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert_eq!(own, "Nothing is answering at http://127.0.0.1:1/v1/chat/completions");
+        let local = chat(&http, &target(Api::Local), &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert_eq!(local, "The DJ's model isn't running");
+        // A server that takes the request and never answers.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+        let _held = tokio::spawn(async move {
+            let _taken = listener.accept().await;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let slow = http.post(&url).timeout(Duration::from_millis(100)).send().await.unwrap_err();
+        let said = unreachable(&Target { url, ..target(Api::Own) }, &slow).to_string();
+        assert_eq!(said, "Your model server took too long to answer");
+    }
+
+    #[tokio::test]
+    async fn never_repeats_the_key_a_provider_echoes_back() {
+        // No telltale prefix: only knowing the key sent hides it.
+        let key = "proj0123456789abcdefghijklmn";
+        let (url, _server) = fake_server(401, format!(r#"{{"error":{{"message":"Key {key} is not valid"}}}}"#)).await;
+        let t = Target { url, key: Some(key.into()), ..target(Api::OpenAi) };
+        let s = schema();
+        let err = chat(&reqwest::Client::new(), &t, &msgs(), Ask::Json(&s), 200).await.unwrap_err().to_string();
+        assert!(!err.contains(key), "{err}");
+        assert!(err.contains("Key …klmn is not valid"), "{err}");
     }
 }

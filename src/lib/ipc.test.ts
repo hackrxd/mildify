@@ -48,6 +48,12 @@ describe("api", () => {
     });
   });
 
+  it("asks for a request to be sent once when Spotify may have carried it out before failing", async () => {
+    invokeMock.mockResolvedValue(null);
+    await api("POST", "/playlists/p/items", { body: { uris: ["spotify:track:a"] }, once: true });
+    expect(invokeMock.mock.calls[0][1]).toMatchObject({ method: "POST", once: true });
+  });
+
   it("stringifies query values and drops undefined and null ones", async () => {
     invokeMock.mockResolvedValue(null);
     await api("GET", "/search", { query: { q: "x", limit: 10, flag: false, device_id: undefined, other: null } });

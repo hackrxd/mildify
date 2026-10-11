@@ -1,5 +1,6 @@
 <script lang="ts">
   import { dj } from "../lib/dj.svelte";
+  import { djNav } from "../lib/djView";
   import { mods } from "../lib/mods.svelte";
   import { player } from "../lib/player.svelte";
   import { reveal } from "../lib/reveal";
@@ -18,6 +19,7 @@
   ];
 
   const current = $derived(router.current);
+  const djShown = $derived(djNav(dj.status, dj.phase));
 
   function isActive(route: Route) {
     return current.name === route.name;
@@ -34,12 +36,18 @@
         </button>
       </li>
     {/each}
-    {#if dj.enabled}
+    {#if djShown !== "hidden"}
       <li>
-        <button class="nav-item" class:active={current.name === "dj"} onclick={() => router.go({ name: "dj" })}>
+        <button
+          class="nav-item"
+          class:active={current.name === "dj"}
+          class:resting={djShown === "off"}
+          title={djShown === "off" ? "The DJ is off" : undefined}
+          onclick={() => router.go({ name: "dj" })}
+        >
           <Icon name="dj" />
           <span>DJ</span>
-          {#if dj.phase !== "off"}<span class="eq"><Equalizer label="Your DJ is on" /></span>{/if}
+          {#if djShown === "playing"}<span class="eq"><Equalizer label="Your DJ is on" /></span>{/if}
         </button>
       </li>
     {/if}
@@ -149,6 +157,10 @@
   }
   .nav-item.active :global(svg) {
     color: var(--highlight);
+  }
+  /* The DJ while it's turned off: there to find, its icon faded. */
+  .nav-item.resting:not(:hover, .active) :global(svg) {
+    opacity: 0.45;
   }
 
   .heading {

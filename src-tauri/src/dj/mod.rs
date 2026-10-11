@@ -4,7 +4,8 @@
 //! - downloading the runtimes, model and voice, only once the DJ is turned on (`install.rs`),
 //! - the language model: run locally by llama.cpp (`engine.rs`), on the user's own server, or a cloud provider's
 //!   with the user's API key (kept in the system keychain, `secrets.rs`); asked through `chat.rs`,
-//! - the voice, sherpa-onnx text-to-speech (`voice.rs`), played on this computer's audio output (`speaker.rs`).
+//! - the voice, sherpa-onnx text-to-speech (`voice.rs`, saying what it reads wrong another way: `say.rs`), played on
+//!   this computer's audio output (`speaker.rs`).
 //!
 //! Everything lives in `<app data>/dj/`; removing the DJ deletes that folder.
 
@@ -12,12 +13,14 @@ pub mod chat;
 pub mod engine;
 pub mod install;
 pub mod manifest;
+pub mod say;
 pub mod secrets;
 pub mod songinfo;
 pub mod speaker;
 pub mod voice;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +29,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::watch;
 
 use crate::error::{AppError, Result};
 use chat::{Answer, Api, Ask, Message, ModelChoice, Target, Tool};
@@ -36,7 +40,8 @@ use songinfo::{SongInfo, SongLookup, SongRef};
 use speaker::{Cmd, Speaker, VoiceCommand};
 use voice::Speech;
 
-/// The DJ's settings, part of `config.json`.
+/// The DJ's settings, part of `config.json`. A new field that changes which model runs belongs in
+/// `keeps_model`; one that changes what's downloaded, in `Dj::needed` (which `same_downloads` compares).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DjConfig {
@@ -48,6 +53,10 @@ pub struct DjConfig {
     pub model: String,
     /// A `manifest::VOICES` id.
     pub voice: String,
+    /// How fast the voice speaks, against its own pace: `voice::SPEED_MIN` to `voice::SPEED_MAX`.
+    pub voice_speed: f32,
+    /// The downloaded model runs on the graphics card, when llama.cpp finds one it can use.
+    pub gpu: bool,
     /// The user's own OpenAI-compatible server (Ollama, LM Studio, llama.cpp…), the `"own"` provider.
     pub server_url: String,
     /// The model name that server knows.
@@ -87,6 +96,8 @@ impl Default for DjConfig {
             provider: "local".into(),
             model: manifest::DEFAULT_MODEL.into(),
             voice: manifest::DEFAULT_VOICE.into(),
+            voice_speed: 1.0,
+            gpu: true,
             server_url: "http://127.0.0.1:11434".into(),
             server_model: String::new(),
             own_tools: false,
@@ -104,6 +115,8 @@ pub struct DjSettingsInput {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub voice: Option<String>,
+    pub voice_speed: Option<f32>,
+    pub gpu: Option<bool>,
     pub server_url: Option<String>,
     pub server_model: Option<String>,
     pub own_tools: Option<bool>,
@@ -128,6 +141,13 @@ impl DjConfig {
         if let Some(bad) = input.api_models.iter().flatten().map(|(p, _)| p).find(|p| !CLOUD.contains(&p.as_str())) {
             return Err(AppError::Other(format!("Unknown DJ model provider {bad}")));
         }
+        if input.voice_speed.is_some_and(|s| !(voice::SPEED_MIN..=voice::SPEED_MAX).contains(&s)) {
+            return Err(AppError::Other(format!(
+                "The DJ speaks between {} and {} times its usual speed",
+                voice::SPEED_MIN,
+                voice::SPEED_MAX
+            )));
+        }
         if let Some(m) = input.model {
             // Settings from before there were providers say "own" here.
             if m == OWN_SERVER {
@@ -145,6 +165,12 @@ impl DjConfig {
                 return Err(AppError::Other(format!("Unknown DJ voice {v}")));
             }
             self.voice = v;
+        }
+        if let Some(speed) = input.voice_speed {
+            self.voice_speed = speed;
+        }
+        if let Some(on) = input.gpu {
+            self.gpu = on;
         }
         if let Some(url) = input.server_url {
             self.server_url = url.trim().to_owned();
@@ -187,11 +213,16 @@ impl DjConfig {
         api(&self.provider)
     }
 
-    /// Whether a change from `other` to these settings leaves the model and the downloads as they are: picking a
-    /// cloud model, look-up options and the like don't unload the model or restart a download.
-    pub fn same_engine(&self, other: &DjConfig) -> bool {
-        (self.enabled, &self.provider, &self.model, &self.voice, &self.server_url, &self.server_model)
-            == (other.enabled, &other.provider, &other.model, &other.voice, &other.server_url, &other.server_model)
+    /// Whether a change from `old` to these settings leaves a loaded model running: only while the DJ stays on with
+    /// the same local model, on the same kind of device. A new voice, the own server's address or a cloud model pick
+    /// don't unload it.
+    pub fn keeps_model(&self, old: &DjConfig) -> bool {
+        self.enabled
+            && old.enabled
+            && self.api() == Api::Local
+            && old.api() == Api::Local
+            && self.model == old.model
+            && self.gpu == old.gpu
     }
 
     /// The model picked for the cloud provider in use.
@@ -246,7 +277,12 @@ pub struct Choice {
     pub id: &'static str,
     pub label: &'static str,
     pub detail: Option<&'static str>,
+    /// The size of its download, which a voice shares with the others in its group.
     pub bytes: u64,
+    /// Its download is in.
+    pub installed: bool,
+    /// A voice's package: the voices in one download together.
+    pub group: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +305,8 @@ pub struct DjStatus {
     pub folder: PathBuf,
     pub models: Vec<Choice>,
     pub voices: Vec<Choice>,
+    /// Where the downloaded model runs, once it has loaded since the app started.
+    pub runs_on: Option<engine::RunsOn>,
 }
 
 /// Spoken lines kept for the UI to fetch; a session only ever needs the next one or two.
@@ -280,6 +318,9 @@ pub struct Dj {
     root: PathBuf,
     scratch: PathBuf,
     http: reqwest::Client,
+    /// For model servers on this computer: straight there, never through a proxy, which would see the key and the
+    /// prompt.
+    loopback: reqwest::Client,
     runtime: Option<Runtime>,
     install: Arc<Mutex<InstallState>>,
     /// Bumped to cancel a running install.
@@ -288,12 +329,18 @@ pub struct Dj {
     installing: Arc<tokio::sync::Mutex<()>>,
     engine: Arc<Engine>,
     speech: Mutex<VecDeque<(u64, Arc<Vec<u8>>)>>,
+    /// The last voice preview, apart from the DJ's lines so it can't push one out.
+    preview: Mutex<Option<(u64, Arc<Vec<u8>>)>>,
     next_speech: AtomicU64,
     speaker: Speaker,
     keys: Arc<Keys>,
     /// Whether each Anthropic model takes `effort`, once asked.
     effort: Mutex<HashMap<String, bool>>,
     songs: SongLookup,
+    /// The model's asks, and song look-ups, each in a lane of its own: a newer one drops one still waiting there
+    /// (`newest`).
+    asks: watch::Sender<u64>,
+    look_ups: watch::Sender<u64>,
 }
 
 /// The most songs one look-up covers: the model asks about a handful before it picks.
@@ -304,18 +351,26 @@ impl Dj {
         Self {
             scratch,
             http: http.clone(),
+            loopback: reqwest::Client::builder()
+                .no_proxy()
+                .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap_or_default(),
             runtime: manifest::this_runtime(),
             install: Arc::default(),
             generation: Arc::default(),
             installing: Arc::default(),
             engine: Arc::default(),
             speech: Mutex::default(),
+            preview: Mutex::default(),
             next_speech: AtomicU64::new(1),
             speaker: Speaker::default(),
             // Beside the DJ's folder, not in it: removing the DJ's downloads keeps the keys.
             keys: Arc::new(Keys::new(root.with_file_name("dj_keys.json"))),
             effort: Mutex::default(),
             songs: SongLookup::new(http.clone(), root.join("song_info.json")),
+            asks: watch::Sender::new(0),
+            look_ups: watch::Sender::new(0),
             root,
         }
     }
@@ -361,16 +416,41 @@ impl Dj {
             folder: self.root.clone(),
             models: manifest::MODELS
                 .iter()
-                .map(|m| Choice { id: m.id, label: m.label, detail: Some(m.detail), bytes: m.component.bytes })
+                .map(|m| Choice {
+                    id: m.id,
+                    label: m.label,
+                    detail: Some(m.detail),
+                    bytes: m.component.bytes,
+                    installed: install::is_installed(&self.root, &m.component),
+                    group: None,
+                })
                 .collect(),
             voices: manifest::VOICES
                 .iter()
-                .map(|v| Choice { id: v.id, label: v.label, detail: None, bytes: v.component.bytes })
+                .map(|v| Choice {
+                    id: v.id,
+                    label: v.label,
+                    detail: None,
+                    bytes: v.component.bytes,
+                    installed: install::is_installed(&self.root, &v.component),
+                    group: Some(v.kind.group()),
+                })
                 .collect(),
+            runs_on: self.runs_on().filter(|_| cfg.api() == Api::Local),
         }
     }
 
-    fn emit_status(&self, app: &AppHandle, cfg: &DjConfig) {
+    /// Where the downloaded model runs, since it last loaded.
+    pub fn runs_on(&self) -> Option<engine::RunsOn> {
+        self.engine.runs_on()
+    }
+
+    /// Has the next load choose where the model runs anew, as the setting to use the graphics card changes.
+    pub fn reset_device(&self) {
+        self.engine.reset_device();
+    }
+
+    pub fn emit_status(&self, app: &AppHandle, cfg: &DjConfig) {
         let _ = app.emit("dj-status", self.status(cfg));
     }
 
@@ -398,13 +478,14 @@ impl Dj {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let (root, http, state, gen, app) =
             (self.root.clone(), self.http.clone(), self.install.clone(), self.generation.clone(), app.clone());
+        let known = self.known_ids();
         let installing = self.installing.clone();
         tauri::async_runtime::spawn(async move {
             let _one_at_a_time = installing.lock().await;
             if gen.load(Ordering::SeqCst) != generation {
                 return;
             }
-            install::remove_stale(&root, &manifest::known_ids());
+            install::remove_stale(&root, &known);
             let mut error = None;
             for c in &missing {
                 {
@@ -442,6 +523,17 @@ impl Dj {
         Ok(())
     }
 
+    /// What the DJ's folder may hold on this computer; anything else there goes as a download starts.
+    fn known_ids(&self) -> Vec<&'static str> {
+        manifest::known_ids(self.runtime)
+    }
+
+    /// Whether `old` and `new` need the same downloads, so one under way can carry on: two voices from one
+    /// package do.
+    pub fn same_downloads(&self, old: &DjConfig, new: &DjConfig) -> bool {
+        old.enabled == new.enabled && self.needed(old) == self.needed(new)
+    }
+
     /// Stops a download; what's downloaded so far is kept and resumes next time.
     pub fn cancel_install(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -454,6 +546,8 @@ impl Dj {
     pub async fn remove(&self) -> Result<()> {
         self.cancel_install();
         self.engine.stop().await;
+        // Downloaded again, the model may well load on the card.
+        self.engine.reset_device();
         self.songs.clear();
         // Let a cancelled download close its file first (Windows can't delete open files).
         let _done = tokio::time::timeout(Duration::from_secs(5), self.installing.lock()).await;
@@ -519,7 +613,7 @@ impl Dj {
         let file = model.component.url.rsplit('/').next().unwrap_or_default();
         let weights = self.installed_dir(&model.component)?.join(file);
         tokio::fs::create_dir_all(&self.scratch).await?;
-        let target = self.engine.local(&server, &weights, &self.scratch.join("llama-server.log")).await?;
+        let target = self.engine.local(&server, &weights, &self.scratch.join("llama-server.log"), cfg.gpu).await?;
         Ok(Target { tools, ..target })
     }
 
@@ -600,10 +694,24 @@ impl Dj {
             (None, Some(schema)) => Ask::Json(schema),
             (None, None) => return Err(AppError::Other("Ask the DJ's model for JSON or look-ups".into())),
         };
-        let target = self.target(cfg).await?;
-        self.engine.touch();
-        let answer = chat::chat(&self.http, &target, messages, ask, max_tokens).await;
-        self.engine.touch();
+        let kind = if tools.is_some() { "look-ups" } else { "picks" };
+        let started = Instant::now();
+        let mut ready = 0.0;
+        // Dropped for a newer ask, even while the model is still loading: the DJ has stopped waiting for this one.
+        let answer = newest(&self.asks, async {
+            let target = self.target(cfg).await?;
+            ready = started.elapsed().as_secs_f64();
+            self.engine.touch();
+            let http = if is_loopback(&target.url) { &self.loopback } else { &self.http };
+            let answer = chat::chat(http, &target, messages, ask, max_tokens).await;
+            self.engine.touch();
+            or_died(answer, target.api, self.engine.died())
+        })
+        .await;
+        // For tuning how early sets are picked: the model's own time, and any wait for it to be ready.
+        let asked = started.elapsed().as_secs_f64() - ready;
+        let outcome = if answer.is_ok() { "answered" } else { "failed" };
+        log::info!("DJ model ({}) {outcome} {kind} in {asked:.1} s{}", cfg.provider, waited(ready));
         answer
     }
 
@@ -620,7 +728,8 @@ impl Dj {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
         let songs = &songs[..songs.len().min(LOOK_UP_AT_MOST)];
-        Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await)
+        // As asks are: a newer look-up drops one still going, and the MusicBrainz requests it was waiting its turn for.
+        newest(&self.look_ups, async { Ok(self.songs.look_up(songs, session, web, cfg.musicbrainz).await) }).await
     }
 
     /// Unloads the model; the next request loads it again.
@@ -639,7 +748,7 @@ impl Dj {
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                if engine.idle(Instant::now()) && engine.is_running().await {
+                if engine.idle(Instant::now()) && engine.is_running() {
                     log::info!("DJ: unloading the model after {} idle minutes", engine::IDLE.as_secs() / 60);
                     engine.stop().await;
                 }
@@ -657,16 +766,8 @@ impl Dj {
         if !cfg.enabled {
             return Err(AppError::Other("The DJ is turned off".into()));
         }
-        let rt = self.runtime.ok_or_else(|| AppError::Other("The DJ can't run on this computer".into()))?;
         let v = manifest::voice(&cfg.voice).ok_or_else(|| AppError::Other("Pick a voice for the DJ".into()))?;
-        let incomplete =
-            || AppError::Other("The DJ's voice is incomplete. Remove the DJ's files and turn it on again.".into());
-        let program = install::find(&self.installed_dir(&rt.tts)?, manifest::TTS_PROGRAM, 3).ok_or_else(incomplete)?;
-        let dir = install::find(&self.installed_dir(&v.component)?, v.kind.model_file(), 2)
-            .and_then(|f| f.parent().map(Path::to_owned))
-            .ok_or_else(incomplete)?;
-        let setup = voice::Setup { program, dir, voice: v };
-        let (wav, sentences, duration_ms) = voice::speak(&setup, text, &self.scratch).await?;
+        let (wav, sentences, duration_ms) = voice::speak(&self.voice_setup(v, cfg.voice_speed)?, text, &self.scratch).await?;
         let id = self.next_speech.fetch_add(1, Ordering::SeqCst);
         let mut kept = self.speech.lock().unwrap();
         if kept.len() >= SPEECH_KEPT {
@@ -676,20 +777,48 @@ impl Dj {
         Ok(Speech { id, duration_ms, sentences })
     }
 
-    /// The WAV audio of a line `speak` made.
+    /// Reads `text` in `voice` at the speed set, to hear it before it's picked: with its package downloaded, whether
+    /// or not the DJ is on. Kept apart from the DJ's lines, and in place of the last preview.
+    pub async fn preview(&self, cfg: &DjConfig, voice: &str, text: &str) -> Result<Speech> {
+        let v = manifest::voice(voice).ok_or_else(|| AppError::Other(format!("Unknown DJ voice {voice}")))?;
+        let (wav, sentences, duration_ms) = voice::speak(&self.voice_setup(v, cfg.voice_speed)?, text, &self.scratch).await?;
+        let id = self.next_speech.fetch_add(1, Ordering::SeqCst);
+        *self.preview.lock().unwrap() = Some((id, Arc::new(wav)));
+        Ok(Speech { id, duration_ms, sentences })
+    }
+
+    /// What the voice program needs to read in `v`, once it's all downloaded.
+    fn voice_setup(&self, v: &'static manifest::Voice, speed: f32) -> Result<voice::Setup> {
+        let rt = self.runtime.ok_or_else(|| AppError::Other("The DJ can't run on this computer".into()))?;
+        let incomplete =
+            || AppError::Other("The DJ's voice is incomplete. Remove the DJ's files and turn it on again.".into());
+        let program = install::find(&self.installed_dir(&rt.tts)?, manifest::TTS_PROGRAM, 3).ok_or_else(incomplete)?;
+        let dir = install::find(&self.installed_dir(&v.component)?, v.kind.model_file(), 2)
+            .and_then(|f| f.parent().map(Path::to_owned))
+            .ok_or_else(incomplete)?;
+        Ok(voice::Setup { program, dir, voice: v, speed })
+    }
+
+    /// A line's audio, ready to play at the loudness every line plays at.
+    fn playable(&self, id: u64) -> Result<voice::Pcm> {
+        let wav = self.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
+        let mut pcm =
+            voice::pcm(&wav).ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
+        voice::level(&mut pcm);
+        Ok(pcm)
+    }
+
+    /// The WAV audio of a line `speak` made, or of the last preview.
     fn speech_audio(&self, id: u64) -> Option<Arc<Vec<u8>>> {
-        self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone())
+        let kept = self.speech.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, wav)| wav.clone());
+        kept.or_else(|| self.preview.lock().unwrap().as_ref().filter(|(i, _)| *i == id).map(|(_, wav)| wav.clone()))
     }
 
     /// Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes.
     pub fn voice(&self, app: &AppHandle, command: VoiceCommand) -> Result<()> {
         let cmd = match command {
-            VoiceCommand::Play { id, gain } => {
-                let wav = self.speech_audio(id).ok_or_else(|| AppError::Other("That line is gone".into()))?;
-                let pcm = voice::pcm(&wav)
-                    .ok_or_else(|| AppError::Other("The DJ's voice wrote audio it can't play".into()))?;
-                Cmd::Play { id, pcm, gain: gain.clamp(0.0, 1.0) }
-            }
+            VoiceCommand::Play { id, gain } => Cmd::Play { id, pcm: self.playable(id)?, gain: gain.clamp(0.0, 1.0) },
+            VoiceCommand::Hold { on } => Cmd::Hold(on),
             VoiceCommand::Pause => Cmd::Pause,
             VoiceCommand::Resume => Cmd::Resume,
             VoiceCommand::Gain { gain } => Cmd::Gain(gain.clamp(0.0, 1.0)),
@@ -748,9 +877,187 @@ impl install::Progress for Reporter {
     }
 }
 
+/// ", after 3.2 s getting it ready", when the model had to be loaded or reached first.
+fn waited(secs: f64) -> String {
+    if secs >= 0.5 { format!(", after {secs:.1} s getting it ready") } else { String::new() }
+}
+
+/// A failed answer from the local model, said as what happened to it when it `died` while answering; the next ask
+/// starts it again.
+fn or_died(answer: Result<Answer>, api: Api, died: Option<String>) -> Result<Answer> {
+    match (answer, api, died) {
+        (Err(_), Api::Local, Some(why)) => Err(AppError::Other(format!("The DJ's model stopped while answering ({why})"))),
+        (answer, _, _) => answer,
+    }
+}
+
+/// Whether `url` is on this computer: localhost, 127.0.0.0/8 or ::1.
+fn is_loopback(url: &str) -> bool {
+    match url::Url::parse(url).ok().as_ref().and_then(url::Url::host) {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+/// Runs `work` as the newest in its `lane`, failing it as soon as a newer one starts there: the DJ only ever waits for
+/// its latest. Dropping a request hangs up on its server, which frees the local model's one slot for the newer ask.
+async fn newest<T>(lane: &watch::Sender<u64>, work: impl Future<Output = Result<T>>) -> Result<T> {
+    let mut newer = lane.subscribe();
+    let mut mine = 0;
+    lane.send_modify(|n| {
+        *n += 1;
+        mine = *n;
+    });
+    tokio::select! {
+        done = work => done,
+        _ = newer.wait_for(|n| *n != mine) => Err(AppError::Other("A newer request took this one's place".into())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_how_long_getting_the_model_ready_took_only_when_it_did() {
+        assert_eq!(waited(0.1), "");
+        assert_eq!(waited(3.24), ", after 3.2 s getting it ready");
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_in_a_lane_drops_the_one_still_waiting_there() {
+        let (lane, other) = (watch::Sender::new(0), watch::Sender::new(0));
+        let waiting = newest(&lane, std::future::pending::<Result<u8>>());
+        let elsewhere = newest(&other, async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(3)
+        });
+        let newer = async {
+            tokio::task::yield_now().await;
+            newest(&lane, async { Ok(2) }).await
+        };
+        let (dropped, newer, elsewhere) = tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(waiting, newer, elsewhere) })
+            .await
+            .unwrap();
+        assert!(dropped.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(newer.unwrap(), 2);
+        assert_eq!(elsewhere.unwrap(), 3);
+        // One after another, nothing is dropped.
+        assert_eq!(newest(&lane, async { Ok(4) }).await.unwrap(), 4);
+        assert_eq!(newest(&lane, async { Ok(5) }).await.unwrap(), 5);
+    }
+
+    /// Reads one HTTP request off `sock`, all of it.
+    async fn read_request(sock: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = sock.read(&mut chunk).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if let Some(i) = text.find("\r\n\r\n") {
+                let len: usize = text
+                    .lines()
+                    .map(str::to_ascii_lowercase)
+                    .find_map(|l| l.strip_prefix("content-length: ").and_then(|v| v.trim().parse().ok()))
+                    .unwrap_or(0);
+                if buf.len() >= i + 4 + len {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// A model server that keeps the first ask waiting, saying on `hung_up` once its asker hangs up, and answers the
+    /// next with a set.
+    async fn keeps_the_first_waiting(hung_up: tokio::sync::oneshot::Sender<()>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            read_request(&mut first).await;
+            tokio::spawn(async move {
+                let mut rest = [0u8; 64];
+                while first.read(&mut rest).await.is_ok_and(|n| n > 0) {}
+                let _ = hung_up.send(());
+            });
+            let (mut second, _) = listener.accept().await.unwrap();
+            read_request(&mut second).await;
+            second.write_all(set_reply().as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    /// A model server's answer with a set.
+    fn set_reply() -> String {
+        let set = r#"{"name":"Set","songs":[1],"talk":"Hello there."}"#;
+        let body = serde_json::json!({ "choices": [{ "message": { "role": "assistant", "content": set }, "finish_reason": "stop" }] })
+            .to_string();
+        format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+    }
+
+    /// A model server that answers one ask with a set.
+    async fn answers_with_a_set() -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            read_request(&mut sock).await;
+            sock.write_all(set_reply().as_bytes()).await.unwrap();
+        });
+        url
+    }
+
+    #[test]
+    fn knows_a_model_server_on_this_computer() {
+        for url in ["http://localhost:11434/v1", "http://LOCALHOST:1234", "http://127.0.0.1:8080/v1/chat/completions", "http://127.1.2.3/", "http://[::1]:11434"] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in ["http://192.168.1.20:11434", "https://api.openai.com/v1/chat/completions", "http://localhost.example.com", "nonsense"] {
+            assert!(!is_loopback(url), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reaches_a_model_server_on_this_computer_without_the_proxy() {
+        // Everything this client sends goes to a proxy that isn't there.
+        let proxied = reqwest::Client::builder().proxy(reqwest::Proxy::all("http://127.0.0.1:1").unwrap()).build().unwrap();
+        let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
+        let d = Dj::new(root.join("dj"), root.join("cache"), proxied);
+        let cfg = DjConfig { enabled: true, server_url: answers_with_a_set().await, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let answer = tokio::time::timeout(Duration::from_secs(5), d.generate(&cfg, &ask, Some(&schema), None, 10)).await.unwrap();
+        assert!(answer.unwrap().json.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_newer_ask_hangs_up_on_the_one_its_server_is_still_answering() {
+        let (hung_up, heard) = tokio::sync::oneshot::channel();
+        let url = keeps_the_first_waiting(hung_up).await;
+        let d = dj();
+        let cfg = DjConfig { enabled: true, server_url: url, server_model: "m".into(), ..own() };
+        let schema = serde_json::json!({ "type": "object" });
+        let ask = [Message { role: "user".into(), content: "A set, please.".into() }];
+        let first = d.generate(&cfg, &ask, Some(&schema), None, 10);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.generate(&cfg, &ask, Some(&schema), None, 10).await
+        };
+        let (first, second) =
+            tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert!(second.unwrap().json.is_some());
+        tokio::time::timeout(Duration::from_secs(2), heard).await.unwrap().unwrap();
+    }
 
     fn dj() -> Dj {
         let root = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8)));
@@ -772,6 +1079,7 @@ mod tests {
     fn off_by_default_with_the_default_model_and_voice() {
         let c = DjConfig::default();
         assert!(!c.enabled);
+        assert!(c.gpu, "the graphics card is used where there's one");
         assert_eq!(c.model, manifest::DEFAULT_MODEL);
         assert_eq!(c.voice, manifest::DEFAULT_VOICE);
     }
@@ -785,11 +1093,17 @@ mod tests {
         assert!(c.apply(DjSettingsInput { provider: Some("skynet".into()), ..Default::default() }).is_err());
         let bad_pick = BTreeMap::from([("skynet".to_owned(), "t-800".to_owned())]);
         assert!(c.apply(DjSettingsInput { api_models: Some(bad_pick), ..Default::default() }).is_err());
+        for speed in [0.5, 1.31, f32::NAN] {
+            let change = DjSettingsInput { voice: Some("emma".into()), voice_speed: Some(speed), ..Default::default() };
+            assert!(c.apply(change).is_err(), "{speed}");
+        }
         assert_eq!(c, DjConfig::default(), "a refused change changes nothing");
         c.apply(DjSettingsInput {
             enabled: Some(true),
             provider: Some(OWN_SERVER.into()),
             voice: Some("emma".into()),
+            voice_speed: Some(1.3),
+            gpu: Some(false),
             server_url: Some(" http://localhost:1234 ".into()),
             server_model: Some(" qwen ".into()),
             own_tools: Some(true),
@@ -797,7 +1111,7 @@ mod tests {
         })
         .unwrap();
         assert!(c.enabled && c.api() == Api::Own && c.own_tools);
-        assert_eq!(c.voice, "emma");
+        assert_eq!((c.voice.as_str(), c.voice_speed, c.gpu), ("emma", 1.3, false));
         assert_eq!(c.server_url, "http://localhost:1234");
         assert_eq!(c.server_model, "qwen");
         // Picking a downloaded model goes back to running it here.
@@ -918,21 +1232,81 @@ mod tests {
     }
 
     #[test]
-    fn only_model_and_download_changes_unload_the_model() {
+    fn only_another_model_unloads_it() {
         let old = DjConfig { enabled: true, ..DjConfig::default() };
-        let picks = DjConfig {
-            musicbrainz: false,
-            own_tools: true,
-            api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
-            api_keys: BTreeSet::from(["openai".to_owned()]),
-            ..old.clone()
-        };
-        assert!(picks.same_engine(&old));
-        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { voice: "emma".into(), ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { enabled: false, ..old.clone() }.same_engine(&old));
-        assert!(!DjConfig { server_url: "http://x".into(), ..old.clone() }.same_engine(&old));
+        for keeps in [
+            DjConfig { voice: "emma".into(), ..old.clone() },
+            DjConfig { voice: "light-male".into(), ..old.clone() },
+            DjConfig { voice_speed: 1.2, ..old.clone() },
+            DjConfig { server_url: "http://x".into(), server_model: "m".into(), ..old.clone() },
+            DjConfig {
+                musicbrainz: false,
+                own_tools: true,
+                api_models: BTreeMap::from([("openai".into(), "gpt-x".into())]),
+                api_keys: BTreeSet::from(["openai".to_owned()]),
+                ..old.clone()
+            },
+        ] {
+            assert!(keeps.keeps_model(&old), "{keeps:?}");
+        }
+        assert!(!DjConfig { model: "qwen3-4b".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: "anthropic".into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { provider: OWN_SERVER.into(), ..old.clone() }.keeps_model(&old));
+        assert!(!DjConfig { enabled: false, ..old.clone() }.keeps_model(&old));
+        // On the processor instead of the graphics card, or back.
+        assert!(!DjConfig { gpu: false, ..old.clone() }.keeps_model(&old));
+    }
+
+    #[test]
+    fn downloads_restart_only_when_what_is_needed_changes() {
+        let d = dj();
+        let old = DjConfig { enabled: true, voice: "michael".into(), ..DjConfig::default() };
+        // Both voices come in one package.
+        assert!(d.same_downloads(&old, &DjConfig { voice: "emma".into(), ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { musicbrainz: false, ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { voice_speed: 0.9, ..old.clone() }));
+        assert!(d.same_downloads(&old, &DjConfig { gpu: false, ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { voice: "light-male".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { model: "qwen3-4b".into(), ..old.clone() }));
+        // A cloud model needs neither the model nor its runtime.
+        assert!(!d.same_downloads(&old, &DjConfig { provider: "gemini".into(), ..old.clone() }));
+        assert!(!d.same_downloads(&old, &DjConfig { enabled: false, ..old.clone() }));
+    }
+
+    #[test]
+    fn keeps_this_computers_runtimes_when_clearing_out_what_it_no_longer_needs() {
+        let d = dj();
+        let Some(rt) = d.runtime else { return };
+        let known = d.known_ids();
+        assert!(known.contains(&rt.llm.id) && known.contains(&rt.tts.id), "{known:?}");
+        assert!(manifest::MODELS.iter().all(|m| known.contains(&m.component.id)));
+    }
+
+    #[test]
+    fn says_where_the_downloaded_model_runs_only_while_its_the_one_in_use() {
+        let d = dj();
+        assert_eq!(d.status(&DjConfig::default()).runs_on, None, "not loaded yet");
+        let on_card = engine::RunsOn { card: Some("Test Card".into()), card_failed: None };
+        d.engine.ran_on(on_card.clone());
+        assert_eq!(d.status(&DjConfig::default()).runs_on, Some(on_card));
+        assert_eq!(d.status(&DjConfig { provider: "anthropic".into(), ..DjConfig::default() }).runs_on, None);
+        assert_eq!(d.status(&own()).runs_on, None);
+        d.reset_device();
+        assert_eq!(d.status(&DjConfig::default()).runs_on, None);
+    }
+
+    #[test]
+    fn lists_voices_by_package_and_says_which_are_downloaded() {
+        let d = dj();
+        let kokoro = manifest::voice("lewis").unwrap().component;
+        std::fs::create_dir_all(install::component_dir(&d.root, &kokoro)).unwrap();
+        std::fs::write(install::component_dir(&d.root, &kokoro).join(install::COMPLETE), "").unwrap();
+        let status = d.status(&DjConfig::default());
+        let voice = |id: &str| status.voices.iter().find(|v| v.id == id).unwrap();
+        assert_eq!((voice("lewis").group, voice("lewis").installed, voice("lewis").bytes), (Some("Kokoro"), true, kokoro.bytes));
+        assert_eq!((voice("michael").group, voice("michael").installed), (Some("Kokoro"), true));
+        assert_eq!((voice("light-male").group, voice("light-male").installed), (Some("Light"), false));
+        assert!(status.models.iter().all(|m| m.group.is_none() && !m.installed));
     }
 
     #[test]
@@ -1009,10 +1383,198 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removing_the_djs_files_gives_the_graphics_card_another_chance() {
+        let d = dj();
+        d.engine.ran_on(engine::RunsOn { card: None, card_failed: Some("It stopped".into()) });
+        d.remove().await.unwrap();
+        assert_eq!(d.runs_on(), None);
+    }
+
+    #[tokio::test]
     async fn removing_with_nothing_downloaded_is_fine() {
         let d = dj();
         d.remove().await.unwrap();
         assert_eq!(d.status(&DjConfig::default()).disk_bytes, 0);
+    }
+
+    /// A WAV of `ms` of a quiet tone, mono 16-bit at 24 kHz, as the voice program writes.
+    fn quiet_line(ms: u32) -> Vec<u8> {
+        let data = 24 * ms * 2;
+        let mut w = Vec::new();
+        w.extend_from_slice(b"RIFF");
+        w.extend_from_slice(&(36 + data).to_le_bytes());
+        w.extend_from_slice(b"WAVEfmt ");
+        for field in [16u32.to_le_bytes(), [1, 0, 1, 0], 24_000u32.to_le_bytes(), 48_000u32.to_le_bytes(), [2, 0, 16, 0]] {
+            w.extend_from_slice(&field);
+        }
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&data.to_le_bytes());
+        // Peaks at a 16th of full scale: 27 dB under it, the way loudness is measured.
+        w.extend((0..data / 2).flat_map(|i| (((i as f32 * 0.07).sin() * 2048.0) as i16).to_le_bytes()));
+        w
+    }
+
+    /// The voice program and `voice`'s package, as downloaded. The program writes down what it's asked, one argument a
+    /// line, in the `asked.txt` it returns, and reads every line as a second of a quiet tone.
+    #[cfg(unix)]
+    fn fake_voice(d: &Dj, voice: &str) -> PathBuf {
+        const PROGRAM: &str = r#"#!/bin/sh
+here=$(dirname "$0")
+printf '%s\n' "$@" > "$here/asked.txt"
+for a in "$@"; do case "$a" in --output-filename=*) out="${a#--output-filename=}";; esac; done
+cp "$here/line.wav" "$out" && echo "sample=24000, progress=1.000000"
+"#;
+        let (rt, v) = (d.runtime.unwrap(), manifest::voice(voice).unwrap());
+        let (bin, pkg) = (install::component_dir(&d.root, &rt.tts).join("bin"), install::component_dir(&d.root, &v.component));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(pkg.join("pkg")).unwrap();
+        std::fs::write(pkg.join("pkg").join(v.kind.model_file()), "").unwrap();
+        std::fs::write(bin.join("line.wav"), quiet_line(1000)).unwrap();
+        executable(&bin.join(manifest::TTS_PROGRAM), PROGRAM);
+        for dir in [bin.parent().unwrap(), &pkg] {
+            std::fs::write(dir.join(install::COMPLETE), "").unwrap();
+        }
+        bin.join("asked.txt")
+    }
+
+    /// Writes `script` to `path` as a program, once it can be run.
+    #[cfg(unix)]
+    fn executable(path: &Path, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A process another test starts may hold the program open for writing a moment longer: wait until it runs.
+        for _ in 0..100 {
+            match std::process::Command::new(path).arg("--version").output() {
+                Err(e) if e.raw_os_error() == Some(26) => std::thread::sleep(Duration::from_millis(10)),
+                _ => break,
+            }
+        }
+    }
+
+    /// The model runtime and the default model, as downloaded: a `llama-server` that lists one graphics card, writes
+    /// down how it's started in the `asked.txt` it returns, and stops before it loads anything.
+    #[cfg(unix)]
+    fn fake_model(d: &Dj) -> PathBuf {
+        const SERVER: &str = r#"#!/bin/sh
+here=$(dirname "$0")
+[ "$1" = "--version" ] && exit 0
+echo "$*" >> "$here/asked.txt"
+[ "$1" = "--list-devices" ] && printf 'Available devices:\n  Vulkan0: Test Card (100 MiB, 90 MiB free)\n' && exit 0
+echo "llama_model_load: error loading model"
+exit 1
+"#;
+        let (rt, model) = (d.runtime.unwrap(), manifest::model(manifest::DEFAULT_MODEL).unwrap());
+        let (bin, weights) = (install::component_dir(&d.root, &rt.llm).join("bin"), install::component_dir(&d.root, &model.component));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&weights).unwrap();
+        std::fs::write(weights.join(model.component.url.rsplit('/').next().unwrap()), "GGUF").unwrap();
+        executable(&bin.join(manifest::LLAMA_SERVER), SERVER);
+        for dir in [bin.parent().unwrap(), &weights] {
+            std::fs::write(dir.join(install::COMPLETE), "").unwrap();
+        }
+        bin.join("asked.txt")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_the_model_on_the_graphics_card_only_when_the_settings_allow() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_model(&d);
+        let off = DjConfig { enabled: true, gpu: false, ..DjConfig::default() };
+        assert!(d.warm(&off).await.is_err());
+        let started = std::fs::read_to_string(&asked).unwrap();
+        assert_eq!(started.lines().count(), 1, "{started}");
+        assert!(started.contains("--device none"), "{started}");
+        std::fs::remove_file(&asked).unwrap();
+        // Allowed, the card it finds is tried first, then the processor.
+        let on = DjConfig { gpu: true, ..off };
+        let err = d.warm(&on).await.unwrap_err().to_string();
+        assert!(err.contains("graphics card") && err.contains("processor"), "{err}");
+        let started: Vec<String> = std::fs::read_to_string(&asked).unwrap().lines().map(str::to_owned).collect();
+        assert_eq!(started.len(), 3, "{started:?}");
+        assert_eq!(started[0], "--list-devices");
+        assert!(!started[1].contains("--device") && started[2].contains("--device none"), "{started:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reads_lines_in_the_voice_and_at_the_speed_picked() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "light-female");
+        let cfg = DjConfig { enabled: true, voice: "light-female".into(), voice_speed: 1.25, ..DjConfig::default() };
+        let speech = d.speak(&cfg, "Hi there.").await.unwrap();
+        assert_eq!((speech.duration_ms, speech.sentences.len()), (1000, 1));
+        let asked = std::fs::read_to_string(asked).unwrap();
+        let asked: Vec<&str> = asked.lines().collect();
+        assert!(asked.contains(&"--sid=1") && asked.contains(&"--kitten-length-scale=0.800"), "{asked:?}");
+        assert_eq!(asked[asked.len() - 2..], ["--", "Hi there."]);
+        assert!(d.speech_audio(speech.id).is_some());
+        // Played at the loudness every line is: 4 dB up from the 27 under full scale it was read at.
+        let pcm = d.playable(speech.id).unwrap();
+        let rms = (pcm.samples.iter().map(|s| s * s).sum::<f32>() / pcm.samples.len() as f32).sqrt();
+        assert!((20.0 * rms.log10() + 23.0).abs() < 0.2, "{}", 20.0 * rms.log10());
+        assert!(d.playable(speech.id + 1000).is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn previews_a_voice_apart_from_the_djs_lines() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "lewis");
+        // Picked or not, and with the DJ off.
+        let cfg = DjConfig { voice_speed: 0.8, ..DjConfig::default() };
+        let first = d.preview(&cfg, "lewis", "Hi, I'm Lewis.").await.unwrap();
+        let asked = std::fs::read_to_string(asked).unwrap();
+        assert!(asked.contains("--sid=10\n") && asked.contains("--kokoro-length-scale=1.250\n"), "{asked}");
+        let on = DjConfig { enabled: true, voice: "lewis".into(), ..DjConfig::default() };
+        let mut lines = Vec::new();
+        for _ in 0..SPEECH_KEPT {
+            lines.push(d.speak(&on, "Hi.").await.unwrap().id);
+        }
+        let preview = d.preview(&cfg, "lewis", "Hi again.").await.unwrap();
+        // No line of the DJ's was pushed out, and only the last preview is kept.
+        assert!(lines.iter().all(|id| d.speech_audio(*id).is_some()));
+        assert!(d.speech_audio(preview.id).is_some());
+        assert!(d.speech_audio(first.id).is_none());
+        assert!(d.preview(&cfg, "nobody", "Hi.").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn previews_only_a_voice_that_is_downloaded() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        match d.preview(&DjConfig::default(), "lewis", "Hi.").await {
+            Err(AppError::Other(m)) => assert!(m.contains("downloading"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn says_lines_the_way_they_read_right_and_shows_them_as_written() {
+        let d = dj();
+        if d.runtime.is_none() {
+            return;
+        }
+        let asked = fake_voice(&d, "michael");
+        let cfg = DjConfig { enabled: true, ..DjConfig::default() };
+        let speech = d.speak(&cfg, "That was the #1 song by J. Cole, from 1999. Next up!").await.unwrap();
+        let shown: Vec<&str> = speech.sentences.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(shown, ["That was the #1 song by J. Cole, from 1999.", "Next up!"]);
+        let asked = std::fs::read_to_string(asked).unwrap();
+        assert_eq!(asked.lines().last(), Some("That was the number 1 song by J Cole, from 19 99. Next up!"));
     }
 
     #[test]
@@ -1027,5 +1589,54 @@ mod tests {
         }
         assert!(d.speech_audio(0).is_none());
         assert_eq!(d.speech_audio(SPEECH_KEPT as u64 + 2).as_deref(), Some(&vec![(SPEECH_KEPT + 2) as u8]));
+    }
+
+    #[test]
+    fn says_when_the_local_model_stopped_while_answering() {
+        let failed = || Err(AppError::Other("The DJ's model isn't running".into()));
+        let said = or_died(failed(), Api::Local, Some("exit status: 9. out of memory".into())).unwrap_err().to_string();
+        assert_eq!(said, "The DJ's model stopped while answering (exit status: 9. out of memory)");
+        assert_eq!(or_died(failed(), Api::Local, None).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert_eq!(or_died(failed(), Api::Own, Some("x".into())).unwrap_err().to_string(), "The DJ's model isn't running");
+        assert!(or_died(Ok(Answer::default()), Api::Local, Some("x".into())).is_ok());
+    }
+
+    /// MusicBrainz keeping the first request it gets waiting, and answering the next with a recording's genres.
+    async fn musicbrainz_keeps_the_first_waiting() -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (_waiting, _) = listener.accept().await.unwrap();
+            let (mut next, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = next.read(&mut buf).await;
+            let body = r#"{"recordings":[{"title":"x","genres":[{"name":"shoegaze","count":2}],"tags":[]}]}"#;
+            let head = format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
+            next.write_all(head.as_bytes()).await.unwrap();
+            next.write_all(body.as_bytes()).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn a_newer_look_up_drops_the_one_still_waiting_for_musicbrainz() {
+        let mut d = dj();
+        d.songs.musicbrainz_url = musicbrainz_keeps_the_first_waiting().await;
+        d.songs.musicbrainz_every = Duration::from_millis(10);
+        let token = std::env::temp_dir().join(format!("mildify-test-{}", crate::config::random_hex(8))).join("token.json");
+        let web = crate::webapi::WebApi::new(reqwest::Client::new(), token);
+        let cfg = DjConfig { enabled: true, musicbrainz: true, ..DjConfig::default() };
+        let song = |uri: &str| [SongRef { uri: uri.into(), name: "x".into(), artist: "y".into(), artist_id: None }];
+        let (a, b) = (song("spotify:track:a"), song("spotify:track:b"));
+        let first = d.song_info(&cfg, &a, None, &web);
+        let second = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            d.song_info(&cfg, &b, None, &web).await
+        };
+        let (first, second) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(first, second) }).await.unwrap();
+        assert!(first.unwrap_err().to_string().contains("newer request"));
+        assert_eq!(second.unwrap()[0].genres, ["shoegaze"]);
     }
 }

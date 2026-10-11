@@ -6,7 +6,7 @@
 // too short an intro, the next song starts after the DJ. Either overlap can be turned off.
 //
 // Also turns a spoken line's sentence timings into lyric lines, so the captions use the same lines and
-// syllable sweep as the lyrics.
+// syllable sweep as the lyrics, and times a line that's only shown as if it were read.
 
 import type { DjSentence } from "./ipc";
 import { lyricLines, type LyricLine } from "./lyricLines";
@@ -104,6 +104,25 @@ export function captionLines(sentences: DjSentence[]): LyricLine[] {
     lines.push({ start: s.start_ms, end: s.end_ms, text: s.text, syllables });
   }
   return lines;
+}
+
+/** About how long the voice takes per letter, and between sentences: a line shown without it is timed the same. */
+export const READ_MS_PER_CHAR = 65;
+const READ_PAUSE_MS = 300;
+/** A line shown without the voice stays up at least this long. */
+export const SHOWN_MIN_MS = 3000;
+
+/** A line shown without the voice (Just play, or a voice that failed) as captions timed as if it were read: its
+ * sentences in turn, at about the voice's pace. */
+export function readLines(sentences: string[]): { lines: LyricLine[]; durationMs: number } {
+  let at = 0;
+  const timed = sentences.map((text): DjSentence => {
+    const start_ms = at;
+    const end_ms = at + text.length * READ_MS_PER_CHAR;
+    at = end_ms + READ_PAUSE_MS;
+    return { text, start_ms, end_ms };
+  });
+  return { lines: captionLines(timed), durationMs: Math.max(SHOWN_MIN_MS, at - READ_PAUSE_MS) };
 }
 
 /** The gain librespot's default volume curve gives a slider position, so the voice sits with the music. */

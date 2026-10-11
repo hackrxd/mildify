@@ -103,6 +103,8 @@ jobs:
       - run: npm test
       - run: cargo test --lib --locked
         working-directory: src-tauri
+      # Builds run on other systems only for tags: check now that each still gets every shared dependency.
+      - run: node scripts/platform-deps.mjs
 
   build:
     needs: prepare

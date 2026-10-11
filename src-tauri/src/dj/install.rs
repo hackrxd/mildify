@@ -14,7 +14,7 @@ use super::manifest::{Component, Pack};
 use crate::error::{AppError, Result};
 
 /// Written last into a component's folder: its presence means the folder is whole.
-const COMPLETE: &str = ".complete";
+pub(crate) const COMPLETE: &str = ".complete";
 /// Partial downloads, kept so an interrupted one resumes.
 pub const DOWNLOADS: &str = "downloads";
 /// A download that sends nothing for this long has stalled.
@@ -58,39 +58,20 @@ pub fn size_of(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Removes folders a newer build no longer uses (an older runtime, say), and leftovers of interrupted unpacks.
+/// Removes folders a newer build no longer uses (an older runtime, say), and leftovers of interrupted unpacks. Files
+/// are the DJ's own, such as what it looked up about songs, and stay.
 pub fn remove_stale(root: &Path, known: &[&str]) {
     let Ok(entries) = fs::read_dir(root) else { return };
     for entry in entries.filter_map(|e| e.ok()) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == DOWNLOADS || known.contains(&name.as_str()) {
+        let path = entry.path();
+        if name == DOWNLOADS || known.contains(&name.as_str()) || !path.is_dir() {
             continue;
         }
-        let path = entry.path();
-        let r = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
-        if let Err(e) = r {
+        if let Err(e) = fs::remove_dir_all(&path) {
             log::warn!("couldn't remove {}: {e}", path.display());
         }
     }
-}
-
-/// The SHA-256 Hugging Face publishes for a file, from the `X-Linked-Etag` of its redirect.
-pub async fn hub_sha256(url: &str) -> Option<String> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent(concat!("Mildify/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .ok()?;
-    let resp = client.head(url).timeout(Duration::from_secs(20)).send().await.ok()?;
-    let headers = resp.headers();
-    let etag = headers.get("x-linked-etag").or_else(|| headers.get("etag"))?.to_str().ok()?;
-    sha256_etag(etag)
-}
-
-/// An ETag that is a SHA-256 (`"abc…"`, `W/"abc…"`), lowercased.
-fn sha256_etag(etag: &str) -> Option<String> {
-    let hash = etag.trim().trim_start_matches("W/").trim_matches('"').to_ascii_lowercase();
-    (hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hash)
 }
 
 /// What a download has done so far.
@@ -108,17 +89,7 @@ pub async fn install(http: &reqwest::Client, root: &Path, c: &Component, progres
     tokio::fs::create_dir_all(&downloads).await?;
     let part = downloads.join(format!("{}.part", c.id));
 
-    let expected = match c.sha256 {
-        Some(h) => Some(h.to_owned()),
-        None => {
-            let hub = hub_sha256(c.url).await;
-            if hub.is_none() {
-                log::warn!("no published hash for {}; checking its format only", c.url);
-            }
-            hub
-        }
-    };
-    download(http, c.url, &part, expected.as_deref(), progress).await?;
+    download(http, c.url, &part, Some(c.sha256), progress).await?;
 
     let dest = component_dir(root, c);
     let staging = root.join(format!(".{}.unpacking", c.id));
@@ -399,12 +370,13 @@ mod tests {
         for d in ["llama-b1", "llama-b2", DOWNLOADS, ".llama-b2.unpacking"] {
             fs::create_dir_all(dir.join(d)).unwrap();
         }
-        fs::write(dir.join("stray.txt"), "x").unwrap();
+        // What the DJ looked up about songs.
+        fs::write(dir.join("song_info.json"), "{}").unwrap();
         remove_stale(&dir, &["llama-b2"]);
         let mut left: Vec<String> =
             fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         left.sort();
-        assert_eq!(left, vec![DOWNLOADS.to_owned(), "llama-b2".to_owned()]);
+        assert_eq!(left, vec![DOWNLOADS.to_owned(), "llama-b2".to_owned(), "song_info.json".to_owned()]);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -417,16 +389,6 @@ mod tests {
         assert_eq!(size_of(&dir), 42);
         assert_eq!(size_of(&dir.join("missing")), 0);
         fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn reads_hashes_out_of_etags() {
-        let h = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
-        assert_eq!(sha256_etag(&format!("\"{h}\"")).as_deref(), Some(h));
-        assert_eq!(sha256_etag(&format!("W/\"{}\"", h.to_uppercase())).as_deref(), Some(h));
-        // A git blob id or a short etag isn't a file hash.
-        assert_eq!(sha256_etag("\"62a8d092b0a1047016f3edbd0fde387598727aa5\""), None);
-        assert_eq!(sha256_etag("\"not-a-hash\""), None);
     }
 
     #[test]
@@ -559,7 +521,7 @@ mod tests {
         let body = enc.finish().unwrap();
         let url: &'static str = Box::leak(serve_once(body.clone()).await.into_boxed_str());
         let sha: &'static str = Box::leak(sha(&body).into_boxed_str());
-        let c = Component { id: "pkg-1", label: "Pkg", url, sha256: Some(sha), bytes: 1, pack: Pack::TarGz };
+        let c = Component { id: "pkg-1", label: "Pkg", url, sha256: sha, bytes: 1, pack: Pack::TarGz };
         let progress = Counter { last: AtomicU64::new(0), stop: AtomicBool::new(false) };
         assert!(!is_installed(&root, &c));
         install(&reqwest::Client::new(), &root, &c, &progress).await.unwrap();

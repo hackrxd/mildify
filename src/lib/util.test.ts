@@ -245,6 +245,19 @@ describe("copyText", () => {
     expect(document.querySelector("textarea")).toBeNull();
   });
 
+  it("gives the focus back where it was after selecting the textarea", async () => {
+    const button = document.body.appendChild(document.createElement("button"));
+    button.focus();
+    // As a browser's selecting does, the copy takes the focus.
+    execCommand(true).mockImplementation(() => {
+      document.querySelector("textarea")!.focus();
+      return document.activeElement === document.querySelector("textarea");
+    });
+    await copyText("la la");
+    expect(document.activeElement).toBe(button);
+    button.remove();
+  });
+
   it("rejects when nothing could copy", async () => {
     execCommand(false);
     await expect(copyText("la la")).rejects.toThrow();

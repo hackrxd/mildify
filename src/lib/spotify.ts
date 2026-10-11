@@ -46,8 +46,8 @@ export const recentlyPlayed = () => get<Paging<PlayHistory>>("/me/player/recentl
 export const topArtists = () => get<Paging<Artist>>("/me/top/artists", { limit: 20, time_range: "short_term" });
 export const topTracks = () => get<Paging<Track>>("/me/top/tracks", { limit: 20, time_range: "short_term" });
 export type TimeRange = "short_term" | "medium_term" | "long_term";
-export const topTracksIn = (timeRange: TimeRange, offset = 0) =>
-  get<Paging<Track>>("/me/top/tracks", { limit: 20, offset, time_range: timeRange });
+export const topTracksIn = (timeRange: TimeRange, offset = 0, limit = 20) =>
+  get<Paging<Track>>("/me/top/tracks", { limit, offset, time_range: timeRange });
 
 /** Unified library endpoints (2026): take full Spotify URIs, max 40 per call. */
 export const libraryContains = (uris: string[]) => get<boolean[]>("/me/library/contains", { uris: uris.join(",") });
