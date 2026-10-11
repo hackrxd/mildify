@@ -108,7 +108,7 @@ export default function (ns) {
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
 items, watchers, what it added to the DJ, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
-the extension left running can't add styles, pages, menu items, watchers or toasts back through the `ns` it was
+the extension left running can't add styles, pages, menu items, watchers, toasts or anything for the DJ back through the `ns` it was
 given, its `ns.api` calls reject without reaching Spotify, and an `onUnload` registered then runs at once.
 `ns.player`, `ns.router` and `ns.storage` still work, so stop your own timers and listeners in the function you
 return. Editing it (for a folder extension,
@@ -168,9 +168,9 @@ set, song or list of lines, so comparing with `===` tells you whether anything c
 
 | Event | When |
 | --- | --- |
-| `{ type: "set-picked", set }` | A set is picked, ahead of its turn. |
-| `{ type: "line-spoken", line }` | The DJ said a line, or showed it: usually just before the `set-started` of the set it brings in, and just after when the set's first song came on before the DJ had had its say. |
-| `{ type: "line-withdrawn", line }` | The DJ took a line back: you went back in the song it talked over. It says it again later, with another `line-spoken`. |
+| `{ type: "set-picked", set }` | A set is picked, ahead of its turn. It may never start: a request or a skipped set has another picked in its place, and the DJ may stop first. |
+| `{ type: "line-spoken", line }` | The DJ starts a line, said aloud or only shown. `line.setId` is the set it brings in, whose `set-started` can come before or after it, so match the two by id. |
+| `{ type: "line-withdrawn", line }` | The DJ took a line back: the listener went back in the song it talked over. It starts it again later, with another `line-spoken`, unless its set is let go first, as with `set-picked`. |
 | `{ type: "set-started", set }` | A set's first song came on. |
 | `{ type: "song-started", song, set }` | One of the DJ's songs came on; `set` is its set, or `null`. |
 | `{ type: "song-skipped", song }`, `{ type: "song-unskipped", song }` | A song was left before halfway; Previous right after took that back. |
@@ -183,31 +183,48 @@ An event reaches `fn` just after the step of the DJ's that it's about, so the DJ
 of it.
 
 `ns.dj.addSetAction({ label, action, when? })` adds an entry to the menu of each set on the DJ page (its "…"
-button, or a right-click on its name), as `addTrackMenuItem` does for tracks, with a copy of the set. Returns a
-remove function.
+button, or a right-click on its name) and of the DJ's items in the queue panel, as `addTrackMenuItem` does for
+tracks, with a copy of the set. Returns a remove function.
 
 `ns.dj.setInstructions(text)` tells the DJ how to talk or what to play from the listener's songs, as the
-listener's own instructions under **Tell your DJ** do. The model reads them after the listener's, which come first
-where the two disagree. An extension has one set of instructions, up to 300 characters: calling it again replaces
-them, and an empty string takes them back, as does the remove function it returns. All extensions' instructions
-together can be 600 characters in a prompt; past that, the latest wait until there's room. The DJ page lists each
-extension's instructions, so the listener sees everything the DJ is told, and with a cloud model they go to its
-provider with the rest of the prompt. They apply from the next set the DJ picks.
+listener's own instructions under **Tell your DJ** do. It returns a remove function.
+
+- An extension has one set of instructions, up to 300 characters. Calling it again replaces them where they were,
+  and an empty string takes them back.
+- The model reads them after the listener's, which come first where the two disagree. They apply from the next set
+  the DJ picks.
+- All extensions' instructions together can be 600 characters in a prompt. They're passed on in the order they were
+  given, and ones that don't fit in what's left wait for room; shorter ones after them may still fit. An extension
+  turned off and on again gives its instructions anew, after the others'.
+- The DJ page lists each extension's instructions, and which wait, so the listener sees everything the DJ is told.
+  With a cloud model, they go to its provider with the rest of the prompt.
 
 `ns.dj.addSegment({ id, label, brief, phrase?, fits })` adds a segment of its own: a kind of set the DJ plays from
-the listener's songs, as it does On repeat or Throwbacks. `fits(song)` says whether one of the listener's songs
-belongs in it, given a copy of the song as above; it's asked about every song the DJ could play each time it picks a
-set, so keep it quick, and its answers about the same song the same. `label` names the segment when the model
-doesn't, `brief` says what it is for the model ("songs under three minutes"), up to 200 characters, and `phrase` is
-how a template line brings it in ("some short songs"; the label by default). The DJ takes turns between its own
-segments and those extensions add, among those with at least three songs that fit, and not one of the last two
-while there are others; it opens the show with one of its own whenever it can. The songs only ever come from the listener's own
-listening. An extension can add up to three segments, and one with the same `id` replaces it. A `fits` that throws
-is taken as not fitting, and logged once. Returns a remove function. The model hears which segments came from an
-extension, and the DJ page says so on each of their sets.
+the listener's songs, as it does On repeat or Throwbacks. It returns a remove function.
+
+- `id` is 1 to 40 of `A-Z`, `a-z`, `0-9`, `.`, `_` and `-`. An extension can add up to three segments, and one with
+  the same `id` replaces it.
+- `fits(song)` says whether one of the listener's songs belongs in it, given a copy of the song as above. It answers
+  at once, and quickly: each time the DJ picks a set, it's asked once about every song the DJ could play. One that
+  throws, or answers with a promise, is taken as not fitting, and logged once.
+- `label` names the segment when the model doesn't, cut to 40 characters. `phrase` is how a template line brings it
+  in ("some short songs"; the label by default), cut to 80. Both lose any quote marks.
+- `brief` says what it is for the model ("songs under three minutes"), up to 200 characters. The model hears that the
+  segment comes from an extension, and is told to go by its brief only where the listener's own instructions agree.
+
+`addSegment` throws for an id it doesn't take, a missing `fits`, or a fourth segment. Uncaught while the extension
+starts, that fails its start, as any error does.
+
+The DJ takes turns between its own segments and those extensions add, among those with at least three songs that
+fit, and never one of the last two while there are others. It opens the show with one of its own whenever it can.
+The songs only ever come from the listener's own listening, and a set picked as it goes keeps to the ones that fit,
+even after a like. The DJ page lists each segment with its brief, and marks the sets from it.
 
 `ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
 play something else, use `ns.player`: the DJ steps out when other music plays.
+
+Turning an extension off takes back everything it added to the DJ, from the next set the DJ picks: a set already
+picked, or being picked, plays on as it was picked.
 
 [DJ log](mods/extensions/dj-log.js) uses all of it: a page that logs what the DJ does, a Short songs segment,
 a line of instructions and an entry in each set's menu.
