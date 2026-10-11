@@ -227,6 +227,22 @@ describe("SetQueue", () => {
     expect(q.of("b")).toBe("done");
   });
 
+  it("leaves a set queued while another's last song is on its way pending until its own are in", async () => {
+    const q = new SetQueue<string>();
+    const held = new Map<string, () => void>();
+    const add = (uri: string) => new Promise<void>((r) => held.set(uri, r));
+    q.add("a", ["1"], add);
+    await settle();
+    // "a" came in before its song was there, and the set after it is queued meanwhile.
+    q.add("b", ["2"], add);
+    held.get("1")!();
+    await settle();
+    expect(q.of("b")).toBe("pending");
+    held.get("2")!();
+    await q.settled;
+    expect(q.of("b")).toBe("done");
+  });
+
   it("forgets the set: nothing of it reads as queued, and the rest of it doesn't go in", async () => {
     const { q, sent, add, release } = queue("1");
     q.add("a", ["1", "2"], add);
