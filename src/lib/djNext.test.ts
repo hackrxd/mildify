@@ -111,6 +111,25 @@ describe("NextSet", () => {
     expect(await newerWait).toBeInstanceOf(GaveUp);
   });
 
+  it("says when a wait can be cut short, and when it no longer can, with why it was", async () => {
+    const heard: boolean[] = [];
+    const next = new NextSet((waiting) => heard.push(waiting));
+    const answer = deferred<string>();
+    const first = next.wait(answer.promise, 10_000);
+    // A newer wait while one is under way: still waiting, nothing new to say.
+    const second = next.wait(new Promise<string>(() => {}), 10_000).catch((e: unknown) => e);
+    answer.resolve("answer");
+    await first;
+    expect(heard).toEqual([true]);
+    next.hurry("you didn't want to wait");
+    const e = (await second) as InstanceType<typeof GaveUp>;
+    expect(e.why).toBe("you didn't want to wait");
+    expect(heard).toEqual([true, false]);
+    next.wait(new Promise<string>(() => {}), 10_000).catch(() => {});
+    next.reset();
+    expect(heard).toEqual([true, false, true, false]);
+  });
+
   it("starts afresh: what was being picked is let go of, and no wait can be hurried", async () => {
     const next = new NextSet();
     const answer = deferred<string>();
