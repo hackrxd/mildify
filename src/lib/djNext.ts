@@ -105,11 +105,9 @@ export class SetQueue<S> {
   }
 
   async #add(set: S, uris: readonly string[], add: (uri: string) => Promise<unknown>) {
-    // Let go of while it waited its turn.
-    if (this.#adding !== set) return;
     try {
       for (const uri of uris) {
-        // Let go of meanwhile: the rest of it isn't wanted.
+        // Let go of while it waited its turn, or since: the rest of it isn't wanted.
         if (this.#adding !== set) return;
         await add(uri);
       }
