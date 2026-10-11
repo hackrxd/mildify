@@ -1562,6 +1562,8 @@ class Dj {
     const queued = this.#queue.of(next);
     if (!next || queued === "failed") return this.#holdForNextSet(run, next, left);
     if (queued === "no") {
+      // A change on its way to the player's queue (Previous clears it) lands first: the set is queued after it.
+      if (this.#lining) return;
       // In Spotify's queue, the next set follows the last song without a gap.
       this.#queue.add(next, next.songs.map((s) => s.uri), (uri) => sp.addToQueue(uri, session.device?.device_id));
       return;

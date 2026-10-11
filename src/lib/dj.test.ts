@@ -2822,6 +2822,43 @@ describe("picking as it goes", () => {
     expect(sp.addToQueue).toHaveBeenCalledWith(next.songs[0].uri, "here");
   });
 
+  it("queues the next set only once when it's picked while Previous is on its way", async () => {
+    await liveStarted();
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementation(() => new Promise((r) => (answer = r)));
+    // The set plays on until it ends and the next set is being picked.
+    for (let i = 0; i < 10 && dj.activity !== "Picking what's next…"; i++) {
+      const songs = dj.current!.songs;
+      const at = songs.findIndex((s) => s.uri === player.track?.uri);
+      if (at === songs.length - 1) await tick();
+      else {
+        await finish();
+        await playing(songs[at + 1].uri, 0);
+        await vi.advanceTimersByTimeAsync(0);
+      }
+    }
+    expect(dj.upNext).toBeNull();
+    // The player takes its time over Previous, and the next set is picked meanwhile.
+    let cleared!: () => void;
+    backend.device.mockImplementation(async (c: unknown) => {
+      if ((c as { action: string }).action === "clear_queue") await new Promise<void>((r) => (cleared = r));
+    });
+    const back = dj.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    answer({ name: "Next", songs: [1, 2, 3], talk: "Here's the next one." });
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    sp.addToQueue.mockClear();
+    await tick();
+    backend.device.mockImplementation(async () => {});
+    cleared();
+    await back;
+    await playing(dj.current!.songs.at(-1)!.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await tick();
+    expect(sp.addToQueue.mock.calls.filter((c) => c[0] === next.songs[0].uri)).toHaveLength(1);
+  });
+
   it("times the talk over the song Previous went back to by that song's own vocals, once they're known", async () => {
     await liveStarted();
     const [, b] = dj.current!.songs;
