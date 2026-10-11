@@ -5,6 +5,7 @@
 // another listener. Never the DJ's settings, keys, or what went wrong with its model, whose errors may quote a
 // provider's. What they add (`djExtensions`) the DJ reads as it picks each set, and the DJ page lists.
 
+import { untrack } from "svelte";
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate, Reason, Segment, SegmentId } from "./djPicks";
 import { cleanTalk, cut, EXTENSION_INSTRUCTIONS_MAX, SEGMENT_BRIEF_MAX } from "./djTalk";
@@ -197,19 +198,24 @@ class DjExtensions {
   /** Each extension's instructions, in the order they were first given. */
   instructions = $state.raw<ExtensionInstructions[]>([]);
 
+  // What changes these lists reads them too, untracked: an extension may call it from inside `ns.watch`, which would
+  // otherwise run again on its own change, again and again.
+
   /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any. */
   setInstructions(owner: Owner, text: string): ExtensionInstructions | null {
-    const clean = cut(text.trim(), EXTENSION_INSTRUCTIONS_MAX).trim();
-    const entry = clean ? { owner, text: clean } : null;
-    const had = this.instructions.some((x) => x.owner.id === owner.id);
-    if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
-    else this.instructions = this.instructions.flatMap((x) => (x.owner.id !== owner.id ? [x] : entry ? [entry] : []));
-    return entry;
+    return untrack(() => {
+      const clean = cut(text.trim(), EXTENSION_INSTRUCTIONS_MAX).trim();
+      const entry = clean ? { owner, text: clean } : null;
+      const had = this.instructions.some((x) => x.owner.id === owner.id);
+      if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
+      else this.instructions = this.instructions.flatMap((x) => (x.owner.id !== owner.id ? [x] : entry ? [entry] : []));
+      return entry;
+    });
   }
 
   /** Takes `entry` away, if it's still its extension's. */
   removeInstructions(entry: ExtensionInstructions) {
-    this.instructions = this.instructions.filter((x) => x !== entry);
+    untrack(() => (this.instructions = this.instructions.filter((x) => x !== entry)));
   }
 
   /** The segments extensions added, in the order they were first added. */
@@ -219,42 +225,44 @@ class DjExtensions {
    * past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say; a `fits` that throws doesn't fit,
    * and is reported once. */
   addSegment(owner: Owner, spec: DjSegmentSpec): ExtensionSegment {
-    const own = String(spec?.id ?? "").trim();
-    if (!own) throw new Error("A DJ segment needs an id");
-    const fits = spec.fits;
-    if (typeof fits !== "function") throw new Error("A DJ segment needs a fits(song) function");
-    const id: SegmentId = `ext:${owner.id}/${own}`;
-    const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
-    if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
-    const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || cut(own, SEGMENT_LABEL_MAX);
-    const brief = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim() || label;
-    const phrase = cut(cleanTalk(String(spec.phrase ?? "")), SEGMENT_PHRASE_MAX).trim() || label;
-    let failed = false;
-    const segment: Segment = {
-      id,
-      label,
-      brief,
-      phrase,
-      from: owner.name,
-      fits: (c) => {
-        try {
-          return !!fits(songView(c));
-        } catch (e) {
-          if (!failed) console.error(`[${owner.name}] the DJ segment "${label}" couldn't tell whether a song fits`, e);
-          failed = true;
-          return false;
-        }
-      },
-    };
-    const entry = { owner, segment };
-    const had = this.segments.some((x) => x.segment.id === id);
-    this.segments = had ? this.segments.map((x) => (x.segment.id === id ? entry : x)) : [...this.segments, entry];
-    return entry;
+    return untrack(() => {
+      const own = String(spec?.id ?? "").trim();
+      if (!own) throw new Error("A DJ segment needs an id");
+      const fits = spec.fits;
+      if (typeof fits !== "function") throw new Error("A DJ segment needs a fits(song) function");
+      const id: SegmentId = `ext:${owner.id}/${own}`;
+      const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
+      if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
+      const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || cut(own, SEGMENT_LABEL_MAX);
+      const brief = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim() || label;
+      const phrase = cut(cleanTalk(String(spec.phrase ?? "")), SEGMENT_PHRASE_MAX).trim() || label;
+      let failed = false;
+      const segment: Segment = {
+        id,
+        label,
+        brief,
+        phrase,
+        from: owner.name,
+        fits: (c) => {
+          try {
+            return !!fits(songView(c));
+          } catch (e) {
+            if (!failed) console.error(`[${owner.name}] the DJ segment "${label}" couldn't tell whether a song fits`, e);
+            failed = true;
+            return false;
+          }
+        },
+      };
+      const entry = { owner, segment };
+      const had = this.segments.some((x) => x.segment.id === id);
+      this.segments = had ? this.segments.map((x) => (x.segment.id === id ? entry : x)) : [...this.segments, entry];
+      return entry;
+    });
   }
 
   /** Takes `entry` away, if it's still there. */
   removeSegment(entry: ExtensionSegment) {
-    this.segments = this.segments.filter((x) => x !== entry);
+    untrack(() => (this.segments = this.segments.filter((x) => x !== entry)));
   }
 
   /** The segments extensions added, for the DJ to take turns with its own. */

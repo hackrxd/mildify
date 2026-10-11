@@ -396,6 +396,29 @@ describe("extensions", () => {
     expect(setMenu(set).map((i) => i.label)).not.toContain("Log this set");
   });
 
+  it("can change what they add to the DJ from inside a watcher, without setting it off again", async () => {
+    list.extensions = [mod("w.js")];
+    localStorage.setItem("nativify:extensions", '["w.js"]');
+    const runs = vi.fn();
+    modules["w.js"] = {
+      default: (ns: ExtensionApi) => {
+        ns.watch(() => {
+          runs();
+          ns.dj.setInstructions(`Keep it light, run ${runs.mock.calls.length}.`);
+          ns.dj.addSegment({ id: "short", label: "Short songs", brief: "songs under three minutes", fits: () => true });
+        });
+      },
+    };
+    await boot();
+    await mods.startExtensions();
+    flushSync();
+    expect(mods.states["w.js"]).toBe("on");
+    expect(runs).toHaveBeenCalledOnce();
+    const { djExtensions } = await import("./djExtensions.svelte");
+    expect(djExtensions.instructions.map((x) => x.text)).toEqual(["Keep it light, run 1."]);
+    expect(djExtensions.segments.map((x) => x.segment.id)).toEqual(["ext:w.js/short"]);
+  });
+
   it("the DJ log example works with the API, and leaves nothing behind", async () => {
     list.extensions = [mod("dj-log.js")];
     localStorage.setItem("nativify:extensions", '["dj-log.js"]');
