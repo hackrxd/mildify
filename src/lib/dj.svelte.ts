@@ -1179,6 +1179,8 @@ class Dj {
    * leaves too little, only what's playing now. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
     const playing = new Set(this.current?.songs.map((s) => s.uri) ?? []);
+    // Starting over leaves out the song in the player too: an opening set starting with it couldn't tell it began.
+    if (player.track) playing.add(player.track.uri);
     const ways = [this.#avoid(), this.#avoid(null, playing), { played: playing, skippedArtists: new Set<string>() }];
     for (const avoid of ways) {
       const segment = nextSegment(this.#segments, this.#pool, avoid);
