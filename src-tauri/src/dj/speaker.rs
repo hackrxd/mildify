@@ -397,6 +397,17 @@ mod tests {
         fn quiet(&self, ms: u64) -> bool {
             self.events.recv_timeout(Duration::from_millis(ms)).is_err()
         }
+        /// Whether the thread lets go of the output within a couple of seconds.
+        fn closes(&self) -> bool {
+            let until = Instant::now() + Duration::from_secs(2);
+            while self.fake.lock().unwrap().open {
+                if Instant::now() > until {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            true
+        }
         /// Waits for the thread to have passed `what` on to the output.
         fn told(&self, what: &str) {
             let until = Instant::now() + Duration::from_secs(2);
@@ -523,8 +534,7 @@ mod tests {
         assert!(h.fake.lock().unwrap().open, "closed while held");
         // Let go of, it closes once idle again.
         h.tx.send(Cmd::Hold(false)).unwrap();
-        std::thread::sleep(Duration::from_millis(400));
-        assert!(!h.fake.lock().unwrap().open);
+        assert!(h.closes());
         // Closing lets go of a hold too.
         h.tx.send(Cmd::Hold(true)).unwrap();
         h.tx.send(Cmd::Close).unwrap();
@@ -532,8 +542,7 @@ mod tests {
         h.next();
         h.fake.lock().unwrap().finished = true;
         h.next();
-        std::thread::sleep(Duration::from_millis(400));
-        assert!(!h.fake.lock().unwrap().open);
+        assert!(h.closes());
     }
 
     #[test]
