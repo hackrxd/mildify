@@ -171,7 +171,8 @@ pub fn clean(text: &str) -> String {
 
 /// Sentences as the voice program reads them: split after . ! or ? followed by a space. Not after an ellipsis, nor
 /// after a full stop the sentence goes on after (`say::keeps_going`): before a lowercase word, after an abbreviation,
-/// an initial or a dotted acronym.
+/// an initial or a dotted acronym. A "sentence" with no letters or digits in it ("?!") ends none for the program, so
+/// it goes with the one before, or the first.
 pub fn split_sentences(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
@@ -193,17 +194,30 @@ pub fn split_sentences(text: &str) -> Vec<String> {
                 continue;
             }
         }
+        // Nothing to say on its own: on to the next sentence, unless there's one before to go with.
         let s = current.trim();
-        if !s.is_empty() {
-            out.push(s.to_owned());
+        if !s.chars().any(char::is_alphanumeric) && out.is_empty() {
+            continue;
         }
+        push_sentence(&mut out, s);
         current.clear();
     }
-    let s = current.trim();
-    if !s.is_empty() {
-        out.push(s.to_owned());
-    }
+    push_sentence(&mut out, current.trim());
     out
+}
+
+/// Adds sentence `s`, or with nothing to say in it, adds it to the one before.
+fn push_sentence(out: &mut Vec<String>, s: &str) {
+    if s.is_empty() {
+        return;
+    }
+    match out.last_mut() {
+        Some(last) if !s.chars().any(char::is_alphanumeric) => {
+            last.push(' ');
+            last.push_str(s);
+        }
+        _ => out.push(s.to_owned()),
+    }
 }
 
 /// Each sentence's length in samples, from the program's `sample=N, progress=P` lines.
@@ -546,6 +560,9 @@ mod tests {
             split_sentences("He said \"great.\" next up is Drake. That was great. \"next\" is a word. Hey.. Next one."),
             vec!["He said \"great.\"", "next up is Drake.", "That was great.", "\"next\" is a word.", "Hey..", "Next one."]
         );
+        // Nothing to say on its own: it goes with a sentence.
+        assert_eq!(split_sentences("Wow! ?! Yes."), vec!["Wow! ?!", "Yes."]);
+        assert_eq!(split_sentences("?! Yes. ..."), vec!["?! Yes. ..."]);
     }
 
     #[test]
