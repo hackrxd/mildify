@@ -470,6 +470,17 @@ describe("segments", () => {
     expect(asked).toBe(3);
   });
 
+  it("tell a set picked as it goes which songs fit, while they're there", () => {
+    const entry = m.djExtensions.addSegment(a, short);
+    const fits = m.djExtensions.fitsFor("ext:a.js/short")!;
+    expect(fits(song(1))).toBe(false);
+    expect(fits({ ...song(1), durationMs: 120_000 })).toBe(true);
+    expect(m.djExtensions.fitsFor("onRepeat")).toBeNull();
+    expect(m.djExtensions.fitsFor("ext:b.js/short")).toBeNull();
+    m.djExtensions.removeSegment(entry);
+    expect(m.djExtensions.fitsFor("ext:a.js/short")).toBeNull();
+  });
+
   it("are added through ns.dj, and taken away by its remover or by turning the extension off", () => {
     const { ns, t } = api();
     const remove = ns.addSegment(short);

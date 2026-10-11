@@ -304,6 +304,12 @@ class DjExtensions {
     });
   }
 
+  /** Whether a song fits the extension segment `id`, for a set picked from it as it goes; null for one that isn't an
+   * extension's, or is gone. */
+  fitsFor(id: string): ((c: Candidate) => boolean) | null {
+    return this.segments.find((x) => x.segment.id === id)?.segment.fits ?? null;
+  }
+
   /** The instructions the model is told: in order, as many as fit in `EXTENSION_INSTRUCTIONS_BUDGET`. One that
    * doesn't fit waits for room. */
   promptInstructions(): ExtensionInstructions[] {

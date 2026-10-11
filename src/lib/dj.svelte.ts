@@ -1709,12 +1709,16 @@ class Dj {
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
     const avoid = this.#avoid(cur.request);
     const before = this.#leftOutAtPick.get(cur.id) ?? new Set<string>();
+    // An extension's segment keeps to its own songs, liked or not.
+    const fits = djExtensions.fitsFor(cur.segment);
     return nextInSet(
       {
         plan: cur.plan,
         choices: cur.choices,
         // More like a song liked comes from the rest of the listening, leaving out all a set would.
-        pool: this.#pool.filter((c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a))),
+        pool: this.#pool.filter(
+          (c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)) && (!fits || fits(c)),
+        ),
         sofar,
         played,
         // The set's own songs passed what was left out as it was picked, or were let in on purpose: only artists

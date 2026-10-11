@@ -2105,6 +2105,25 @@ describe("picking as it goes", () => {
     expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
   });
 
+  it("keeps a set from an extension's segment to the songs that fit it, even after a like", async () => {
+    twins();
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each artist's first song, never their other one.
+    const fits = (s: { uri: string }) => Number(s.uri.replace("spotify:track:t", "")) < 100;
+    djExtensions.addSegment({ id: "x.js", name: "X" }, { id: "firsts", label: "Firsts", brief: "first songs", fits });
+    await liveStarted();
+    await untilNextSet();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/firsts" });
+    const set = await nextSet();
+    backend.device.mockClear();
+    // Liking the song playing would bring in its artist's other song, which doesn't fit.
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    expect(dj.current!.songs.length).toBeGreaterThan(1);
+    expect(dj.current!.songs.every(fits)).toBe(true);
+    expect(queued().every((uri) => fits({ uri: uri! }))).toBe(true);
+  });
+
   it("lines up nothing skipped lately, even by an artist the listener likes", async () => {
     twins();
     vi.spyOn(Math, "random").mockReturnValue(0);
