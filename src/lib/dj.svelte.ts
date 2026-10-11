@@ -112,6 +112,9 @@ export const EARLY_TOLERANCE_MS = 300;
 /** Music playing when the DJ starts fades out over this long, from when the player's output queue has played. */
 export const OPENING_FADE_MS = 400;
 const OUTPUT_QUEUE_MS = 600;
+/** The talk over a set's last song is timed by its vocals, once they're known; with this little of the song left, it's
+ * planned without them. */
+export const PLAN_BY_MS = 10_000;
 /** The song lined up next can change (the listener liked something) until this long before the one playing
  * ends; the player starts loading the next song 30 s before. */
 export const REPICK_UNTIL_MS = 35_000;
@@ -273,7 +276,9 @@ class Dj {
   #shown: { since: number; forMs: number } | null = null;
   /** Brings the announced set's music in now. Its cue calls it, and so does skipping the talk. */
   #bringIn: (() => void) | null = null;
-  #lastVocals: Vocals | null = null;
+  /** The vocals of the set's last song, by its URI, once they're known: none when it has no synced lyrics, or they
+   * couldn't be read. */
+  #lastVocals: { uri: string; vocals: Vocals | null } | null = null;
   #lastUri: string | null = null;
   #lastPos = 0;
   #lastDuration = 0;
@@ -1587,7 +1592,8 @@ class Dj {
       return;
     }
     if (this.#queued !== "done") return;
-    if (this.#handOver.on !== uri) this.#plan(run, next, t.durationMs, pos, uri);
+    const known = this.#lastVocals?.uri === uri;
+    if (this.#handOver.on !== uri && (known || left < PLAN_BY_MS)) this.#plan(run, next, t.durationMs, pos, uri);
     // Paused, the song's cues wait: a seek while paused only moves where they'll fire from.
     if (player.isPlaying) this.#runCues(run, this.#handOver.cues, pos, () => player.positionNow());
   }
@@ -1833,8 +1839,12 @@ class Dj {
 
   /** The set ends with `last`: its vocals time the talk over its end, and the next set gets picked. */
   #readyNext(run: number, set: DjSet, last: Candidate) {
-    songVocals(last.uri).then((v) => {
-      if (run === this.#run && this.current?.id === set.id) this.#lastVocals = v;
+    this.#lastVocals = null;
+    songVocals(last.uri).then((vocals) => {
+      // Still the set's last song: a set picked as it goes may have gone back from it meanwhile.
+      if (run === this.#run && this.current?.id === set.id && this.current.songs.at(-1)?.uri === last.uri) {
+        this.#lastVocals = { uri: last.uri, vocals };
+      }
     });
     this.#prepareNext(run);
   }
@@ -1979,7 +1989,8 @@ class Dj {
     };
     const speech = next.speech;
     if (!speech) return this.#handOver.plan(uri, [cue(durationMs - 1000, () => this.#announce(run, next))], null);
-    const plan = this.#planFor(speech, next.firstVocals, this.#lastVocals, durationMs - pos, durationMs);
+    const old = this.#lastVocals?.uri === uri ? this.#lastVocals.vocals : null;
+    const plan = this.#planFor(speech, next.firstVocals, old, durationMs - pos, durationMs);
     const cues: Cue[] = [];
     let hold: Hold<DjSet> | null = null;
     if (plan.overOld > 0) {
