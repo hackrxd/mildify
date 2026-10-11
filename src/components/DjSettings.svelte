@@ -92,6 +92,13 @@
   let pending = $state<{ change: DjChange; question: Question } | null>(null);
   /** The model picker shows the model it's asking about or switching to, and its description, until that's settled. */
   const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : (switchingTo ?? modelChoice));
+  let voicePicker = $state<HTMLSelectElement>();
+
+  async function pickVoice(id: string) {
+    // Not saved: the picker goes back to the voice in use, which it can't tell changed.
+    if (!(await dj.configure({ voice: id })) && voicePicker) voicePicker.value = djSettings?.voice ?? "";
+  }
+
   /** The voice picker shows the voice it's asking about. */
   const shownVoice = $derived(pending?.change.kind === "voice" ? pending.change.choice : (djSettings?.voice ?? ""));
   const shownVoiceChoice = $derived(djStatus?.voices.find((v) => v.id === shownVoice));
@@ -114,7 +121,7 @@
   function make(c: DjChange) {
     pending = null;
     if (c.kind === "model") pickModel(c.choice);
-    else if (c.kind === "voice") dj.configure({ voice: c.choice });
+    else if (c.kind === "voice") pickVoice(c.choice);
     else if (c.kind === "key") removeKey(c.provider);
     else if (c.kind === "forget") {
       dj.forget();
@@ -414,7 +421,12 @@
         <span class="muted small">The voices speak English. Those in a group download together.</span>
       </span>
       <span class="buttons">
-        <select class="field" value={shownVoice} onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}>
+        <select
+          class="field"
+          bind:this={voicePicker}
+          value={shownVoice}
+          onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}
+        >
           {#each voiceGroups(djStatus?.voices ?? []) as group (group.name)}
             <optgroup label={group.label}>
               {#each group.voices as v (v.id)}
