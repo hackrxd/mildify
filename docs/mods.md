@@ -107,7 +107,7 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, DJ listeners, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
+items, watchers, DJ listeners and instructions, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
 the extension left running can't add styles, pages, menu items, watchers or toasts back through the `ns` it was
 given, its `ns.api` calls reject without reaching Spotify, and an `onUnload` registered then runs at once.
 `ns.player`, `ns.router` and `ns.storage` still work, so stop your own timers and listeners in the function you
@@ -131,7 +131,7 @@ offers a **Reload window** button then).
 | `addStyle(css)` | Adds a stylesheet. Returns a remove function. |
 | `addTrackMenuItem({ label, action, when? })` | Adds an entry to the right-click menu of every track, the DJ's songs included. `label` may be a function of the track; `when(track)` hides it for tracks it doesn't apply to; `action(track)` runs on click, and may be async: if it throws or its promise rejects, the error shows as a notice. An entry whose `label` or `when` throws is left out of that menu. The track is the Web API track object (`uri`, `name`, `artists`, `album`, …). Returns a remove function. |
 | `addPage({ id, label, icon?, render })` | Adds a page to the sidebar. `render(el)` draws it into an empty element each time the page opens and may return a cleanup for when it closes. `icon` is one of the app's icon names (`"queue"`, `"heart"`, `"disc"`, `"mic"`, `"lyrics"`, …); the default is a puzzle piece. Returns a remove function. |
-| `dj` | The AI DJ: what it plays and says, what happens in its sessions, and entries for its sets' menus. See [The DJ](#the-dj). |
+| `dj` | The AI DJ: what it plays and says, what happens in its sessions, entries for its sets' menus, and instructions for it. See [The DJ](#the-dj). |
 | `storage.get(key)`, `storage.set(key, value)`, `storage.remove(key)` | Settings that persist across restarts, kept separate per extension. Values are stored as JSON. |
 | `onUnload(fn)` | Runs `fn` when the extension is turned off or restarted. |
 
@@ -184,6 +184,14 @@ of it.
 `ns.dj.addSetAction({ label, action, when? })` adds an entry to the menu of each set on the DJ page (its "…"
 button, or a right-click on its name), as `addTrackMenuItem` does for tracks, with a copy of the set. Returns a
 remove function.
+
+`ns.dj.setInstructions(text)` tells the DJ how to talk or what to play from the listener's songs, as the
+listener's own instructions under **Tell your DJ** do. The model reads them after the listener's, which come first
+where the two disagree. An extension has one set of instructions, up to 300 characters: calling it again replaces
+them, and an empty string takes them back, as does the remove function it returns. All extensions' instructions
+together can be 600 characters in a prompt; past that, the latest wait until there's room. The DJ page lists each
+extension's instructions, so the listener sees everything the DJ is told, and with a cloud model they go to its
+provider with the rest of the prompt. They apply from the next set the DJ picks.
 
 `ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
 play something else, use `ns.player`: the DJ steps out when other music plays.

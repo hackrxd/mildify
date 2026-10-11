@@ -212,6 +212,10 @@ Call me Captain.
 Instructions can change how it talks and which of the offered songs it picks, but not where its songs come
 from. The voices speak English, so a DJ told to speak another language will read it with an English accent.
 
+[Extensions](mods.md#the-dj) you turn on can give the DJ instructions too, up to 300 characters each and 600 in
+all. They come after yours, and where they disagree with yours, yours come first. The DJ page lists them under
+**Tell your DJ**, so you can see everything the DJ is told; turning an extension off takes its instructions back.
+
 ## Its voice
 
 Settings → AI DJ → **Voice** picks who reads the DJ's lines out: one of ten Kokoro voices, six American and four
@@ -306,7 +310,7 @@ your own on this computer, directly, never through a proxy set for your system.
 
 With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
 off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
-before in this session, and your instructions.
+before in this session, and your instructions and your extensions'.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ### What it remembers
