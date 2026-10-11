@@ -99,6 +99,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   provider asks for a longer wait, the DJ says how long.
 - When the DJ looks songs up before picking, every song gets Spotify's facts first, so a slow MusicBrainz no longer
   leaves the last songs with nothing.
+- What the DJ looked up about songs, which it keeps for a month, is no longer thrown away each time it downloads
+  something.
 
 ## 1.3.0 - 2026-10-06
 
