@@ -8,6 +8,9 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 ### Added
 
 - Minor release bump for the branded lyrics button and recent playback polish.
+- While your DJ gets its first set ready, its page ticks off each step, from reading your listening to recording its
+  voice, and after a little while offers to start right away with a short intro. When the music is waiting for the
+  next set, "Play now with a short intro" does the same.
 
 ### Fixed
 
