@@ -339,3 +339,35 @@ export function songWhy(c: Candidate, info: DjSongInfo | undefined, now = new Da
   }
   return { yours, found, bio: info?.artist_bio?.trim() || null };
 }
+
+/** Something an extension adds to the DJ, for the DJ page. */
+export interface ExtensionNote {
+  /** The extension's name. */
+  name: string;
+  what: string;
+  /** Why it doesn't reach the DJ, when it doesn't. */
+  note: string | null;
+}
+
+/** What the extensions turned on add to the DJ, a line each: the instructions they give it, and whether the model is
+ * told them (`passed`), since they can only add so much in all; then the segments they add, with what they tell the
+ * model each is. */
+export function extensionNotes(
+  instructions: readonly { owner: { name: string }; text: string }[],
+  passed: readonly unknown[],
+  budget: number,
+  segments: readonly { owner: { name: string }; segment: { label: string; brief: string } }[] = [],
+): ExtensionNote[] {
+  return [
+    ...instructions.map((x) => ({
+      name: x.owner.name,
+      what: `Tells it: “${x.text}”`,
+      note: passed.includes(x) ? null : `Not passed on for now: extensions' instructions can add up to ${budget} characters in all.`,
+    })),
+    ...segments.map(({ owner, segment }) => ({
+      name: owner.name,
+      what: segment.brief === segment.label ? `Adds a segment: ${segment.label}` : `Adds a segment, ${segment.label}: “${segment.brief}”`,
+      note: null,
+    })),
+  ];
+}

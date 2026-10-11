@@ -4,6 +4,9 @@
 import { getVersion } from "@tauri-apps/api/app";
 import type { IconName } from "../components/Icon.svelte";
 import { builtinThemes } from "../themes";
+import { dj } from "./dj.svelte";
+import { djApi, type DjExtensionApi } from "./djExtensions.svelte";
+import { addSetAction } from "./djMenu";
 import { api, backend, errorMessage, type AppError, type ModInfo, type ModKind, type ModList } from "./ipc";
 import { addedItems, type AddedItem } from "./menu.svelte";
 import { player } from "./player.svelte";
@@ -57,6 +60,8 @@ export interface ExtensionApi {
   };
   addTrackMenuItem: (item: TrackMenuItem) => () => void;
   addPage: (page: ExtensionPage) => () => void;
+  /** The AI DJ: what it plays and says, as copies, what happens in a session, and entries for its sets' menus. */
+  dj: DjExtensionApi;
   /** Runs when the extension is turned off or reloaded. */
   onUnload: (fn: () => void) => void;
 }
@@ -395,6 +400,7 @@ class Mods {
         this.pages = [...this.pages.filter((p) => p.key !== registered.key), registered];
         return track(() => (this.pages = this.pages.filter((p) => p !== registered)));
       },
+      dj: djApi(dj, { id: mod.id, name: mod.name }, { track, live }, addSetAction),
       // Already unloaded: it runs now.
       onUnload: (fn) => (live() ? void running.cleanups.push(fn) : fn()),
     };

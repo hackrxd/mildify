@@ -22,6 +22,7 @@ import {
   weightedOrder,
   type Candidate,
   type Listening,
+  type Segment,
   type SetSoFar,
   type Taste,
 } from "./djPicks";
@@ -551,13 +552,33 @@ describe("nextSegment", () => {
 
   it("doesn't come back to the last two segments while others are left", () => {
     for (let i = 0; i < 20; i++) {
-      const next = nextSegment(["onRepeat", "throwbacks"], pool, none, Math.random);
+      const next = nextSegment(["onRepeat", "throwbacks"], pool, none, { random: Math.random });
       expect(["fresh", "rediscover"]).toContain(next?.id);
     }
   });
 
   it("gives up when nothing has enough songs", () => {
     expect(nextSegment([], candidates(2, ["onRepeat"]), none)).toBeNull();
+  });
+
+  const extra = (id: string, fits: (c: Candidate) => boolean) =>
+    ({ id: `ext:x.js/${id}`, label: id, brief: id, phrase: id, fits, from: "X" }) as Segment;
+
+  it("takes turns with an extension's segments, which open the show only when none of its own can", () => {
+    const everything = extra("all", () => true);
+    expect(nextSegment([], pool, none, { extra: [everything] })?.id).toBe("onRepeat");
+    const seen = new Set<string | undefined>();
+    for (let i = 0; i < 40; i++) seen.add(nextSegment(["onRepeat", "throwbacks"], pool, none, { extra: [everything] })?.id);
+    expect([...seen].sort()).toEqual(["ext:x.js/all", "fresh", "rediscover"]);
+    // After it, not again straight away.
+    for (let i = 0; i < 20; i++) expect(nextSegment(["fresh", "ext:x.js/all"], pool, none, { extra: [everything] })?.id).not.toBe("ext:x.js/all");
+    const few = candidates(4, ["recent"]);
+    expect(nextSegment([], few, none, { extra: [everything] })?.id).toBe("ext:x.js/all");
+  });
+
+  it("leaves out an extension's segment with too few songs that fit it", () => {
+    const two = extra("two", (c) => c.uri === "spotify:track:c0" || c.uri === "spotify:track:c1");
+    for (let i = 0; i < 20; i++) expect(nextSegment(["onRepeat", "throwbacks"], pool, none, { extra: [two] })?.id).not.toBe("ext:x.js/two");
   });
 });
 

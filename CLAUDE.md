@@ -81,8 +81,14 @@ refusing paths that leave those folders. Built-in themes are stylesheets in `src
 `index.ts` with `builtin:` ids and linked from the app's own assets. `src/lib/mods.svelte.ts` links the active
 theme and Quick CSS at the end of `<body>`, imports enabled extensions as ES modules once the session is ready,
 and hands each the `ExtensionApi`. Everything an extension registers through it is undone when it's turned off;
-window focus re-reads the folders, so edits apply live. `--safe-mode` loads none of it. User-facing guide:
-`docs/mods.md`.
+window focus re-reads the folders, so edits apply live. Its `ns.dj` (`djExtensions.svelte.ts`) gives frozen copies
+of the DJ's sets, songs and lines (one per object, kept in `WeakMap`s), the DJ's `on` events a microtask later, set
+menu entries (`addSetAction`), and adds to `djExtensions`: instructions (one each, fenced after the listener's,
+`EXTENSION_INSTRUCTIONS_BUDGET` in all) and segments (`ext:<extension>/<id>`, up to three each, whose `fits` sees
+the listener's own songs, asked once a song in a pick through `promptSegments`; `fitsFor` holds a set picked as it
+goes to it), which `#prepare` reads (`nextSegment`'s `extra`: one of the DJ's own opens) and the DJ page lists. What
+changes them runs `untrack`ed, since extensions call it from `ns.watch`. `--safe-mode` loads none of it. User-facing
+guide: `docs/mods.md`.
 
 **AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only

@@ -313,6 +313,16 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("passes on what extensions tell it, until they take it back", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    const given = djExtensions.setInstructions({ id: "x.js", name: "X" }, "Keep it light.");
+    await started();
+    expect(lastPrompt()[0].content).toContain('"""\nKeep it light.\n"""');
+    djExtensions.removeInstructions(given!);
+    await askAgain();
+    expect(lastPrompt()[0].content).not.toContain("Keep it light.");
+  });
+
   it("calls the listener by the first name on their account, or by what they asked to be called", async () => {
     const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
     await started();
@@ -2095,6 +2105,25 @@ describe("picking as it goes", () => {
     expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
   });
 
+  it("keeps a set from an extension's segment to the songs that fit it, even after a like", async () => {
+    twins();
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each artist's first song, never their other one.
+    const fits = (s: { uri: string }) => Number(s.uri.replace("spotify:track:t", "")) < 100;
+    djExtensions.addSegment({ id: "x.js", name: "X" }, { id: "firsts", label: "Firsts", brief: "first songs", fits });
+    await liveStarted();
+    await untilNextSet();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/firsts" });
+    const set = await nextSet();
+    backend.device.mockClear();
+    // Liking the song playing would bring in its artist's other song, which doesn't fit.
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    expect(dj.current!.songs.length).toBeGreaterThan(1);
+    expect(dj.current!.songs.every(fits)).toBe(true);
+    expect(queued().every((uri) => fits({ uri: uri! }))).toBe(true);
+  });
+
   it("lines up nothing skipped lately, even by an artist the listener likes", async () => {
     twins();
     vi.spyOn(Math, "random").mockReturnValue(0);
@@ -3397,6 +3426,83 @@ describe("events", () => {
     });
     const first = await started();
     expect(dj.current).toBe(first);
+  });
+
+  it("reach extensions just after each step, with copies of what the DJ has", async () => {
+    const { djApi, setView } = await import("./djExtensions.svelte");
+    const undo: (() => void)[] = [];
+    const tracker = { track: (fn: () => void) => (undo.push(fn), fn), live: () => true };
+    const ns = djApi(dj, { id: "log.js", name: "DJ log" }, tracker, () => () => {});
+    const heard: string[] = [];
+    ns.on((e) => void heard.push("set" in e && e.set ? `${e.type} ${e.set.name}` : e.type));
+    const first = await started();
+    expect(heard).toEqual(["set-picked Set 1", "line-spoken", "set-started Set 1", "song-started Set 1", "set-picked Set 2"]);
+    expect(ns.current).toBe(setView(first));
+    expect(ns.upNext?.name).toBe("Set 2");
+    expect(ns.said.map((l) => l.talk)).toEqual([first.talk]);
+    for (const fn of undo) fn();
+  });
+});
+
+describe("an extension's segments", () => {
+  const lastPrompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0];
+  const owner = { id: "x.js", name: "X" };
+
+  it("take turns with the DJ's own after the opening, and the model hears them in the extension's words", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, { id: "all", label: "Everything", brief: "anything at all", fits: () => true });
+    const first = await started();
+    expect(first).toMatchObject({ segment: "onRepeat", from: null });
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/all", from: "X" });
+    expect(lastPrompt()[1].content).toContain('This segment comes from an extension the listener turned on, in its words:\n"""\nanything at all\n"""');
+  });
+
+  it("are left out when the extension can't tell which songs fit, and the show goes on", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, {
+      id: "broken",
+      label: "Broken",
+      brief: "broken",
+      fits: () => {
+        throw new Error("oops");
+      },
+    });
+    await started();
+    expect(dj.upNext?.segment).toBe("onRepeat");
+    expect(dj.phase).toBe("on");
+  });
+
+  it("are asked about each song once a pick, so one that changes its mind still gives the songs it counted", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each song fits the first two times it's asked about, and never again.
+    const asked = new Map<string, number>();
+    const fits = (s: { uri: string }) => {
+      asked.set(s.uri, (asked.get(s.uri) ?? 0) + 1);
+      return asked.get(s.uri)! <= 2;
+    };
+    djExtensions.addSegment(owner, { id: "fickle", label: "Fickle", brief: "whatever it likes", fits });
+    await started();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/fickle", from: "X" });
+    expect(dj.upNext!.songs.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("still play a set picked from them once the extension is turned off, and none after", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const added = ["all", "more"].map((id) => djExtensions.addSegment(owner, { id, label: id, brief: "anything at all", fits: () => true }));
+    const first = await started();
+    const next = dj.upNext!;
+    expect(next.segment).toBe("ext:x.js/all");
+    for (const entry of added) djExtensions.removeSegment(entry);
+    await playing(first.songs[1].uri, 0);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    await tick();
+    await tick();
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current?.id).toBe(next.id);
+    // On, it would have been the other one's turn.
+    expect(dj.upNext).toMatchObject({ segment: "onRepeat", from: null });
   });
 });
 
