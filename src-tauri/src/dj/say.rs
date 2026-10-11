@@ -50,7 +50,7 @@ const ENDINGS: &[(&str, &str)] = &[("Jr", "Junior"), ("Sr", "Senior")];
 /// Whether a full stop after `word` goes on with the sentence, where `next` is the word after it: before a lowercase
 /// word, after an ellipsis, an abbreviation, an initial ("J. Cole") or a dotted acronym ("B.B. King"). As the
 /// program reads it: by the character right after the space, quote or bracket as it may be, and a quote or bracket
-/// closing after the full stop ends the sentence.
+/// closing after the full stop ends the sentence. "I." and "a.m."/"p.m." end one before a capital, as they so often do.
 pub fn keeps_going(word: &str, next: &str) -> bool {
     let word = word.trim_start_matches(is_opening);
     let Some(core) = word.strip_suffix('.') else { return false };
@@ -64,7 +64,9 @@ pub fn keeps_going(word: &str, next: &str) -> bool {
     if BEFORE_NUMBERS.iter().any(|(a, _)| a.eq_ignore_ascii_case(core)) {
         return next_starts.is_some_and(|c| c.is_ascii_digit());
     }
-    (is_initial(core) || acronym(core).is_some()) && next_starts.is_some_and(char::is_uppercase)
+    let initial = is_initial(core) && core != "I";
+    let meridiem = ["a.m", "p.m"].iter().any(|m| core.eq_ignore_ascii_case(m));
+    (initial || (acronym(core).is_some() && !meridiem)) && next_starts.is_some_and(char::is_uppercase)
 }
 
 /// `sentence` (one of `voice::split_sentences`') as the voice should say it.
@@ -402,6 +404,9 @@ mod tests {
             ("great.", "(more)"),
             ("great.\"", "next"),
             ("Hey..", "Next"),
+            ("I.", "Next"),
+            ("p.m.", "Time"),
+            ("A.M.", "Time"),
             ("great.", "Next"),
             ("great.", "\"Next\""),
             ("great.", "2"),
