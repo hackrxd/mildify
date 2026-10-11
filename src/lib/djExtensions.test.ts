@@ -306,6 +306,20 @@ describe("instructions", () => {
     expect(m.djExtensions.instructions[0].text).toBe("x".repeat(EXTENSION_INSTRUCTIONS_MAX - 1));
   });
 
+  it("said again are kept as they were, with the same remover", () => {
+    const first = m.djExtensions.setInstructions(a, "Keep it light.");
+    m.djExtensions.setInstructions(b, "No explicit songs.");
+    const before = m.djExtensions.instructions;
+    expect(m.djExtensions.setInstructions(a, " Keep it light. ")).toBe(first);
+    expect(m.djExtensions.instructions).toBe(before);
+    const { ns, t } = api();
+    const remove = ns.setInstructions("One.");
+    expect(ns.setInstructions("One.")).toBe(remove);
+    expect(t.held()).toBe(1);
+    remove();
+    expect(given()).toEqual(["A: Keep it light.", "B: No explicit songs."]);
+  });
+
   it("reach the model as far as they fit, the first given first", () => {
     const owners = ["a", "b", "c", "d"].map((id) => ({ id, name: id }));
     const lengths = [300, 250, 60, 40];

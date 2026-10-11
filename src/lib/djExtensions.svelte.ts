@@ -201,14 +201,16 @@ class DjExtensions {
   // What changes these lists reads them too, untracked: an extension may call it from inside `ns.watch`, which would
   // otherwise run again on its own change, again and again.
 
-  /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any. */
+  /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any: the same
+   * one when they say what they said. */
   setInstructions(owner: Owner, text: string): ExtensionInstructions | null {
     return untrack(() => {
       const clean = cut(text.trim(), EXTENSION_INSTRUCTIONS_MAX).trim();
+      const had = this.instructions.find((x) => x.owner.id === owner.id);
+      if (had && had.text === clean) return had;
       const entry = clean ? { owner, text: clean } : null;
-      const had = this.instructions.some((x) => x.owner.id === owner.id);
       if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
-      else this.instructions = this.instructions.flatMap((x) => (x.owner.id !== owner.id ? [x] : entry ? [entry] : []));
+      else this.instructions = this.instructions.flatMap((x) => (x !== had ? [x] : entry ? [entry] : []));
       return entry;
     });
   }
@@ -345,7 +347,9 @@ export function djApi(
   addSetAction: (item: AddedItem<DjSet>) => () => void,
 ): DjExtensionApi {
   const none = () => {};
-  /** Takes back the extension's instructions before these: they're replaced, and that remover has nothing to do. */
+  /** The extension's instructions, and what takes them back; the remover of those it gave before has nothing to do
+   * once they're replaced. */
+  let instructions: ExtensionInstructions | null = null;
   let untrackInstructions = none;
   /** The same for each of its segments, by id. */
   const untrackSegment = new Map<string, () => void>();
@@ -410,7 +414,10 @@ export function djApi(
     setInstructions(text: string) {
       if (!live()) return none;
       const entry = djExtensions.setInstructions(owner, String(text ?? ""));
+      // The same as before: kept, with its remover.
+      if (entry && entry === instructions) return untrackInstructions;
       const before = untrackInstructions;
+      instructions = entry;
       untrackInstructions = entry ? track(() => djExtensions.removeInstructions(entry)) : none;
       before();
       return untrackInstructions;
