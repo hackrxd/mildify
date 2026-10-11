@@ -3485,6 +3485,25 @@ describe("an extension's segments", () => {
     expect(dj.upNext).toMatchObject({ segment: "ext:x.js/fickle", from: "X" });
     expect(dj.upNext!.songs.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("still play a set picked from them once the extension is turned off, and none after", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const added = ["all", "more"].map((id) => djExtensions.addSegment(owner, { id, label: id, brief: "anything at all", fits: () => true }));
+    const first = await started();
+    const next = dj.upNext!;
+    expect(next.segment).toBe("ext:x.js/all");
+    for (const entry of added) djExtensions.removeSegment(entry);
+    await playing(first.songs[1].uri, 0);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    await tick();
+    await tick();
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current?.id).toBe(next.id);
+    // On, it would have been the other one's turn.
+    expect(dj.upNext).toMatchObject({ segment: "onRepeat", from: null });
+  });
 });
 
 describe("hearing a voice before picking it", () => {
