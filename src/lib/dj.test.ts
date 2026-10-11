@@ -17,6 +17,7 @@ const backend = vi.hoisted(() => ({
   djSongInfo: vi.fn(),
   djSetKey: vi.fn(),
   djSpeak: vi.fn(),
+  djPreview: vi.fn(),
   djVoice: vi.fn(async (_command: unknown) => {}),
   djDuck: vi.fn(async () => {}),
   djRelease: vi.fn(async () => {}),
@@ -120,6 +121,10 @@ class FakeVoice {
   stop = vi.fn(() => {
     this.sounding = false;
   });
+  forget = vi.fn(() => {
+    this.sounding = false;
+  });
+  hold = vi.fn();
   /** The line plays out, or fails to. */
   end(error?: string) {
     this.sounding = false;
@@ -156,6 +161,8 @@ const readyStatus = {
     provider: "local",
     model: "qwen2.5-1.5b",
     voice: "michael",
+    voice_speed: 1,
+    gpu: true,
     server_url: "",
     server_model: "",
     own_tools: false,
@@ -171,6 +178,7 @@ const readyStatus = {
   folder: "/dj",
   models: [],
   voices: [],
+  runs_on: null,
 } as DjStatus;
 
 let voice: FakeVoice;
@@ -305,6 +313,16 @@ describe("what the DJ is asked", () => {
     expect(system.content).toContain("Name only that first song");
   });
 
+  it("passes on what extensions tell it, until they take it back", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    const given = djExtensions.setInstructions({ id: "x.js", name: "X" }, "Keep it light.");
+    await started();
+    expect(lastPrompt()[0].content).toContain('"""\nKeep it light.\n"""');
+    djExtensions.removeInstructions(given!);
+    await askAgain();
+    expect(lastPrompt()[0].content).not.toContain("Keep it light.");
+  });
+
   it("calls the listener by the first name on their account, or by what they asked to be called", async () => {
     const openingPrompt = () => (backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content;
     await started();
@@ -399,6 +417,11 @@ describe("what the DJ is asked", () => {
     expect(dj.modelTrouble).not.toBeNull();
     expect(told()).toBe(2);
     await dj.configure({ api_models: { openai: "gpt-5.5" } });
+    expect(dj.modelTrouble).toBeNull();
+    // Moving the model on or off the graphics card may fix it too.
+    await askAgain();
+    expect(dj.modelTrouble).not.toBeNull();
+    await dj.configure({ gpu: false });
     expect(dj.modelTrouble).toBeNull();
     // Nor does a change that leaves the model as it was, or one that fails.
     await askAgain();
@@ -1172,6 +1195,13 @@ describe("settings", () => {
     expect(dj.phase).toBe("off");
   });
 
+  it("says whether a change was saved, so a picker can go back to what's in use when it wasn't", async () => {
+    expect(await dj.configure({ voice: "emma" })).toBe(true);
+    backend.djConfigure.mockRejectedValueOnce({ kind: "other", message: "Couldn't save" });
+    expect(await dj.configure({ voice: "light-male" })).toBe(false);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+  });
+
   it("asks for lines as long as the listener wants them", async () => {
     dj.setTalk("chatty");
     expect(localStorage.getItem("nativify:djTalk")).toBe("chatty");
@@ -1208,6 +1238,7 @@ describe("starting", () => {
     expect(dj.phase).toBe("off");
     expect(toasts.show).toHaveBeenCalled();
     expect(sp.topTracksIn).not.toHaveBeenCalled();
+    expect(voice.hold).not.toHaveBeenCalled();
   });
 
   it("doesn't start with the song in the player either when it starts over, everything having played lately", async () => {
@@ -1237,6 +1268,17 @@ describe("starting", () => {
     expect(player.track?.uri).toBe(song);
     const again = await started();
     expect(again.songs.map((s) => s.uri)).not.toContain(song);
+  });
+
+  it("holds its voice's output open from the start, until it lets go of its voice as it stops", async () => {
+    player.isPlaying = false;
+    const starting = dj.start();
+    // Before the first set is even picked.
+    expect(voice.hold).toHaveBeenCalledTimes(1);
+    expect(backend.djGenerate).not.toHaveBeenCalled();
+    await starting;
+    dj.stop();
+    expect(backend.djRelease).toHaveBeenCalled();
   });
 
   it("greets as an item of its own, and brings the first song in near the end of the line", async () => {
@@ -2061,6 +2103,25 @@ describe("picking as it goes", () => {
     expect(artistOf(queued()[1]!)).toBe(artistOf(first));
     expect(dj.current?.songs[1].uri).toBe(queued()[1]);
     expect(events.filter((e) => e.startsWith("song-liked"))).toEqual([`song-liked ${set.songs[0].name}`]);
+  });
+
+  it("keeps a set from an extension's segment to the songs that fit it, even after a like", async () => {
+    twins();
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each artist's first song, never their other one.
+    const fits = (s: { uri: string }) => Number(s.uri.replace("spotify:track:t", "")) < 100;
+    djExtensions.addSegment({ id: "x.js", name: "X" }, { id: "firsts", label: "Firsts", brief: "first songs", fits });
+    await liveStarted();
+    await untilNextSet();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/firsts" });
+    const set = await nextSet();
+    backend.device.mockClear();
+    // Liking the song playing would bring in its artist's other song, which doesn't fit.
+    likedState.saved.set(set.songs[0].uri, true);
+    await tick();
+    expect(dj.current!.songs.length).toBeGreaterThan(1);
+    expect(dj.current!.songs.every(fits)).toBe(true);
+    expect(queued().every((uri) => fits({ uri: uri! }))).toBe(true);
   });
 
   it("lines up nothing skipped lately, even by an artist the listener likes", async () => {
@@ -3366,4 +3427,175 @@ describe("events", () => {
     const first = await started();
     expect(dj.current).toBe(first);
   });
+
+  it("reach extensions just after each step, with copies of what the DJ has", async () => {
+    const { djApi, setView } = await import("./djExtensions.svelte");
+    const undo: (() => void)[] = [];
+    const tracker = { track: (fn: () => void) => (undo.push(fn), fn), live: () => true };
+    const ns = djApi(dj, { id: "log.js", name: "DJ log" }, tracker, () => () => {});
+    const heard: string[] = [];
+    ns.on((e) => void heard.push("set" in e && e.set ? `${e.type} ${e.set.name}` : e.type));
+    const first = await started();
+    expect(heard).toEqual(["set-picked Set 1", "line-spoken", "set-started Set 1", "song-started Set 1", "set-picked Set 2"]);
+    expect(ns.current).toBe(setView(first));
+    expect(ns.upNext?.name).toBe("Set 2");
+    expect(ns.said.map((l) => l.talk)).toEqual([first.talk]);
+    for (const fn of undo) fn();
+  });
 });
+
+describe("an extension's segments", () => {
+  const lastPrompt = () => (backend.djGenerate.mock.calls.at(-1) as unknown as [{ content: string }[]])[0];
+  const owner = { id: "x.js", name: "X" };
+
+  it("take turns with the DJ's own after the opening, and the model hears them in the extension's words", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, { id: "all", label: "Everything", brief: "anything at all", fits: () => true });
+    const first = await started();
+    expect(first).toMatchObject({ segment: "onRepeat", from: null });
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/all", from: "X" });
+    expect(lastPrompt()[1].content).toContain('This segment comes from an extension the listener turned on, in its words:\n"""\nanything at all\n"""');
+  });
+
+  it("are left out when the extension can't tell which songs fit, and the show goes on", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    djExtensions.addSegment(owner, {
+      id: "broken",
+      label: "Broken",
+      brief: "broken",
+      fits: () => {
+        throw new Error("oops");
+      },
+    });
+    await started();
+    expect(dj.upNext?.segment).toBe("onRepeat");
+    expect(dj.phase).toBe("on");
+  });
+
+  it("are asked about each song once a pick, so one that changes its mind still gives the songs it counted", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each song fits the first two times it's asked about, and never again.
+    const asked = new Map<string, number>();
+    const fits = (s: { uri: string }) => {
+      asked.set(s.uri, (asked.get(s.uri) ?? 0) + 1);
+      return asked.get(s.uri)! <= 2;
+    };
+    djExtensions.addSegment(owner, { id: "fickle", label: "Fickle", brief: "whatever it likes", fits });
+    await started();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/fickle", from: "X" });
+    expect(dj.upNext!.songs.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("still play a set picked from them once the extension is turned off, and none after", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const added = ["all", "more"].map((id) => djExtensions.addSegment(owner, { id, label: id, brief: "anything at all", fits: () => true }));
+    const first = await started();
+    const next = dj.upNext!;
+    expect(next.segment).toBe("ext:x.js/all");
+    for (const entry of added) djExtensions.removeSegment(entry);
+    await playing(first.songs[1].uri, 0);
+    await playing(first.songs[first.songs.length - 1].uri, 100_000);
+    await tick();
+    await tick();
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.current?.id).toBe(next.id);
+    // On, it would have been the other one's turn.
+    expect(dj.upNext).toMatchObject({ segment: "onRepeat", from: null });
+  });
+});
+
+describe("hearing a voice before picking it", () => {
+  const lewis = { id: "lewis", label: "Lewis (British)", detail: null, bytes: 1, installed: true, group: "Kokoro" };
+  let preview: FakeVoice;
+
+  beforeEach(() => {
+    preview = new FakeVoice();
+    dj = new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>, preview as unknown as InstanceType<typeof mod.Voice>);
+    dj.status = readyStatus;
+    backend.djPreview.mockImplementation(async (_voice: string, text: string) => ({
+      id: 99,
+      duration_ms: 3000,
+      sentences: [{ text, start_ms: 0, end_ms: 3000 }],
+    }));
+  });
+
+  it("plays a short line in the voice, one at a time, while the DJ isn't talking", async () => {
+    const hearing = dj.preview(lewis);
+    expect(dj.previewing).toEqual({ voice: "lewis", playing: false });
+    await hearing;
+    expect(backend.djPreview).toHaveBeenCalledWith("lewis", "Hi, I'm Lewis. This is how I'd sound between your songs.");
+    expect(preview.played.map((p) => p.id)).toEqual([99]);
+    expect(dj.previewing).toEqual({ voice: "lewis", playing: true });
+    await dj.preview(lewis);
+    expect(backend.djPreview).toHaveBeenCalledTimes(1);
+    preview.end();
+    expect(dj.previewing).toBeNull();
+    expect(voice.played).toEqual([]);
+    await dj.preview(lewis);
+    expect(backend.djPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't play while the DJ talks, whose line it would cut off", async () => {
+    player.isPlaying = false;
+    await dj.start();
+    expect(dj.speaking).toBe(true);
+    await dj.preview(lewis);
+    expect(backend.djPreview).not.toHaveBeenCalled();
+    expect(dj.previewing).toBeNull();
+  });
+
+  it("gives way to a line the DJ starts, without stopping it", async () => {
+    await dj.preview(lewis);
+    player.isPlaying = false;
+    await dj.start();
+    expect(voice.played).toHaveLength(1);
+    expect(dj.previewing).toBeNull();
+    expect(preview.forget).toHaveBeenCalled();
+    expect(preview.stop).not.toHaveBeenCalled();
+  });
+
+  it("isn't played when the DJ starts talking while it's made", async () => {
+    let made!: (s: { id: number; duration_ms: number; sentences: [] }) => void;
+    backend.djPreview.mockImplementation(() => new Promise((resolve) => (made = resolve)));
+    const hearing = dj.preview(lewis);
+    player.isPlaying = false;
+    await dj.start();
+    made({ id: 99, duration_ms: 3000, sentences: [] });
+    await hearing;
+    expect(preview.played).toEqual([]);
+    expect(dj.previewing).toBeNull();
+  });
+
+  it("says why a voice couldn't be heard", async () => {
+    backend.djPreview.mockRejectedValueOnce({ kind: "other", message: "The DJ is still downloading what it needs", status: null });
+    await dj.preview(lewis);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+    expect(dj.previewing).toBeNull();
+    await dj.preview(lewis);
+    preview.end("No audio output device");
+    expect(toasts.show).toHaveBeenCalledWith("Couldn't play the voice: No audio output device", "error");
+    expect(dj.previewing).toBeNull();
+  });
+});
+
+describe("where the model runs", () => {
+  it("hears where the model runs as a load decides it, from the status the backend sends", async () => {
+    backend.djStatus.mockImplementation(async () => readyStatus);
+    await dj.init();
+    const runsOn = { card: null, card_failed: "The DJ's model stopped while loading (exit status: 1)" };
+    events.handlers.get("dj-status")!({ payload: { ...readyStatus, runs_on: runsOn } });
+    expect(dj.status?.runs_on).toEqual(runsOn);
+    // The voice's output, held for a session before a reload, is let go of.
+    expect(backend.djVoice).toHaveBeenCalledWith({ action: "hold", on: false });
+  });
+
+  it("carries on playing when the model moves on or off the graphics card", async () => {
+    await started();
+    await dj.configure({ gpu: false });
+    expect(dj.phase).toBe("on");
+    expect(backend.djConfigure).toHaveBeenCalledWith({ gpu: false });
+  });
+});
+

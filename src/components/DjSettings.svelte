@@ -6,12 +6,16 @@
     askBefore,
     choicePatch,
     CLOUD_NAMES,
+    deviceNote,
     cloudModelOf,
     cloudOf,
     DEFAULT_CLOUD_MODEL,
     firstCloudModel,
     isCloud,
     modelChoiceOf,
+    speedWords,
+    voiceGroups,
+    VOICE_SPEED,
     type DjChange,
     type Question,
   } from "../lib/djView";
@@ -47,6 +51,17 @@
     }
   }
 
+  /** The speed slider's value while it's dragged, until it's saved. */
+  let draggedSpeed = $state<number | null>(null);
+  const shownSpeed = $derived(draggedSpeed ?? djSettings?.voice_speed ?? 1);
+
+  async function saveSpeed(speed: number) {
+    draggedSpeed = speed;
+    await dj.configure({ voice_speed: speed });
+    // Dragged on while it saved: that's the one to show.
+    if (draggedSpeed === speed) draggedSpeed = null;
+  }
+
   let callMe = $state(dj.callMe);
   /** The first name on the Spotify account, when it looks like a name: what the DJ calls the listener by default. */
   const accountName = $derived(listenerName(session.user?.display_name));
@@ -77,12 +92,27 @@
   let pending = $state<{ change: DjChange; question: Question } | null>(null);
   /** The model picker shows the model it's asking about or switching to, and its description, until that's settled. */
   const shownChoice = $derived(pending?.change.kind === "model" ? pending.change.choice : (switchingTo ?? modelChoice));
+  let voicePicker = $state<HTMLSelectElement>();
+
+  async function pickVoice(id: string) {
+    // Not saved: the picker goes back to the voice in use, which it can't tell changed.
+    if (!(await dj.configure({ voice: id })) && voicePicker) voicePicker.value = djSettings?.voice ?? "";
+  }
+
+  /** The voice picker shows the voice it's asking about. */
+  const shownVoice = $derived(pending?.change.kind === "voice" ? pending.change.choice : (djSettings?.voice ?? ""));
+  const shownVoiceChoice = $derived(djStatus?.voices.find((v) => v.id === shownVoice));
+  /** Why the voice shown can't be heard now, if it can't. */
+  const cantHear = $derived(
+    !shownVoiceChoice?.installed ? "It downloads with its group" : dj.speaking ? "Not while the DJ talks" : null,
+  );
 
   /** Makes `change`, once it's asked about it when it stops the DJ or can't be taken back. */
   function change(c: DjChange) {
     pending = null;
-    // Back to the model in use, from one it was asking about.
+    // Back to the model or voice in use, from one it was asking about.
     if (c.kind === "model" && c.choice === modelChoice) return;
+    if (c.kind === "voice" && c.choice === djSettings?.voice) return;
     const question = djStatus ? askBefore(c, djStatus, dj.phase !== "off") : null;
     if (question) pending = { change: c, question };
     else make(c);
@@ -91,6 +121,7 @@
   function make(c: DjChange) {
     pending = null;
     if (c.kind === "model") pickModel(c.choice);
+    else if (c.kind === "voice") pickVoice(c.choice);
     else if (c.kind === "key") removeKey(c.provider);
     else if (c.kind === "forget") {
       dj.forget();
@@ -152,7 +183,7 @@
 {#snippet asking(asked: { change: DjChange; question: Question })}
   <ConfirmStrip
     {...asked.question}
-    danger={asked.change.kind !== "model"}
+    danger={asked.change.kind !== "model" && asked.change.kind !== "voice"}
     onconfirm={() => make(asked.change)}
     oncancel={() => (pending = null)}
   />
@@ -255,6 +286,16 @@
     </label>
     {#if pending?.change.kind === "model"}
       {@render asking(pending)}
+    {/if}
+
+    {#if djStatus && djSettings.provider === "local"}
+      <label class="row">
+        <span>
+          <span class="label">Use the graphics card</span>
+          <span class="muted small">{deviceNote(djStatus)}</span>
+        </span>
+        <input type="checkbox" class="switch" checked={djSettings.gpu} onchange={(e) => dj.configure({ gpu: e.currentTarget.checked })} />
+      </label>
     {/if}
 
     {#if cloud}
@@ -377,13 +418,65 @@
     <label class="row">
       <span>
         <span class="label">Voice</span>
-        <span class="muted small">The voices speak English.</span>
+        <span class="muted small">The voices speak English. Those in a group download together.</span>
       </span>
-      <select class="field" value={djSettings.voice} onchange={(e) => dj.configure({ voice: e.currentTarget.value })}>
-        {#each djStatus?.voices ?? [] as v (v.id)}
-          <option value={v.id}>{v.label}</option>
-        {/each}
-      </select>
+      <span class="buttons">
+        <select
+          class="field"
+          bind:this={voicePicker}
+          value={shownVoice}
+          onchange={(e) => change({ kind: "voice", choice: e.currentTarget.value })}
+        >
+          {#each voiceGroups(djStatus?.voices ?? []) as group (group.name)}
+            <optgroup label={group.label}>
+              {#each group.voices as v (v.id)}
+                <option value={v.id}>{v.label}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+        <button
+          class="btn quiet"
+          type="button"
+          title={cantHear ?? "Hear this voice at the speed set"}
+          disabled={!!cantHear || !!dj.previewing}
+          onclick={() => shownVoiceChoice && dj.preview(shownVoiceChoice)}
+        >
+          {dj.previewing?.playing ? "Playing…" : dj.previewing ? "Loading…" : "Hear it"}
+        </button>
+      </span>
+    </label>
+    {#if pending?.change.kind === "voice"}
+      {@render asking(pending)}
+    {/if}
+
+    <label class="row">
+      <span>
+        <span class="label">Speaking speed</span>
+        <span class="muted small">{speedWords(shownSpeed)}. A line the DJ already has ready keeps its speed.</span>
+      </span>
+      <span class="slider">
+        <span class="muted small">Slower</span>
+        <input
+          type="range"
+          min={VOICE_SPEED.min}
+          max={VOICE_SPEED.max}
+          step={VOICE_SPEED.step}
+          value={shownSpeed}
+          oninput={(e) => (draggedSpeed = Number(e.currentTarget.value))}
+          onchange={(e) => saveSpeed(Number(e.currentTarget.value))}
+          aria-label="How fast the DJ speaks"
+        />
+        <span class="muted small">Faster</span>
+        <!-- Always laid out: appearing mid-drag would shift the slider under the pointer. -->
+        <button
+          class="btn quiet"
+          class:hidden={shownSpeed === 1}
+          type="button"
+          disabled={shownSpeed === 1}
+          onclick={() => saveSpeed(1)}>Reset</button
+        >
+      </span>
     </label>
 
     {#if dj.enabled}

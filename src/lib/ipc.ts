@@ -57,6 +57,10 @@ export interface DjConfig {
   /** The downloaded model the "local" provider runs, an id from `DjStatus.models`. */
   model: string;
   voice: string;
+  /** How fast the voice speaks, against its own pace: `VOICE_SPEED`'s range. */
+  voice_speed: number;
+  /** The downloaded model runs on the graphics card, when llama.cpp finds one it can use. */
+  gpu: boolean;
   server_url: string;
   server_model: string;
   /** The own server's model can call tools, so it can look songs up. */
@@ -93,7 +97,12 @@ export interface DjChoice {
   id: string;
   label: string;
   detail: string | null;
+  /** The size of its download, which a voice shares with the others in its group. */
   bytes: number;
+  /** Its download is in. */
+  installed: boolean;
+  /** A voice's package: the voices in one download together. */
+  group: string | null;
 }
 
 export interface DjStatus {
@@ -114,6 +123,16 @@ export interface DjStatus {
   folder: string;
   models: DjChoice[];
   voices: DjChoice[];
+  /** Where the downloaded model runs, once it has loaded since the app started. */
+  runs_on: DjRunsOn | null;
+}
+
+/** Where the downloaded model runs (src-tauri/src/dj/engine.rs). */
+export interface DjRunsOn {
+  /** The graphics card, by name; null for the processor. */
+  card: string | null;
+  /** Why the processor runs it although the card was to: the card failed to. */
+  card_failed: string | null;
 }
 
 export interface DjMessage {
@@ -181,7 +200,9 @@ export type DjVoiceCommand =
   | { action: "pause" }
   | { action: "resume" }
   | { action: "gain"; gain: number }
-  | { action: "stop" };
+  | { action: "stop" }
+  /** Keeps the sound output open between lines too, or lets it close once idle; closing the voice lets go of it. */
+  | { action: "hold"; on: boolean };
 
 /** A `dj-voice` event: the line playing this far in (as it starts, then a few times a second), done, or unplayable. */
 export type DjVoiceEvent =
@@ -348,6 +369,8 @@ export const backend = {
   /** The models a cloud provider offers with the saved key. */
   djModels: (provider: DjCloud) => invoke<DjModelChoice[]>("dj_models", { provider }),
   djSpeak: (text: string) => invoke<DjSpeech>("dj_speak", { text }),
+  /** Reads `text` in `voice` at the speed set, to hear it before it's picked; `djVoice` plays it. */
+  djPreview: (voice: string, text: string) => invoke<DjSpeech>("dj_preview", { voice, text }),
   /** Plays, pauses or stops the DJ's lines on this computer's audio output; `dj-voice` events say how it goes. */
   djVoice: (command: DjVoiceCommand) => invoke<void>("dj_voice", { command }),
   /** Turns the embedded player's music down to `level` (0-1), `delayMs` from now in heard time, or back up. */

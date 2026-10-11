@@ -159,7 +159,7 @@
           {:else}{Math.abs(lyrics.offsetMs)} ms {lyrics.offsetMs > 0 ? "later" : "earlier"} than the audio clock.{/if}
         </span>
       </span>
-      <span class="timing">
+      <span class="slider">
         <span class="muted small">Earlier</span>
         <input
           type="range"
@@ -284,7 +284,7 @@
         <span class="label">Effect intensity</span>
         <span class="muted small">How strongly the glow pulses: {Math.round(audioFx.intensity * 100)}%.</span>
       </span>
-      <span class="timing">
+      <span class="slider">
         <span class="muted small">Subtle</span>
         <input
           type="range"
@@ -624,16 +624,17 @@
     cursor: default;
     opacity: 0.4;
   }
-  .timing {
+  /* A slider with its ends named and a reset button: global within the page, for the AI DJ's speed too. */
+  :where(.page) :global(.row > .slider) {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-  .timing input {
+  :where(.page) :global(.slider input) {
     width: 200px;
     accent-color: var(--highlight);
   }
-  .timing .hidden {
+  :where(.page) :global(.slider .hidden) {
     visibility: hidden;
   }
   .login {

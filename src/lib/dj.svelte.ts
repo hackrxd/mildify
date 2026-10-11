@@ -45,18 +45,21 @@ import {
 import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
+import { djExtensions } from "./djExtensions.svelte";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
-import { modelNote, voiceNote } from "./djView";
+import { modelNote, previewLine, voiceNote } from "./djView";
 import { Voice, type Spoken } from "./djVoice";
 import {
   backend,
   errorMessage,
+  type DjChoice,
   type DjCloud,
   type DjConfig,
   type DjInstall,
   type DjModelChoice,
   type DjSongInfo,
+  type DjSpeech,
   type DjStatus,
   type RepeatMode,
 } from "./ipc";
@@ -81,7 +84,7 @@ const USE_NAME_KEY = "nativify:djUseName";
 /** How many of its latest openings a local model hears before opening a session. */
 const OPENINGS_REMEMBERED = 3;
 /** The settings that pick the model, or say how to reach it: changing any may fix what was wrong with it. */
-const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "server_url", "server_model", "own_tools", "api_models"];
+const MODEL_SETTINGS: (keyof DjConfig)[] = ["provider", "model", "gpu", "server_url", "server_model", "own_tools", "api_models"];
 /** Waiting longer than this for the model, the DJ talks from a template instead. */
 export const MODEL_TIMEOUT_MS = 90_000;
 /** The first answer may have to wait for the model to load. */
@@ -130,6 +133,8 @@ export interface DjSet {
   /** The same while a set picked as it goes grows song by song (each step is a new object). */
   id: number;
   segment: SegmentId;
+  /** The extension whose segment it's from, by name; null for the DJ's own. */
+  from: string | null;
   name: string;
   /** The songs to play. A set picked as it goes has the ones played and playing, and the one lined up next. */
   songs: Candidate[];
@@ -249,11 +254,15 @@ class Dj {
   talkMs = $state(0);
   /** The listener paused the DJ's item. */
   paused = $state(false);
+  /** The voice Settings is letting the listener hear, while its line is made, then `playing`. */
+  previewing = $state.raw<{ voice: string; playing: boolean } | null>(null);
 
   enabled = $derived(!!this.status?.settings.enabled);
   ready = $derived(!!this.status?.settings.enabled && !!this.status?.ready);
 
   #voice = new Voice();
+  /** Plays previews, on the same output as the DJ's lines. */
+  #preview = new Voice();
   #run = 0;
   #ticker: ReturnType<typeof setInterval> | undefined;
   #timers = new Set<ReturnType<typeof setTimeout>>();
@@ -353,8 +362,9 @@ class Dj {
   /** Bumped each time a set picked as it goes changes the player's queue, for views that show the queue. */
   linedUp = $state(0);
 
-  constructor(voice?: Voice) {
+  constructor(voice?: Voice, preview?: Voice) {
     if (voice) this.#voice = voice;
+    if (preview) this.#preview = preview;
     this.on((e) => this.#remember(e));
   }
 
@@ -366,9 +376,13 @@ class Dj {
       if (e.payload.component !== was) this.refresh();
     });
     await listen("dj-installed", () => this.refresh());
-    // A reload in the middle of a line mustn't leave the music turned down, or the line playing on.
+    // Where the model runs, once a load decides it.
+    await listen<DjStatus>("dj-status", (e) => (this.status = e.payload));
+    // A reload in the middle of a line mustn't leave the music turned down, the line playing on, or the sound output
+    // held open for a session that's gone.
     backend.djDuck(1, 0, 0).catch(() => {});
     backend.djVoice({ action: "stop" }).catch(() => {});
+    backend.djVoice({ action: "hold", on: false }).catch(() => {});
     await this.refresh();
   }
 
@@ -380,7 +394,8 @@ class Dj {
     }
   }
 
-  async configure(patch: Partial<DjConfig>) {
+  /** Saves a settings change; whether it was saved. */
+  async configure(patch: Partial<DjConfig>): Promise<boolean> {
     // Another model ends the session. A new voice carries on (a line already made keeps the old one), unless it has
     // to download first.
     const switching = patch.provider !== undefined || patch.model !== undefined;
@@ -393,10 +408,11 @@ class Dj {
       toasts.error(e);
     }
     if (patch.voice !== undefined && !this.ready) this.stop();
-    if (!saved) return;
+    if (!saved) return false;
     // A change that may have fixed the model or the voice: what was wrong is forgotten, and said again if it isn't.
     if (MODEL_SETTINGS.some((k) => patch[k] !== undefined)) this.#forgetModelTrouble();
     if (patch.voice !== undefined) this.#forgetVoiceTrouble();
+    return true;
   }
 
   /** Saves a cloud provider's API key in the system keychain, or removes it with null. Removing the key the DJ is
@@ -412,6 +428,37 @@ class Dj {
     }
     if (inUse) this.#forgetModelTrouble();
     return true;
+  }
+
+  /** Lets the listener hear `voice` at the speed set before picking it: a short line, played as the DJ's are. Not
+   * while the DJ talks, whose line one in its place would cut off; a line the DJ starts takes the preview's place. */
+  async preview(voice: DjChoice) {
+    if (this.speaking || this.previewing) return;
+    const mine = { voice: voice.id, playing: false };
+    this.previewing = mine;
+    let speech: DjSpeech;
+    try {
+      speech = await backend.djPreview(voice.id, previewLine(voice));
+    } catch (e) {
+      if (this.previewing === mine) this.previewing = null;
+      toasts.error(e);
+      return;
+    }
+    // Let go of meanwhile: the DJ started talking.
+    if (this.previewing !== mine) return;
+    this.previewing = { ...mine, playing: true };
+    const playing = this.previewing;
+    this.#preview.play(speech.id, volumeGain(player.volume), (error) => {
+      if (this.previewing === playing) this.previewing = null;
+      if (error) toasts.show(`Couldn't play the voice: ${error}`, "error");
+    });
+  }
+
+  /** A line of the DJ's takes the preview's place on the output: it's let go of, without stopping what plays. */
+  #endPreview() {
+    if (!this.previewing) return;
+    this.previewing = null;
+    this.#preview.forget();
   }
 
   /** The models a cloud provider offers with the saved key. */
@@ -811,6 +858,8 @@ class Dj {
     this.phase = "starting";
     this.activity = "Looking through your listening…";
     backend.djWarm().catch(() => {});
+    // Its voice's output stays open until it stops.
+    this.#voice.hold();
     // The DJ plays here; music on another device would play on under its voice.
     if (player.isPlaying && !player.isLocal) player.togglePlay();
     try {
@@ -1061,6 +1110,7 @@ class Dj {
       listener,
       previous: prev,
       instructions: this.instructions,
+      extensionInstructions: djExtensions.promptInstructions().map((x) => x.text),
       opening,
       setNumber: this.#setsThisSession + 1,
       earlier: this.#earlier(local),
@@ -1125,6 +1175,7 @@ class Dj {
     return {
       id: ++this.#setIds,
       segment: segment.id,
+      from: segment.from ?? null,
       name: pick.name,
       songs,
       live,
@@ -1174,16 +1225,17 @@ class Dj {
     return this.#ordinarySegment();
   }
 
-  /** The next of the usual segments, and its choices; none when the listening has nothing left for one. When
-   * everything's been played, it starts over, leaving out only what's playing now and what's skipped; when that
-   * leaves too little, only what's playing now. */
+  /** The next of the usual segments, extensions' among them, and its choices; none when the listening has nothing
+   * left for one. When everything's been played, it starts over, leaving out only what's playing now and what's
+   * skipped; when that leaves too little, only what's playing now. */
   #ordinarySegment(): { segment: Segment; choices: Candidate[] } | null {
     const playing = new Set(this.current?.songs.map((s) => s.uri) ?? []);
     // Starting over leaves out the song in the player too: an opening set starting with it couldn't tell it began.
     if (player.track) playing.add(player.track.uri);
     const ways = [this.#avoid(), this.#avoid(null, playing), { played: playing, skippedArtists: new Set<string>() }];
+    const extra = djExtensions.promptSegments();
     for (const avoid of ways) {
-      const segment = nextSegment(this.#segments, this.#pool, avoid);
+      const segment = nextSegment(this.#segments, this.#pool, avoid, { extra });
       if (!segment) continue;
       if (avoid !== ways[0]) this.#played = new Set(playing);
       return { segment, choices: choicesFor(segment, this.#pool, avoid, Math.random, this.#memory) };
@@ -1371,6 +1423,7 @@ class Dj {
     this.talkMs = 0;
     this.caption = speech.lines;
     this.onAir = { name: set.name, durationMs: speech.durationMs, next: set.songs[0], set };
+    this.#endPreview();
     this.#voice.play(speech.id, volumeGain(player.volume), (error) => {
       if (error) this.#voiceFailed(error);
       // A line that played through: the voice works.
@@ -1656,12 +1709,16 @@ class Dj {
   #nextInSet(cur: DjSet, sofar: Candidate[], played: Set<string>): Candidate | null {
     const avoid = this.#avoid(cur.request);
     const before = this.#leftOutAtPick.get(cur.id) ?? new Set<string>();
+    // An extension's segment keeps to its own songs, liked or not.
+    const fits = djExtensions.fitsFor(cur.segment);
     return nextInSet(
       {
         plan: cur.plan,
         choices: cur.choices,
         // More like a song liked comes from the rest of the listening, leaving out all a set would.
-        pool: this.#pool.filter((c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a))),
+        pool: this.#pool.filter(
+          (c) => !avoid.skippedSongs.has(c.uri) && !c.artists.some((a) => avoid.skippedArtists.has(a)) && (!fits || fits(c)),
+        ),
         sofar,
         played,
         // The set's own songs passed what was left out as it was picked, or were let in on purpose: only artists

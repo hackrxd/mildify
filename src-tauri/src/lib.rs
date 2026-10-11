@@ -324,6 +324,10 @@ async fn dj_configure(
         // What's downloading isn't what's needed any more; partial downloads are kept.
         state.dj.cancel_install();
     }
+    // A card that failed one model, or with the setting as it was, gets another chance.
+    if new.gpu != old.gpu || new.model != old.model {
+        state.dj.reset_device();
+    }
     if !new.keeps_model(&old) {
         state.dj.release().await;
     }
@@ -359,14 +363,25 @@ async fn dj_remove(state: State<'_, AppState>) -> Result<dj::DjStatus> {
 
 /// Loads the DJ's model ahead of its first request.
 #[tauri::command]
-async fn dj_warm(state: State<'_, AppState>) -> Result<()> {
-    state.dj.warm(&state.config().dj).await
+async fn dj_warm(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
+    let ran = state.dj.runs_on();
+    let warmed = state.dj.warm(&state.config().dj).await;
+    told_where_it_runs(&app, &state, ran);
+    warmed
+}
+
+/// Tells the UI, with a `dj-status`, when loading the model moved it to another device, or found where it runs.
+fn told_where_it_runs(app: &AppHandle, state: &AppState, ran: Option<dj::engine::RunsOn>) {
+    if state.dj.runs_on() != ran {
+        state.dj.emit_status(app, &state.config().dj);
+    }
 }
 
 /// Asks the DJ's model: with a JSON schema, for JSON that fits it; offered tools, for the calls it wants to
 /// make before answering.
 #[tauri::command]
 async fn dj_generate(
+    app: AppHandle,
     state: State<'_, AppState>,
     messages: Vec<dj::chat::Message>,
     schema: Option<Value>,
@@ -375,7 +390,10 @@ async fn dj_generate(
 ) -> Result<dj::chat::Answer> {
     let cfg = state.config().dj;
     let max_tokens = max_tokens.unwrap_or(400).min(2000);
-    state.dj.generate(&cfg, &messages, schema.as_ref(), tools.as_deref(), max_tokens).await
+    let ran = state.dj.runs_on();
+    let answer = state.dj.generate(&cfg, &messages, schema.as_ref(), tools.as_deref(), max_tokens).await;
+    told_where_it_runs(&app, &state, ran);
+    answer
 }
 
 /// Saves the API key for a cloud model provider in the system keychain, or removes it with `None`. The key
@@ -413,6 +431,12 @@ async fn dj_models(state: State<'_, AppState>, provider: String) -> Result<Vec<d
 #[tauri::command]
 async fn dj_speak(state: State<'_, AppState>, text: String) -> Result<dj::voice::Speech> {
     state.dj.speak(&state.config().dj, &text).await
+}
+
+/// Reads a short line in a voice, to hear it before it's picked; `dj_voice` plays it.
+#[tauri::command]
+async fn dj_preview(state: State<'_, AppState>, voice: String, text: String) -> Result<dj::voice::Speech> {
+    state.dj.preview(&state.config().dj, &voice, &text).await
 }
 
 /// Plays, pauses or stops the DJ's lines on this computer's audio output, as the music plays.
@@ -579,6 +603,7 @@ pub fn run() {
             dj_models,
             dj_song_info,
             dj_speak,
+            dj_preview,
             dj_voice,
             dj_duck,
             dj_release,
