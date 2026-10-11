@@ -19,10 +19,9 @@ use serde::Serialize;
 use super::chat::{Api, Target};
 use crate::error::{AppError, Result};
 
-/// Loading a model from a slow disk can take a while; past this, something is wrong.
+/// Loading a model from a slow disk can take a while; past this, something is wrong. A graphics card that hasn't loaded
+/// the model by then is stuck, and the processor gets its turn.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(240);
-/// A graphics card that hasn't loaded the model by now is stuck, and the processor gets its turn.
-const CARD_LOAD_TIMEOUT: Duration = Duration::from_secs(120);
 /// The backends `--list-devices` names a graphics card by: Vulkan, Metal, and llama.cpp's others for cards. Not BLAS,
 /// which Intel Macs' build lists for Apple's Accelerate library and runs on the processor.
 const CARD_BACKENDS: [&str; 5] = ["Vulkan", "MTL", "CUDA", "ROCm", "SYCL"];
@@ -98,7 +97,7 @@ pub struct Engine {
     /// Bumped by `stop` and `kill_now`, so a load still waiting its turn gives up rather than start a server nobody
     /// wants any more.
     stops: AtomicU64,
-    /// `CARD_LOAD_TIMEOUT`, but for tests.
+    /// `LOAD_TIMEOUT` for the graphics card, but shorter in tests.
     card_load_timeout: Duration,
     /// Held while a load chooses where the model runs and loads it there: one waiting on it sees how the card did.
     choosing: Mutex<()>,
@@ -119,7 +118,7 @@ impl Default for Engine {
             server: StdMutex::default(),
             next_id: AtomicU64::new(1),
             stops: AtomicU64::new(0),
-            card_load_timeout: CARD_LOAD_TIMEOUT,
+            card_load_timeout: LOAD_TIMEOUT,
             choosing: Mutex::default(),
             http: reqwest::Client::builder().no_proxy().build().unwrap_or_default(),
             last_used: StdMutex::default(),
@@ -812,6 +811,12 @@ mod tests {
         assert_eq!(spawned.load(Ordering::SeqCst), 1);
         assert!(target.url.contains(&format!(":{p}/")), "{}", target.url);
         e.stop().await;
+    }
+
+    #[test]
+    fn gives_the_card_as_long_to_load_the_model_as_the_processor() {
+        // A slow disk is as slow for both, and on a first load the card builds its shaders too.
+        assert_eq!(Engine::default().card_load_timeout, LOAD_TIMEOUT);
     }
 
     #[test]
