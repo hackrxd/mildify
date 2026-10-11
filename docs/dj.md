@@ -215,9 +215,10 @@ from. The voices speak English, so a DJ told to speak another language will read
 [Extensions](mods.md#the-dj) you turn on can give the DJ instructions too, up to 300 characters each and 600 in
 all. They come after yours, and where they disagree with yours, yours come first. They can also add segments of
 their own, such as short songs only, which take turns with the DJ's and play only songs from your listening; the
-DJ still opens with one of its own. The DJ page lists what each extension adds under **Tell your DJ**, so you can
-see everything the DJ is told, and marks the sets from an extension's segment. Turning an extension off takes it
-all back; a set already picked from its segment plays on.
+DJ opens with one of its own when it can. The DJ page lists what each extension adds under **Tell your DJ**, with
+what each segment tells the model it is, so you can see everything the DJ is told, and marks the sets from an
+extension's segment. Turning an extension off takes it all back from the next set the DJ picks; a set already
+picked, or being picked, plays on.
 
 ## Its voice
 
@@ -313,7 +314,7 @@ your own on this computer, directly, never through a proxy set for your system.
 
 With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
 off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
-before in this session, and your instructions and your extensions'.
+before in this session, your instructions, and your extensions' instructions and what their segments are.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
 
 ### What it remembers
