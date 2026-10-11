@@ -150,15 +150,18 @@ play, `dj.talk` "silent", or a voice that failed) is only shown (`dj.showing`), 
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
-picked only as the last song starts. Likes let a set run on past its plan (`setCap`: a song each, up to `RUN_ON`,
+picked only as the last song starts. How the set playing is going (its likes and skips, whether it ends or picks its
+next song again, where a Next or Previous is headed) is its `SetProgress` (`djLive.ts`), made anew as each set comes
+in. Likes let a set run on past its plan (`setCap`: a song each, up to `RUN_ON`,
 while there's more like them), and an artist doesn't play twice running, by every artist a song credits
-(`sharesArtist`), unless liked or named by the set's request. A set's own songs are left out only for artists
-skipped since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set was started with sit behind the player, so Next and
-Previous go through `dj.skipTalk()`/`dj.previous()`, which line up a song before moving. `dj.request(text)` makes the next set a
-requested one (`requestSegment`/`requestChoices`), replacing an `upNext` not yet introduced (its queue cleared after
-what's on its way through `#queuing`, its hand-over dropped by `#dropHandOver`, a set still being picked ignored
-through `#prepareGen`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song
-playing, waiting `SKIP_WAIT_MS` for it before rushing to a template (a template for a request plays only songs it
+(`sharesArtist`), unless liked or named by the set's request. A set's own songs are left out only for artists skipped
+since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set
+was started with sit behind the player, so Next and Previous go through `dj.skipTalk()`/`dj.previous()`, which line
+up a song before moving. `dj.request(text)` makes the next set a requested one (`requestSegment`/`requestChoices`),
+replacing an `upNext` not yet introduced (taken out of the player's queue after what's on its way by the `SetQueue`,
+its hand-over dropped by `#dropHandOver`, a set still being picked let go of by the `NextSet`, which drops what it
+comes to; both in `djNext.ts`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from
+the song playing, waiting `SKIP_WAIT_MS` before hurrying to a template (a template for a request plays only songs it
 names). The session keeps its likes and skips in `djTaste.ts` (a skipped song's main artist sits out the next
 `SIT_OUT_SETS` sets picked, and the rest of the session after two skips: `sittingOut`), asks the model through
 `djPicker.ts` and plays lines through `djVoice.ts`. `DjMemory` (`djMemory.ts`) keeps across sessions, in localStorage

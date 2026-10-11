@@ -1,4 +1,5 @@
 // The model's round for a set: what it looks up first, what it picks, and why there's no pick when there isn't.
+import { GaveUp } from "./djNext";
 import {
   answerOptions,
   lookUpMessages,
@@ -16,9 +17,6 @@ import { vocals, type Vocals } from "./djTiming";
 import { backend, errorMessage, type DjSongInfo } from "./ipc";
 import { lyrics } from "./lyrics.svelte";
 import { idFromUri } from "./util";
-
-/** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
-export class GaveUp extends Error {}
 
 /** What was found about the songs the model asked after: lines for its prompt, and the facts, by song URI. */
 export interface LookedUp {

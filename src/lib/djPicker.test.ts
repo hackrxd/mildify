@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GaveUp } from "./djNext";
 import { SEGMENTS, type Candidate } from "./djPicks";
 import type { SegmentAsk } from "./djTalk";
 
@@ -11,7 +12,7 @@ const backend = vi.hoisted(() => ({
 vi.mock("./ipc", async (actual) => ({ ...(await actual<typeof import("./ipc")>()), backend }));
 vi.mock("./lyrics.svelte", () => ({ lyrics: { songOffsets: {} } }));
 
-const { askModel, GaveUp, lookUp, songVocals } = await import("./djPicker");
+const { askModel, lookUp, songVocals } = await import("./djPicker");
 
 const choices: Candidate[] = Array.from({ length: 4 }, (_, i) => ({
   uri: `spotify:track:c${i}`,
