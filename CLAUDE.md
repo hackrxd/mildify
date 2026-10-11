@@ -85,9 +85,10 @@ window focus re-reads the folders, so edits apply live. Its `ns.dj` (`djExtensio
 of the DJ's sets, songs and lines (one per object, kept in `WeakMap`s), the DJ's `on` events a microtask later, set
 menu entries (`addSetAction`), and adds to `djExtensions`: instructions (one each, fenced after the listener's,
 `EXTENSION_INSTRUCTIONS_BUDGET` in all) and segments (`ext:<extension>/<id>`, up to three each, whose `fits` sees
-the listener's own songs), which `#prepare` reads (`nextSegment`'s `extra`: one of the DJ's own opens) and the DJ
-page lists. `--safe-mode` loads none of it. User-facing guide:
-`docs/mods.md`.
+the listener's own songs, asked once a song in a pick through `promptSegments`; `fitsFor` holds a set picked as it
+goes to it), which `#prepare` reads (`nextSegment`'s `extra`: one of the DJ's own opens) and the DJ page lists. What
+changes them runs `untrack`ed, since extensions call it from `ns.watch`. `--safe-mode` loads none of it. User-facing
+guide: `docs/mods.md`.
 
 **AI DJ.** Off by default, and nothing of it ships with the app. `src-tauri/src/dj/` downloads its runtimes
 (llama.cpp's `llama-server`, sherpa-onnx's TTS program), the chosen GGUF model and voice into `<app data>/dj/`, only
