@@ -58,17 +58,17 @@ pub fn size_of(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// Removes folders a newer build no longer uses (an older runtime, say), and leftovers of interrupted unpacks.
+/// Removes folders a newer build no longer uses (an older runtime, say), and leftovers of interrupted unpacks. Files
+/// are the DJ's own, such as what it looked up about songs, and stay.
 pub fn remove_stale(root: &Path, known: &[&str]) {
     let Ok(entries) = fs::read_dir(root) else { return };
     for entry in entries.filter_map(|e| e.ok()) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == DOWNLOADS || known.contains(&name.as_str()) {
+        let path = entry.path();
+        if name == DOWNLOADS || known.contains(&name.as_str()) || !path.is_dir() {
             continue;
         }
-        let path = entry.path();
-        let r = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
-        if let Err(e) = r {
+        if let Err(e) = fs::remove_dir_all(&path) {
             log::warn!("couldn't remove {}: {e}", path.display());
         }
     }
@@ -370,12 +370,13 @@ mod tests {
         for d in ["llama-b1", "llama-b2", DOWNLOADS, ".llama-b2.unpacking"] {
             fs::create_dir_all(dir.join(d)).unwrap();
         }
-        fs::write(dir.join("stray.txt"), "x").unwrap();
+        // What the DJ looked up about songs.
+        fs::write(dir.join("song_info.json"), "{}").unwrap();
         remove_stale(&dir, &["llama-b2"]);
         let mut left: Vec<String> =
             fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         left.sort();
-        assert_eq!(left, vec![DOWNLOADS.to_owned(), "llama-b2".to_owned()]);
+        assert_eq!(left, vec![DOWNLOADS.to_owned(), "llama-b2".to_owned(), "song_info.json".to_owned()]);
         fs::remove_dir_all(dir).unwrap();
     }
 
