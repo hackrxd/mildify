@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DjEvent } from "./dj.svelte";
+import { MUTE_RAMP_MS } from "./djMixer";
 import type { DjStatus } from "./ipc";
 import type { Track } from "./types";
 
@@ -1586,7 +1587,7 @@ describe("between sets", () => {
     expect(dj.speaking).toBe(true);
     // The finishing song plays to its end, and the music goes silent right there.
     await vi.advanceTimersByTimeAsync(overOld - mod.MUTE_LEAD_MS + mod.TICK_MS);
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
     // Spotify starts the queued song: it waits at its start…
     await vi.advanceTimersByTimeAsync(mod.MUTE_LEAD_MS - mod.TICK_MS);
@@ -1635,7 +1636,7 @@ describe("between sets", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(dj.speaking).toBe(false);
     // Silent at its end rather than cut short.
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
     await vi.advanceTimersByTimeAsync(1000);
     // The queued song comes up: the DJ talks first, and the song waits for its time in the line.
@@ -1658,7 +1659,7 @@ describe("between sets", () => {
     player.pos = DURATION - 2000;
     await tick();
     await vi.advanceTimersByTimeAsync(1300);
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     // Spotify moves on while the song's last half second is still to be heard.
     voice.played = [];
     await playing(next.songs[0].uri, 0);
@@ -1691,7 +1692,7 @@ describe("between sets", () => {
     player.pos = DURATION - 2000;
     await tick();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     // Paused from the player bar, with no DJ item up yet, and played on a while later.
     player.isPlaying = false;
     const at = player.positionNow();
@@ -1701,7 +1702,7 @@ describe("between sets", () => {
     expect(player.togglePlay).toHaveBeenCalled();
     expect(backend.djDuck.mock.calls).toEqual([
       [1, 0, 0],
-      [0, Math.round(DURATION - at - mod.MUTE_RAMP_MS), mod.MUTE_RAMP_MS],
+      [0, Math.round(DURATION - at - MUTE_RAMP_MS), MUTE_RAMP_MS],
     ]);
     player.isPlaying = true;
     backend.djDuck.mockClear();
@@ -1710,9 +1711,9 @@ describe("between sets", () => {
     // A step back too small to plan again: the silence moves with the song.
     player.pos = player.positionNow() - 500;
     await tick();
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     // Timed from where the song was at that tick, at most a tick ago.
-    const left = DURATION - player.positionNow() - mod.MUTE_RAMP_MS;
+    const left = DURATION - player.positionNow() - MUTE_RAMP_MS;
     const [, delay] = backend.djDuck.mock.lastCall as unknown as number[];
     expect(delay).toBeGreaterThanOrEqual(left - 5);
     expect(delay).toBeLessThanOrEqual(left + mod.TICK_MS + 5);
@@ -1960,7 +1961,7 @@ describe("between sets", () => {
     player.pos = DURATION - (4000 - timing.VOCAL_GAP_MS);
     await tick();
     await vi.advanceTimersByTimeAsync(4000 - timing.VOCAL_GAP_MS - mod.MUTE_LEAD_MS + mod.TICK_MS);
-    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), mod.MUTE_RAMP_MS);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
     dj.togglePause();
     player.isPlaying = false;
     const at = player.positionNow();
@@ -1973,7 +1974,7 @@ describe("between sets", () => {
     dj.togglePause();
     expect(backend.djDuck.mock.calls).toEqual([
       [timing.DUCK_LEVEL, 0, 0],
-      [0, Math.round(DURATION - at - mod.MUTE_RAMP_MS), mod.MUTE_RAMP_MS],
+      [0, Math.round(DURATION - at - MUTE_RAMP_MS), MUTE_RAMP_MS],
     ]);
   });
 
