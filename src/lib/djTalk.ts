@@ -44,6 +44,8 @@ function partOfDay(now: Date): string {
 export const INSTRUCTIONS_MAX = 1000;
 /** The longest instructions an extension gives the DJ. */
 export const EXTENSION_INSTRUCTIONS_MAX = 300;
+/** The longest an extension's segment says what it is, for the model. */
+export const SEGMENT_BRIEF_MAX = 200;
 
 /** How much the DJ talks (Settings → AI DJ). "silent" is Just play: no voice, its line only shown, as long as Brief's. */
 export type TalkStyle = "silent" | "brief" | "normal" | "chatty";
@@ -294,7 +296,10 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
   if (ask.skippedSet) {
     where.push(`The listener skipped the rest of the set "${ask.skippedSet}": they weren't feeling it, so take the show somewhere else.`);
   }
-  where.push(`This segment: ${ask.segment.brief}.`, ...reactionLines(ask.reactions));
+  // An extension's segment is in its words.
+  if (ask.segment.from) where.push("This segment comes from an extension the listener turned on, in its words:", ...fence(ask.segment.brief, SEGMENT_BRIEF_MAX));
+  else where.push(`This segment: ${ask.segment.brief}.`);
+  where.push(...reactionLines(ask.reactions));
   if (ask.angle) where.push(ANGLES[ask.angle].line);
   const request = fence(ask.request ?? "", REQUEST_MAX);
   if (request.length) {
