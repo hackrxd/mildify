@@ -1455,6 +1455,7 @@ class Dj {
     rule(!this.#awaiting || this.#awaiting === this.upNext, "awaiting a set that isn't next");
     rule(!this.#waitingForSet || !this.upNext, "waiting for a set that's ready");
     rule(!this.#handOver.on || !!this.upNext, "a hand-over planned with no next set");
+    rule(!this.#mixer.silencing || !!this.#handOver.on, "a silence left over from a dropped plan");
     rule(!this.#queueFor || this.#queueFor === this.upNext || this.#queueFor === this.current, "queueing a set let go of");
     rule(!this.showing || (!this.speaking && !!this.caption && !!this.#shown), "a line shown without captions, or spoken");
     if (this.phase === "off") {
