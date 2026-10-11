@@ -156,10 +156,10 @@ while there's more like them), and an artist doesn't play twice running, by ever
 since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set
 was started with sit behind the player, so Next and Previous go through `dj.skipTalk()`/`dj.previous()`, which line
 up a song before moving. `dj.request(text)` makes the next set a requested one (`requestSegment`/`requestChoices`),
-replacing an `upNext` not yet introduced (its queue cleared after what's on its way through `#queuing`, its hand-over
-dropped by `#dropHandOver`, a set still being picked let go of by its `NextSet`, `djNext.ts`, which drops what it
-comes to); `dj.skipSet()` clears the queue, holds the music and picks the next set again from the song playing,
-waiting `SKIP_WAIT_MS` for the model before hurrying to a template (a template for a request plays only songs it
+replacing an `upNext` not yet introduced (taken out of the player's queue after what's on its way by the `SetQueue`,
+its hand-over dropped by `#dropHandOver`, a set still being picked let go of by the `NextSet`, which drops what it
+comes to; both in `djNext.ts`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from
+the song playing, waiting `SKIP_WAIT_MS` before hurrying to a template (a template for a request plays only songs it
 names). The session keeps its likes and skips in `djTaste.ts` (a skipped song's main artist sits out the next
 `SIT_OUT_SETS` sets picked, and the rest of the session after two skips: `sittingOut`), asks the model through
 `djPicker.ts` and plays lines through `djVoice.ts`. `DjMemory` (`djMemory.ts`) keeps across sessions, in localStorage
