@@ -23,6 +23,9 @@ use crate::error::{AppError, Result};
 const LOAD_TIMEOUT: Duration = Duration::from_secs(240);
 /// A graphics card that hasn't loaded the model by now is stuck, and the processor gets its turn.
 const CARD_LOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// The backends `--list-devices` names a graphics card by: Vulkan, Metal, and llama.cpp's others for cards. Not BLAS,
+/// which Intel Macs' build lists for Apple's Accelerate library and runs on the processor.
+const CARD_BACKENDS: [&str; 5] = ["Vulkan", "MTL", "CUDA", "ROCm", "SYCL"];
 /// How long llama.cpp may take to list the graphics cards it can use.
 const LIST_TIMEOUT: Duration = Duration::from_secs(15);
 /// The model is unloaded after this long without a request, freeing its memory.
@@ -464,11 +467,15 @@ async fn list_devices(server: &Path) -> Option<String> {
 }
 
 /// The first graphics card in `--list-devices`' answer, by its description: "  Vulkan0: NVIDIA GeForce RTX 3060
-/// (12288 MiB, 11515 MiB free)" is the NVIDIA GeForce RTX 3060. "(none)" lists none.
+/// (12288 MiB, 11515 MiB free)" is the NVIDIA GeForce RTX 3060. "(none)" lists none, and a device of a backend that
+/// isn't a card's (`CARD_BACKENDS`) isn't one.
 fn first_card(said: &str) -> Option<String> {
     let listed = &said[said.find("Available devices:")? + "Available devices:".len()..];
     listed.lines().find_map(|line| {
         let (name, rest) = line.trim().split_once(": ")?;
+        if !CARD_BACKENDS.iter().any(|b| name.starts_with(b)) {
+            return None;
+        }
         let description = match rest.rfind(" (") {
             Some(i) if rest.ends_with("MiB free)") => &rest[..i],
             _ => rest,
@@ -817,6 +824,12 @@ mod tests {
         let second = "Available devices:\n  Vulkan0: AMD Radeon Graphics (RADV RENOIR) (2048 MiB, 1900 MiB free)\n";
         assert_eq!(first_card(second).as_deref(), Some("AMD Radeon Graphics (RADV RENOIR)"));
         assert_eq!(first_card("Available devices:\n  MTL0: Apple M2\n").as_deref(), Some("Apple M2"));
+        // Intel Macs' build lists Apple's Accelerate library, which runs on the processor.
+        let intel_mac = "Available devices:\n  BLAS: Accelerate (0 MiB, 0 MiB free)\n";
+        assert_eq!(first_card(intel_mac), None);
+        let m2 = "Available devices:\n  MTL0: Apple M2 (10922 MiB, 10922 MiB free)\n  BLAS: Accelerate (0 MiB, 0 MiB free)\n";
+        assert_eq!(first_card(m2).as_deref(), Some("Apple M2"));
+        assert_eq!(first_card("Available devices:\n  RPC0: 192.168.1.2:50052 (1 MiB, 1 MiB free)\n"), None);
         // What this build says without one, and something else entirely.
         assert_eq!(first_card("Available devices:\n  (none)\n"), None);
         assert_eq!(first_card("error: unknown argument: --list-devices"), None);
