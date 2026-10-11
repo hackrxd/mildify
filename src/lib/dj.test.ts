@@ -2421,6 +2421,9 @@ describe("picking as it goes", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(dj.current!.songs).toHaveLength(1);
     expect(dj.upNext).not.toBeNull();
+    // It doesn't try again with every look at the player.
+    await tick();
+    expect(backend.device.mock.calls.filter(([c]) => (c as { action: string }).action === "queue")).toHaveLength(1);
     backend.device.mockImplementation(async () => {});
   });
 
@@ -2724,6 +2727,31 @@ describe("picking as it goes", () => {
     await untilNextSet();
     expect(prompt()).not.toContain(`They skipped "${b.name}"`);
     expect(prompt()).not.toContain(`They skipped "${c.name}"`);
+  });
+
+  it("carries on after a skip Previous took back, as it would after one skip", async () => {
+    // A set planned five songs long.
+    backend.djGenerate.mockImplementation(async () => {
+      answers++;
+      return { name: `Set ${answers}`, songs: [1, 2, 3, 4, 5], talk: `Here's set number ${answers}, nice and easy.` };
+    });
+    await liveStarted();
+    const b = dj.current!.songs[1];
+    // The set's first song skipped early: one skip.
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    // Next, then Previous straight after: that skip is taken back.
+    dj.skipTalk();
+    void dj.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    await playing(c.uri, 0);
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await tick();
+    // Two skips would end the set with this song; one lines up another after it.
+    expect(dj.current!.songs).toHaveLength(3);
+    expect(dj.upNext).toBeNull();
   });
 
   it("sends one Next into the next set when Next is pressed twice quickly on a set's last song", async () => {
