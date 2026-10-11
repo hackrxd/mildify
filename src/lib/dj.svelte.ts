@@ -789,11 +789,10 @@ class Dj {
     for (const s of now.songs.slice(at)) this.#played.delete(s.uri);
     this.current = { ...now, songs: now.songs.slice(0, at) };
     this.#repick = false;
-    // The next set's first song was in the queue just cleared: it's queued again, after the song gone back to.
+    // The next set's first song was in the queue just cleared: it's queued again, after the song gone back to, and
+    // planned over its end anew.
     if (this.#queued !== "no") this.#queued = "no";
-    this.#plannedOn = null;
-    this.#cues = [];
-    this.#bringIn = null;
+    this.#dropHandOver();
     if (this.#setEnds) this.#readyNext(run, this.current, back);
   }
 
