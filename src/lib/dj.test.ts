@@ -1233,6 +1233,77 @@ describe("settings", () => {
 });
 
 describe("starting", () => {
+  it("says how far getting its first set ready has got", async () => {
+    player.isPlaying = false;
+    let warmed!: () => void;
+    backend.djWarm.mockImplementationOnce(() => new Promise<void>((r) => (warmed = r)));
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    let spoken!: () => void;
+    backend.djSpeak.mockImplementationOnce(
+      (text: string) =>
+        new Promise((r) => (spoken = () => r({ id: 1, duration_ms: speechMs, sentences: [{ text, start_ms: 0, end_ms: speechMs }] }))),
+    );
+    const starting = dj.start();
+    expect(dj.stage).toBe("listening");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    expect(dj.canHurry).toBe(true);
+    expect(dj.modelLoaded).toBe(false);
+    warmed();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.modelLoaded).toBe(true);
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("voicing");
+    expect(dj.canHurry).toBe(false);
+    spoken();
+    await starting;
+    expect(dj.stage).toBeNull();
+    expect(dj.phase).toBe("on");
+  });
+
+  it("looks songs up before it writes, with a model that can", async () => {
+    dj.status = { ...readyStatus, tools: true };
+    player.isPlaying = false;
+    let looked!: (v: unknown) => void;
+    backend.djLookUp.mockImplementationOnce(() => new Promise((r) => (looked = r)));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("lookingUp");
+    looked({ calls: [] });
+    await starting;
+    expect(backend.djGenerate).toHaveBeenCalled();
+  });
+
+  it("starts from a template at once when the listener doesn't want to wait for the model", async () => {
+    player.isPlaying = false;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(dj.phase).toBe("starting");
+    expect(dj.canHurry).toBe(true);
+    dj.hurry();
+    await starting;
+    expect(dj.phase).toBe("on");
+    const set = dj.said[0] ?? dj.upNext;
+    expect(set?.byModel).toBe(false);
+    expect(set?.why).toBe(mod.HURRIED);
+    expect(dj.modelTrouble).toBeNull();
+    expect(toasts.show).not.toHaveBeenCalledWith(expect.stringContaining("talking from templates"), "error", 8000);
+  });
+
+  it("has nothing being picked or waited for once it stops while getting ready", async () => {
+    player.isPlaying = false;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    void dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    dj.stop();
+    expect(dj.stage).toBeNull();
+    expect(dj.canHurry).toBe(false);
+  });
+
   it("waits until everything is downloaded", async () => {
     dj.status = { ...readyStatus, ready: false };
     await dj.start();

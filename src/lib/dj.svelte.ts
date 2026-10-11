@@ -200,6 +200,13 @@ export interface OnAir {
   set: DjSet;
 }
 
+/** How far picking a set has got: the listening read (the opening only), songs looked up (a model that calls tools),
+ * the talk written, and the line voiced. */
+export type DjStage = "listening" | "lookingUp" | "writing" | "voicing";
+
+/** Why a set talks from a template when the listener didn't wait for the model. */
+export const HURRIED = "you started it without waiting for the model";
+
 class Dj {
   /** The backend's view: settings, downloads, disk use. */
   status = $state<DjStatus | null>(null);
@@ -222,6 +229,14 @@ class Dj {
   phase = $state<"off" | "starting" | "on">("off");
   /** What the DJ is busy with, for the DJ page. */
   activity = $state<string | null>(null);
+  /** How far the set being picked has got (the opening's, or the next one's), and since when on performance.now()'s
+   * clock: none while nothing is being picked. */
+  stage = $state<DjStage | null>(null);
+  stageSince = $state(0);
+  /** The model on this computer has loaded, this session. */
+  modelLoaded = $state(false);
+  /** The model is being waited for, and the listener can say not to wait (`hurry`). */
+  canHurry = $state(false);
   /** The set playing now. */
   current = $state.raw<DjSet | null>(null);
   /** The set after it, once it's picked. */
@@ -270,7 +285,7 @@ class Dj {
   /** When this session started: with a set's id, what its memory is kept under. */
   #sessionStart = 0;
   /** The next set on its way: being picked, and the wait for the model. */
-  #next = new NextSet();
+  #next = new NextSet((waiting) => (this.canHurry = waiting));
   /** The next set in the player's queue, after the set playing's last song. */
   #queue = new SetQueue<DjSet>();
   /** Cues on the clock of the line being spoken. */
@@ -662,6 +677,23 @@ class Dj {
     return this.#step(() => this.#skipSetNow());
   }
 
+  /** Stops waiting for the model, for the set being picked: it comes from a template now. For a listener who'd
+   * rather not wait (`canHurry`). */
+  hurry() {
+    this.#next.hurry(HURRIED);
+  }
+
+  /** The music is held for the next set, which is still being picked. */
+  get musicWaits(): boolean {
+    return this.#waitingForSet;
+  }
+
+  #setStage(stage: DjStage | null) {
+    if (stage === this.stage) return;
+    this.stage = stage;
+    this.stageSince = performance.now();
+  }
+
   /** Whether `set` can be skipped now: it's the set playing (there's none unless the DJ is on), the DJ isn't talking
    * or bringing a set in, the music plays on this computer, and no skip is under way. The page's Skip buttons and
    * `skipSet()` go by it. */
@@ -832,7 +864,11 @@ class Dj {
     this.#sessionStart = Date.now();
     this.phase = "starting";
     this.activity = "Looking through your listening…";
-    backend.djWarm().catch(() => {});
+    this.#setStage("listening");
+    backend.djWarm().then(
+      () => void (run === this.#run && (this.modelLoaded = true)),
+      () => {},
+    );
     // Its voice's output stays open until it stops.
     this.#voice.hold();
     // The DJ plays here; music on another device would play on under its voice.
@@ -847,6 +883,7 @@ class Dj {
       this.activity = "Picking your first songs…";
       const first = await this.#prepare(run, null, OPENING_TIMEOUT_MS, true);
       if (run !== this.#run) return;
+      this.#setStage(null);
       if (!first) {
         throw new Error("There isn't enough in your listening for the DJ yet. Play and like some songs, then try again.");
       }
@@ -917,6 +954,8 @@ class Dj {
    * for. Stopping clears all of it. */
   #resetPlayback() {
     this.activity = null;
+    this.#setStage(null);
+    this.modelLoaded = false;
     this.speaking = false;
     this.showing = false;
     this.#shown = null;
@@ -1115,6 +1154,7 @@ class Dj {
     const songs = live ? pick.songs.slice(0, 1) : pick.songs;
     for (const s of songs) this.#played.add(s.uri);
     // Just play has no voice, and so no talk to time around the song's vocals.
+    if (ask.talk !== "silent" && !stale()) this.#setStage("voicing");
     const [speech, firstVocals] =
       ask.talk === "silent" ? [null, null] : await Promise.all([this.#speak(pick.talk), songVocals(pick.songs[0].uri)]);
     if (stale()) {
@@ -1171,6 +1211,7 @@ class Dj {
       tools: !!this.status?.tools,
       wait: (p) => this.#next.wait(p, timeoutMs),
       stale,
+      stage: (stage) => void (stale() || this.#setStage(stage)),
     });
     if (round.pick) this.modelTrouble = null;
     // Trouble with settings changed since is no news: the change may have fixed it, and the next round tells.
@@ -1433,6 +1474,7 @@ class Dj {
     if (this.phase === "off") {
       rule(
         !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.showing &&
+          !this.stage && !this.canHurry &&
           !this.#next.picking && !this.#next.waiting && this.#queue.idle && !this.#handOver.on &&
           !this.#speechCues.length && !this.#bringIn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet &&
           !this.#mixer.silencing && !this.#leftSet && !this.#setSkipped &&
@@ -1884,6 +1926,7 @@ class Dj {
       (wanted) => this.#prepare(run, after, MODEL_TIMEOUT_MS, false, wanted),
       (set) => {
         this.activity = null;
+        this.#setStage(null);
         if (!set) {
           this.#outOfSongs = true;
           // The music is waiting for a set that won't come.
