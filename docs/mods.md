@@ -107,7 +107,7 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
+items, watchers, DJ listeners, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
 the extension left running can't add styles, pages, menu items, watchers or toasts back through the `ns` it was
 given, its `ns.api` calls reject without reaching Spotify, and an `onUnload` registered then runs at once.
 `ns.player`, `ns.router` and `ns.storage` still work, so stop your own timers and listeners in the function you
@@ -131,11 +131,62 @@ offers a **Reload window** button then).
 | `addStyle(css)` | Adds a stylesheet. Returns a remove function. |
 | `addTrackMenuItem({ label, action, when? })` | Adds an entry to the right-click menu of every track, the DJ's songs included. `label` may be a function of the track; `when(track)` hides it for tracks it doesn't apply to; `action(track)` runs on click, and may be async: if it throws or its promise rejects, the error shows as a notice. An entry whose `label` or `when` throws is left out of that menu. The track is the Web API track object (`uri`, `name`, `artists`, `album`, …). Returns a remove function. |
 | `addPage({ id, label, icon?, render })` | Adds a page to the sidebar. `render(el)` draws it into an empty element each time the page opens and may return a cleanup for when it closes. `icon` is one of the app's icon names (`"queue"`, `"heart"`, `"disc"`, `"mic"`, `"lyrics"`, …); the default is a puzzle piece. Returns a remove function. |
+| `dj` | The AI DJ: what it plays and says, what happens in its sessions, and entries for its sets' menus. See [The DJ](#the-dj). |
 | `storage.get(key)`, `storage.set(key, value)`, `storage.remove(key)` | Settings that persist across restarts, kept separate per extension. Values are stored as JSON. |
 | `onUnload(fn)` | Runs `fn` when the extension is turned off or restarted. |
 
 Network access is limited to the app's own backend: use `ns.api` for Spotify. `fetch` works for
 files next to the extension (`fetch(new URL("./data.json", ns.extension.url))`).
+
+### The DJ
+
+`ns.dj` follows the [AI DJ](dj.md). Its state is reactive, like `ns.player`'s, so read it in `ns.watch`:
+
+| Member | What it is |
+| --- | --- |
+| `phase` | `"off"`, `"starting"` (getting its first set ready) or `"on"`. |
+| `ready` | Turned on, with everything it needs downloaded and set up. |
+| `current`, `upNext` | The set playing, and the one after it once it's picked; or `null`. |
+| `onAir` | The DJ's talk while it's on, an item of its own in the player: `{ setId, name, durationMs, next }`, where `next` is the song it leads into. |
+| `said` | What it said this session, oldest first: `{ setId, name, talk, byModel, spoken }`. `spoken` is false for a line that was only shown. |
+| `speaking`, `showing` | Its voice is reading a line out; a line shows without it (Just play, or the voice failed). |
+| `requested` | What the listener asked the next set to be, until a set for it comes on. |
+
+A set is `{ id, name, segment, songs, talk, byModel, live, request }`: `segment` is the kind of set
+(`"onRepeat"`, `"favorites"`, `"throwbacks"`, `"fresh"`, `"rediscover"` or `"request"`), `talk` what the DJ says
+to bring it in, `byModel` false when that came from a template, `live` true for a set picked song by song as it
+plays, and `request` what the listener asked for, when it's their request. A set picked as it goes grows: each
+step is a new copy with the same `id`. A song is `{ uri, name, artists, album, year, durationMs, explicit,
+reasons, likedAt, playedAt }`. `reasons` says how it's in the listener's listening (`"onRepeat"`, `"favorite"`,
+`"allTime"`, `"recent"`, `"likedLately"`, `"likedLongAgo"`); the dates are ISO strings, or `null`.
+
+These are copies, frozen: changing them changes nothing. The DJ keeps the same copy for as long as it has the same
+set, song or list of lines, so comparing with `===` tells you whether anything changed.
+
+`ns.dj.on(fn)` calls `fn` with each thing that happens in a session, and returns a function that stops it:
+
+| Event | When |
+| --- | --- |
+| `{ type: "set-picked", set }` | A set is picked, ahead of its turn. |
+| `{ type: "line-spoken", line }` | The DJ said a line, or showed it: usually just before the `set-started` of the set it brings in, and just after when the set's first song came on before the DJ had had its say. |
+| `{ type: "line-withdrawn", line }` | The DJ took a line back: you went back in the song it talked over. It says it again later, with another `line-spoken`. |
+| `{ type: "set-started", set }` | A set's first song came on. |
+| `{ type: "song-started", song, set }` | One of the DJ's songs came on; `set` is its set, or `null`. |
+| `{ type: "song-skipped", song }`, `{ type: "song-unskipped", song }` | A song was left before halfway; Previous right after took that back. |
+| `{ type: "song-liked", song }` | A song was liked while the DJ played it. |
+| `{ type: "set-skipped", set }` | The listener skipped the rest of a set. |
+| `{ type: "stopped" }` | The session ended. |
+
+An event reaches `fn` just after the step of the DJ's that it's about, so the DJ may already be further on: read
+`ns.dj` for where it is now. A listener that throws is logged in the developer console, and the others still hear
+of it.
+
+`ns.dj.addSetAction({ label, action, when? })` adds an entry to the menu of each set on the DJ page (its "…"
+button, or a right-click on its name), as `addTrackMenuItem` does for tracks, with a copy of the set. Returns a
+remove function.
+
+`ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
+play something else, use `ns.player`: the DJ steps out when other music plays.
 
 ## When something breaks
 
