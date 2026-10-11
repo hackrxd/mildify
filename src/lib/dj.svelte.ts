@@ -47,6 +47,7 @@ import { loadListening } from "./djListening";
 import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
 import { djExtensions } from "./djExtensions.svelte";
 import { cue, HandOver, runCues, type Cue, type Hold } from "./djHandOver";
+import { SetProgress } from "./djLive";
 import { Mixer } from "./djMixer";
 import { NextSet, SetQueue } from "./djNext";
 import { askModel, songVocals, type ModelRound } from "./djPicker";
@@ -326,18 +327,12 @@ class Dj {
   #modelWarned = false;
   /** Bumped by a change to the model's settings: a round asked before it reports no trouble. */
   #modelSettings = 0;
-  /** For the set playing, picked as it goes: songs skipped, whether it ends with the song playing, whether the
-   * song lined up next should be picked again, and a queue change on its way to the player. */
-  #setSkips = 0;
-  #setEnds = false;
-  #repick = false;
+  /** How the set playing is going: what it was skipped and liked, and how what's next in it is lined up. */
+  #progress = new SetProgress();
+  /** A queue change on its way to the player, for a set picked as it goes. */
   #lining = false;
-  /** Songs liked while the set plays: they steer its next picks. Older likes are the model's to weigh. */
-  #setLiked: Candidate[] = [];
   /** The last queue change sent to the player, settled once the player has it. */
   #linedUpDone: Promise<boolean> = Promise.resolve(true);
-  /** Where a Next or Previous sent in a set picked as it goes is headed, while the player gets there. */
-  #heading: { uri: string; at: number } | null = null;
   /** Those Nexts and Previouses, one after another: each goes from where the one before left the player. */
   #steps: Promise<unknown> = Promise.resolve();
   /** Previous went back to this song: leaving the one before isn't a skip. */
@@ -697,7 +692,7 @@ class Dj {
     backend.device({ action: "clear_queue" }).catch(() => {});
     this.#queue.forget();
     // A set picked as it goes lines nothing more up.
-    this.#setEnds = true;
+    this.#progress.ends = true;
     this.#replan();
     this.#heldMusic = true;
     backend.device({ action: "pause" }).catch(() => {});
@@ -725,12 +720,12 @@ class Dj {
 
   /** Where the last Next or Previous sent is headed, if the player may not be there yet. */
   #headed(): string | null {
-    const h = this.#heading;
+    const h = this.#progress.heading;
     return h && performance.now() - h.at < SKIP_LANDS_MS ? h.uri : null;
   }
 
   #headTo(uri: string) {
-    this.#heading = { uri, at: performance.now() };
+    this.#progress.heading = { uri, at: performance.now() };
   }
 
   async #stepBack() {
@@ -769,12 +764,12 @@ class Dj {
     // The songs from the one left on are up for picking again; the song gone back to ends the set for now.
     for (const s of now.songs.slice(at)) this.#played.delete(s.uri);
     this.current = { ...now, songs: now.songs.slice(0, at) };
-    this.#repick = false;
+    this.#progress.repick = false;
     // The next set's first song was in the queue just cleared: it's queued again, after the song gone back to, and
     // planned over its end anew.
     this.#queue.forget();
     this.#dropHandOver();
-    if (this.#setEnds) this.#readyNext(run, this.current, back);
+    if (this.#progress.ends) this.#readyNext(run, this.current, back);
   }
 
   /** The set playing is picked as it goes, here. */
@@ -798,7 +793,7 @@ class Dj {
     if (run !== this.#run) return;
     let set = this.current!;
     if (at === set.songs.length - 1) {
-      if (this.#setEnds) {
+      if (this.#progress.ends) {
         // The next set follows from the player's queue once it's there; until then the music waits for it.
         if (!this.upNext || this.#queue.of(this.upNext) !== "done" || heading) return this.#skipToNextSet();
         this.#headTo(this.upNext.songs[0].uri);
@@ -807,8 +802,8 @@ class Dj {
       const pick = this.#nextInSet(set, set.songs, this.#played);
       if (!pick || !(await this.#lineUp(run, set, set.songs, pick))) {
         if (run !== this.#run) return;
-        if (!this.#setEnds) {
-          this.#setEnds = true;
+        if (!this.#progress.ends) {
+          this.#progress.ends = true;
           this.#readyNext(run, set, set.songs[at]);
         }
         return this.#skipToNextSet();
@@ -946,12 +941,8 @@ class Dj {
     this.#pausedMusic = false;
     this.#musicAsked = false;
     this.#stalledSince = null;
-    this.#setSkips = 0;
-    this.#setEnds = false;
-    this.#repick = false;
+    this.#progress = new SetProgress();
     this.#lining = false;
-    this.#setLiked = [];
-    this.#heading = null;
     this.#goingBack = null;
     this.#foreignSince = null;
     this.#remoteSince = null;
@@ -1445,7 +1436,7 @@ class Dj {
           !this.#next.picking && !this.#next.waiting && this.#queue.idle && !this.#handOver.on &&
           !this.#speechCues.length && !this.#bringIn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet &&
           !this.#mixer.silencing && !this.#leftSet && !this.#setSkipped &&
-          !this.#lining && !this.#setEnds && !this.#heading && !this.requested,
+          !this.#lining && !this.#progress.ends && !this.#progress.heading && !this.requested,
         "stopped with playback state left",
       );
     }
@@ -1606,16 +1597,16 @@ class Dj {
    * queue, and picked again when the listener likes something, until it's too late to change. When the set
    * should end with the song playing, the next set gets picked. */
   #goLive(run: number, cur: DjSet, uri: string, left: number) {
-    if (this.#setEnds || this.#lining) return;
+    if (this.#progress.ends || this.#lining) return;
     const at = cur.songs.findIndex((s) => s.uri === uri);
     if (at < 0) return;
     if (at === cur.songs.length - 1) {
       const pick = this.#nextInSet(cur, cur.songs, this.#played);
       if (pick) return this.#lineUp(run, cur, cur.songs, pick);
-      this.#setEnds = true;
+      this.#progress.ends = true;
       this.#readyNext(run, cur, cur.songs[at]);
-    } else if (at === cur.songs.length - 2 && this.#repick && left > REPICK_UNTIL_MS) {
-      this.#repick = false;
+    } else if (at === cur.songs.length - 2 && this.#progress.repick && left > REPICK_UNTIL_MS) {
+      this.#progress.repick = false;
       const queued = cur.songs[at + 1];
       // The song lined up is fair game again.
       const played = new Set(this.#played);
@@ -1644,8 +1635,8 @@ class Dj {
         // The set's own songs passed what was left out as it was picked, or were let in on purpose: only artists
         // skipped since leave them out.
         skippedArtists: new Set([...avoid.skippedArtists].filter((a) => !before.has(a))),
-        reactions: { liked: this.#setLiked, skipped: this.#taste.skippedSongs },
-        skips: this.#setSkips,
+        reactions: { liked: this.#progress.liked, skipped: this.#taste.skippedSongs },
+        skips: this.#progress.skips,
         request: cur.request,
       },
       this.#memory,
@@ -1657,7 +1648,7 @@ class Dj {
     const replaced = cur.songs.length > sofar.length ? cur.songs[cur.songs.length - 1] : null;
     if (replaced) this.#played.delete(replaced.uri);
     this.#played.add(pick.uri);
-    this.#repick = false;
+    this.#progress.repick = false;
     this.#lining = true;
     this.current = { ...cur, songs: [...sofar, pick] };
     const done = (async () => {
@@ -1673,7 +1664,7 @@ class Dj {
         // Nothing follows in the player: the set ends with the song playing.
         if (run !== this.#run || this.current?.id !== cur.id) return false;
         this.current = { ...this.current, songs: sofar };
-        this.#setEnds = true;
+        this.#progress.ends = true;
         this.#readyNext(run, cur, sofar[sofar.length - 1]);
         return false;
       })
@@ -1689,8 +1680,7 @@ class Dj {
   #noticeLikes(cur: DjSet) {
     for (const s of cur.songs) if (liked.has(s.uri) === undefined) liked.ensure([s.uri]);
     for (const s of this.#taste.noticeLikes(cur.songs, (uri) => liked.has(uri))) {
-      this.#setLiked = [s, ...this.#setLiked.filter((l) => l.uri !== s.uri)];
-      this.#repick = true;
+      this.#progress.like(s);
       this.#emit({ type: "song-liked", song: s });
     }
   }
@@ -1741,7 +1731,7 @@ class Dj {
     // Songs the player passes through on its way back leave it be.
     const wentBack = uri !== null && uri === this.#goingBack;
     if (wentBack) this.#goingBack = null;
-    if (uri === this.#heading?.uri) this.#heading = null;
+    if (uri === this.#progress.heading?.uri) this.#progress.heading = null;
     // A DJ song left early, not by the DJ: the listener skipped it, so its artist sits out a while.
     // Leaving a set the listener skipped isn't a skip of the song: the set was.
     const leaving = !!prev && !!this.#leftSet?.songs.some((s) => s.uri === prev.uri);
@@ -1778,14 +1768,14 @@ class Dj {
   #countSkip(song: Candidate) {
     // A set being picked has its choices already: the artist sits out the sets picked after it.
     if (!this.#taste.skipped(song, this.#setsThisSession + (this.#next.picking ? 1 : 0))) return;
-    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips++;
+    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#progress.skips++;
     this.#emit({ type: "song-skipped", song });
   }
 
   /** Takes back a skip of `song`. */
   #forgive(song: Candidate) {
     if (!this.#taste.forgive(song)) return;
-    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#setSkips = Math.max(0, this.#setSkips - 1);
+    if (this.current?.songs.some((s) => s.uri === song.uri)) this.#progress.unskip();
     this.#emit({ type: "song-unskipped", song });
   }
 
@@ -1808,11 +1798,7 @@ class Dj {
       if (this.#mixer.level === 0) this.#mixer.restore();
       this.#endOnAir();
     }
-    this.#setSkips = 0;
-    this.#setEnds = false;
-    this.#repick = false;
-    this.#setLiked = [];
-    this.#heading = null;
+    this.#progress = new SetProgress();
     this.#leftSet = null;
     this.#lastVocals = null;
     this.#emit({ type: "set-started", set });
