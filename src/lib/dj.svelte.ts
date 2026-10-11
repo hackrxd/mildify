@@ -1775,9 +1775,10 @@ class Dj {
         this.#mixer.restore(DUCK_UP_MS);
       }
       // Before a set the DJ started comes in, whatever was playing plays on under the voice. Otherwise the
-      // listener moved on, and nothing the DJ planned is to be done to their song.
+      // listener moved on, and nothing the DJ planned is to be done to their song: back to the DJ's, it's planned anew.
       if (!this.#awaiting) {
         this.#foreignSince ??= performance.now();
+        this.#dropHandOver();
         this.#bringIn = null;
       }
       return;

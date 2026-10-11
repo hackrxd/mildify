@@ -1662,6 +1662,19 @@ describe("between sets", () => {
     expect(dj.speaking).toBe(true);
   });
 
+  it("plans its talk over a song's end anew when the listener plays something else for a moment and comes back", async () => {
+    const first = await started();
+    const last = first.songs[first.songs.length - 1];
+    await lastSong(first);
+    await playing("spotify:track:mine", 0);
+    // Back to the set's last song, where the DJ talks over its end: Next brings the next set in.
+    await playing(last.uri, DURATION - (speechMs - (3000 - timing.VOCAL_GAP_MS)));
+    expect(dj.speaking).toBe(true);
+    backend.device.mockClear();
+    dj.skipTalk();
+    expect(backend.device).toHaveBeenCalledWith({ action: "next" });
+  });
+
   it("lets a held song that comes in about on time play on", async () => {
     // 6 s of talk, none of it over the next intro: 5 s over the end, 1 s alone.
     dj.setOverStart(false);
