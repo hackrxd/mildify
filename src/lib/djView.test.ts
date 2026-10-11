@@ -9,6 +9,7 @@ import {
   djNav,
   firstCloudModel,
   modelChoiceOf,
+  modelLabel,
   modelName,
   previewLine,
   offNote,
@@ -152,12 +153,41 @@ describe("djLead", () => {
       ": llama3.2, on your own model server, writes what it says, and Michael (American) reads it out on this computer.",
     );
     expect(djLead(status({ provider: "own" }))).toContain(": your own model server writes what it says");
-    expect(djLead(status({ provider: "anthropic" }))).toContain(": Anthropic's claude-opus-5-5 writes what it says");
+    expect(djLead(status({ provider: "anthropic" }))).toContain(": Claude Opus 5.5 writes what it says");
+    expect(djLead(status({ provider: "openai", api_models: { openai: "o3" } }))).toContain(": OpenAI's o3 writes what it says");
     expect(djLead(status({ provider: "openai" }))).toContain(": OpenAI writes what it says, and Michael (American) reads it out on this computer.");
     for (const provider of ["local", "own", "openai", "anthropic", "gemini"] as const) {
       expect(djLead(status({ provider }))).toContain("Michael (American) reads it out");
     }
     expect(djLead(null)).toBe("Your own radio DJ. It plays songs from your listening and talks between them.");
+  });
+});
+
+describe("modelLabel", () => {
+  it("names a cloud model as people write it, without its release date", () => {
+    for (const [id, label] of [
+      ["claude-sonnet-5-5", "Claude Sonnet 5.5"],
+      ["claude-opus-5-5", "Claude Opus 5.5"],
+      ["claude-fable-5-1", "Claude Fable 5.1"],
+      ["claude-opus-4-1-20250805", "Claude Opus 4.1"],
+      ["claude-sonnet-4-20250514", "Claude Sonnet 4"],
+      ["claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet"],
+      ["claude-3-5-haiku-latest", "Claude 3.5 Haiku"],
+      ["gpt-5.5", "GPT-5.5"],
+      ["gpt-5.5-mini", "GPT-5.5 mini"],
+      ["gpt-4o-2024-08-06", "GPT-4o"],
+      ["gpt-4.1-nano-2025-04-14", "GPT-4.1 nano"],
+      ["gemini-2.5-pro", "Gemini 2.5 Pro"],
+      ["models/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"],
+      ["gemini-2.0-flash-001", "Gemini 2.0 Flash"],
+      ["gemini-2.5-pro-preview-05-06", "Gemini 2.5 Pro Preview"],
+    ]) {
+      expect(modelLabel(id), id).toBe(label);
+    }
+  });
+
+  it("leaves an id of another kind as it is", () => {
+    for (const id of ["o3", "o4-mini", "my-model", "claude", "gpt", "llama3.2:latest"]) expect(modelLabel(id)).toBe(id);
   });
 });
 

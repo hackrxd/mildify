@@ -111,13 +111,44 @@ export function speedWords(speed: number): string {
   return `${Math.abs(percent)}% ${percent > 0 ? "faster" : "slower"} than usual`;
 }
 
+/** A cloud model's name as people write it, from its id: "claude-sonnet-5-5" is Claude Sonnet 5.5, "gpt-5.5-mini"
+ * GPT-5.5 mini and "gemini-2.5-pro" Gemini 2.5 Pro, without release dates. An id of another kind stays as it is. */
+export function modelLabel(id: string): string {
+  const bare = id
+    .trim()
+    .replace(/^models\//, "")
+    .replace(/-(\d{4}-\d{2}-\d{2}|\d{8})$/, "")
+    .replace(/(-preview)-\d{2}-\d{2}$/, "$1");
+  const parts = bare.split("-").filter(Boolean);
+  // Builds and aliases: "gemini-2.0-flash-001", "claude-3-5-haiku-latest".
+  while (parts.length > 2 && /^(\d{3,}|latest)$/.test(parts[parts.length - 1])) parts.pop();
+  const [family, ...rest] = parts;
+  if (!rest.length) return id;
+  const word = (w: string) => (/^\d/.test(w) ? w : w[0].toUpperCase() + w.slice(1));
+  if (family === "claude") {
+    // Its version comes in pieces: "sonnet-5-5" is Sonnet 5.5, "3-5-sonnet" 3.5 Sonnet.
+    const out: string[] = [];
+    for (const w of rest) {
+      if (/^\d+$/.test(w) && /^\d+(\.\d+)*$/.test(out[out.length - 1] ?? "")) out[out.length - 1] += `.${w}`;
+      else out.push(word(w));
+    }
+    return ["Claude", ...out].join(" ");
+  }
+  if (family === "gpt") return [`GPT-${rest[0]}`, ...rest.slice(1)].join(" ");
+  if (family === "gemini") return ["Gemini", ...rest.map(word)].join(" ");
+  return id;
+}
+
 /** Who writes what the DJ says, as the subject of a sentence. */
 function writer(status: DjStatus): string {
   const s = status.settings;
   if (s.provider === "local") return modelName(status);
   if (s.provider === "own") return s.server_model.trim() ? `${s.server_model.trim()}, on your own model server,` : "your own model server";
   const model = cloudModelOf(s);
-  return model ? `${providerName(s)}'s ${model}` : providerName(s);
+  if (!model) return providerName(s);
+  // A name that says whose it is needs no more: "Claude Sonnet 5.5", but "OpenAI's o3".
+  const label = modelLabel(model);
+  return label !== model ? label : `${providerName(s)}'s ${model}`;
 }
 
 /** The DJ page's lead: what the DJ is, which model writes what it says, and which voice reads it out. */
