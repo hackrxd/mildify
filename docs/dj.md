@@ -163,6 +163,12 @@ from a template, and why. When the model fails in a way you can fix, such as a c
 your account running out of credit, the DJ says so once and plays on from templates. Removing the key the DJ is
 using stops it.
 
+While it gets its first set ready, the DJ page ticks off each step: reading your listening, loading its model (on
+your computer), looking songs up (with a model that does), writing what to say and recording its voice. A slow
+model gets 2½ minutes for the first set; after 15 seconds the page offers **Start now with a short intro**, which
+starts at once from a template. Later, when the music is waiting for the next set, **Play now with a short intro**
+does the same.
+
 The DJ page keeps saying what's wrong with the model or the voice until it's fixed, with a button to the DJ's
 settings, and through stopping and starting again. The model's note goes once the model answers again, or after you
 change its model, server or key; the voice's once a line plays through, or after you pick another voice. A change
