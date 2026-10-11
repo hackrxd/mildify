@@ -1639,6 +1639,29 @@ describe("between sets", () => {
     expect(backend.djDuck).toHaveBeenLastCalledWith(1, 0, timing.DUCK_UP_MS);
   });
 
+  it("talks over a song's end without its vocals when they don't come in time", async () => {
+    const first = await started();
+    const next = dj.upNext!;
+    const last = next.songs[next.songs.length - 1];
+    // The lyrics never come for the next set's last song.
+    const answer = backend.lyrics.getMockImplementation()!;
+    backend.lyrics.mockImplementation((song: string) => (song === last.uri.split(":")[2] ? new Promise(() => {}) : answer(song)));
+    await lastSong(first);
+    // The listener skips into the next set; the DJ talks first.
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(speechMs);
+    voice.end();
+    await playing(next.songs[1].uri, 0);
+    await playing(last.uri, 100_000);
+    await tick();
+    await tick();
+    // Close to its end, the DJ plans its talk without them, as for a song with no synced lyrics.
+    player.pos = DURATION - timing.UNKNOWN_OUTRO_MS + 100;
+    await tick();
+    await tick();
+    expect(dj.speaking).toBe(true);
+  });
+
   it("lets a held song that comes in about on time play on", async () => {
     // 6 s of talk, none of it over the next intro: 5 s over the end, 1 s alone.
     dj.setOverStart(false);
@@ -2658,6 +2681,67 @@ describe("picking as it goes", () => {
     await back;
     expect(sent()).toEqual(["clear_queue", `queue ${b.uri}`, "next"]);
     expect(a).toBeDefined();
+  });
+
+  it("times the talk over the song Previous went back to by that song's own vocals, once they're known", async () => {
+    await liveStarted();
+    const [, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    const id = (s: { uri: string }) => s.uri.split(":")[2];
+    // The set's last song has a long end to talk over. The one before sings until just before its end, and its lyrics
+    // are slow to come.
+    backend.lyrics.mockImplementation(async (song: string) => {
+      if (song !== id(b)) return sync(3000, song === id(c) ? DURATION - 10_000 : 150_000);
+      await new Promise((r) => setTimeout(r, 2000));
+      return sync(3000, DURATION - 300);
+    });
+    await finish();
+    await playing(c.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await tick();
+    await tick();
+    await dj.previous();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(3000);
+    // Its singer sings on to the end: the DJ waits for the song to end to talk.
+    player.pos = DURATION - 3000;
+    await tick();
+    await tick();
+    expect(dj.speaking).toBe(false);
+  });
+
+  it("doesn't time the talk over the song Previous went back to by a late answer about the one it left", async () => {
+    await liveStarted();
+    const [, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const c = dj.current!.songs[2];
+    const id = (s: { uri: string }) => s.uri.split(":")[2];
+    // The set's last song has a long end to talk over, and its lyrics are slow to come. The one before sings until just
+    // before its end.
+    backend.lyrics.mockImplementation(async (song: string) => {
+      if (song !== id(c)) return sync(3000, song === id(b) ? DURATION - 300 : 150_000);
+      await new Promise((r) => setTimeout(r, 5000));
+      return sync(3000, DURATION - 10_000);
+    });
+    await finish();
+    await playing(c.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await dj.previous();
+    await playing(b.uri, 0);
+    // The answer about the song left comes in, then the listener steps back in the song: the talk is planned anew.
+    await vi.advanceTimersByTimeAsync(6000);
+    player.pos = 1000;
+    await tick();
+    await tick();
+    player.pos = DURATION - 3000;
+    await tick();
+    await tick();
+    expect(dj.speaking).toBe(false);
   });
 
   it("doesn't hold the next set's song for a hand-over Previous left behind, as it comes in on its own", async () => {
