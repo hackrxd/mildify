@@ -61,10 +61,16 @@ export interface ModelRound {
 
 /** Asks the model for its pick from `ask`, after any look-ups it wants when it can call tools. `wait` bounds the
  * whole round (a timeout, or the music that can't wait any longer, rejecting with `GaveUp`); `stale` says the
- * set isn't wanted any more, so nothing more is asked once it isn't. */
+ * set isn't wanted any more, so nothing more is asked once it isn't. `stage` hears what it's doing: looking songs up,
+ * then writing. */
 export async function askModel(
   ask: SegmentAsk,
-  opts: { tools: boolean; wait: <T>(round: Promise<T>) => Promise<T>; stale: () => boolean },
+  opts: {
+    tools: boolean;
+    wait: <T>(round: Promise<T>) => Promise<T>;
+    stale: () => boolean;
+    stage?: (stage: "lookingUp" | "writing") => void;
+  },
 ): Promise<ModelRound> {
   // Given up on (too slow, or the music can't wait): what's still on its way isn't asked for.
   let gaveUp = false;
@@ -73,8 +79,10 @@ export async function askModel(
     const answer = await opts.wait(
       (async () => {
         // A model that can call tools may look some of the songs up first.
+        if (opts.tools) opts.stage?.("lookingUp");
         const looked = opts.tools ? await lookUp(ask) : null;
         if (gaveUp || opts.stale()) throw new GaveUp("given up");
+        opts.stage?.("writing");
         if (looked) found = looked.found;
         const messages = segmentMessages({ ...ask, lookedUp: looked?.lines });
         return backend.djGenerate(messages, segmentSchema(ask.choices.length, ask.talk), talkLength(ask.talk).maxTokens);
@@ -87,7 +95,7 @@ export async function askModel(
   } catch (e) {
     gaveUp = true;
     console.warn("DJ: no answer from the model, talking from a template:", e);
-    if (e instanceof GaveUp) return { pick: null, why: "the model didn't answer in time", trouble: null, found };
+    if (e instanceof GaveUp) return { pick: null, why: e.why ?? "the model didn't answer in time", trouble: null, found };
     // Not wanted any more: its ask was dropped for a newer one, which is nothing for the listener to fix.
     if (opts.stale()) return { pick: null, why: "the set isn't wanted any more", trouble: null, found };
     const why = errorMessage(e);
