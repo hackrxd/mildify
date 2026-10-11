@@ -58,7 +58,7 @@ export class NextSet {
     this.#rush?.();
   }
 
-  /** A new session: nothing picked or waited for. */
+  /** The session stopped: nothing picked or waited for, for the next one to start from. */
   reset() {
     this.letGo();
     this.#rush = null;
@@ -111,7 +111,7 @@ export class SetQueue<S> {
         if (this.#adding !== set) return;
         await add(uri);
       }
-      // A set that came in meanwhile isn't the one queued any more: the next one is queued in its turn.
+      // Taken out, forgotten or queued over meanwhile: then it's not this set's to say.
       if (this.#queued?.set === set) this.#queued.state = "done";
     } catch (e) {
       console.warn("DJ: couldn't queue the next set:", e);

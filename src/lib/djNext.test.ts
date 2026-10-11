@@ -84,7 +84,9 @@ describe("NextSet", () => {
 
   it("stops waiting when hurried, and only while it waits", async () => {
     const next = new NextSet();
+    // Hurried with nothing to wait for: the wait after it isn't cut short.
     next.hurry();
+    await expect(next.wait(Promise.resolve("answer"), 10_000)).resolves.toBe("answer");
     const answer = deferred<string>();
     const waited = next.wait(answer.promise, 10_000).catch((e: unknown) => e);
     next.hurry();
