@@ -3474,6 +3474,8 @@ describe("where the model runs", () => {
     const runsOn = { card: null, card_failed: "The DJ's model stopped while loading (exit status: 1)" };
     events.handlers.get("dj-status")!({ payload: { ...readyStatus, runs_on: runsOn } });
     expect(dj.status?.runs_on).toEqual(runsOn);
+    // The voice's output, held for a session before a reload, is let go of.
+    expect(backend.djVoice).toHaveBeenCalledWith({ action: "hold", on: false });
   });
 
   it("carries on playing when the model moves on or off the graphics card", async () => {

@@ -375,9 +375,11 @@ class Dj {
     await listen("dj-installed", () => this.refresh());
     // Where the model runs, once a load decides it.
     await listen<DjStatus>("dj-status", (e) => (this.status = e.payload));
-    // A reload in the middle of a line mustn't leave the music turned down, or the line playing on.
+    // A reload in the middle of a line mustn't leave the music turned down, the line playing on, or the sound output
+    // held open for a session that's gone.
     backend.djDuck(1, 0, 0).catch(() => {});
     backend.djVoice({ action: "stop" }).catch(() => {});
+    backend.djVoice({ action: "hold", on: false }).catch(() => {});
     await this.refresh();
   }
 
