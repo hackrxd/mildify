@@ -409,10 +409,15 @@ describe("segments", () => {
     expect(m.djExtensions.promptSegments().map((s) => s.id)).toEqual(["ext:a.js/one", "ext:a.js/two", "ext:a.js/three", "ext:b.js/short"]);
   });
 
-  it("need an id and a fits function", () => {
-    expect(() => m.djExtensions.addSegment(a, { ...short, id: " " })).toThrow("needs an id");
+  it("need a short word for an id, and a fits function", () => {
+    for (const id of ["", " ", "short songs", "a/b", "ext:x", "é", "x".repeat(41), undefined]) {
+      expect(() => m.djExtensions.addSegment(a, { ...short, id: id as never })).toThrow("A DJ segment's id is 1 to 40 of");
+    }
     expect(() => m.djExtensions.addSegment(a, { ...short, fits: undefined as never })).toThrow("fits(song)");
     expect(ids()).toEqual([]);
+    m.djExtensions.addSegment(a, { ...short, id: "x".repeat(40) });
+    m.djExtensions.addSegment(a, { ...short, id: "Short-songs_2.0" });
+    expect(ids()).toEqual([`ext:a.js/${"x".repeat(40)}`, "ext:a.js/Short-songs_2.0"]);
   });
 
   it("don't fit a song when they can't tell, and say so once", () => {

@@ -169,7 +169,8 @@ export interface ExtensionInstructions {
 
 /** A segment an extension adds: a kind of set the DJ plays from the listener's own songs. */
 export interface DjSegmentSpec {
-  /** Unique within the extension: adding one with the same id replaces it. */
+  /** Unique within the extension: adding one with the same id replaces it. 1 to 40 of A-Z, a-z, 0-9, ".", "_" and
+   * "-". */
   id: string;
   /** Its name, when the model doesn't give one. */
   label: string;
@@ -186,6 +187,8 @@ export const SEGMENT_LABEL_MAX = 40;
 export const SEGMENT_PHRASE_MAX = 80;
 /** How many segments one extension can add. */
 export const EXTENSION_SEGMENTS_MAX = 3;
+/** An extension's segment's own id: a short word, kept in the DJ's memory with each set from it. */
+const SEGMENT_ID = /^[A-Za-z0-9._-]{1,40}$/;
 
 /** A segment an extension added, as the DJ plays it. */
 export interface ExtensionSegment {
@@ -223,19 +226,19 @@ class DjExtensions {
   /** The segments extensions added, in the order they were first added. */
   segments = $state.raw<ExtensionSegment[]>([]);
 
-  /** Adds `owner`'s segment `spec`, in place of the one with the same id. Throws for one with no id or `fits`, or one
-   * past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say; a `fits` that throws doesn't fit,
-   * and is reported once. */
+  /** Adds `owner`'s segment `spec`, in place of the one with the same id. Throws for one without a short word for an id
+   * or without `fits`, or one past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say; a `fits`
+   * that throws doesn't fit, and is reported once. */
   addSegment(owner: Owner, spec: DjSegmentSpec): ExtensionSegment {
     return untrack(() => {
-      const own = String(spec?.id ?? "").trim();
-      if (!own) throw new Error("A DJ segment needs an id");
+      const own = String(spec?.id ?? "");
+      if (!SEGMENT_ID.test(own)) throw new Error("A DJ segment's id is 1 to 40 of A-Z, a-z, 0-9, '.', '_' and '-'");
       const fits = spec.fits;
       if (typeof fits !== "function") throw new Error("A DJ segment needs a fits(song) function");
       const id: SegmentId = `ext:${owner.id}/${own}`;
       const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
       if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
-      const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || cut(own, SEGMENT_LABEL_MAX);
+      const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || own;
       const brief = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim() || label;
       const phrase = cut(cleanTalk(String(spec.phrase ?? "")), SEGMENT_PHRASE_MAX).trim() || label;
       let failed = false;
