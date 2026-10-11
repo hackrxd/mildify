@@ -1224,6 +1224,21 @@ describe("starting", () => {
     expect(voice.hold).not.toHaveBeenCalled();
   });
 
+  it("doesn't start with the song in the player either when it starts over, everything having played lately", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const first = await started();
+    const song = first.songs[0].uri;
+    dj.stop();
+    localStorage.clear();
+    const memory = new memoryModule.DjMemory({ user: "u" });
+    for (let n = 1; n <= 12; n++) memory.played(`spotify:track:t${n}`);
+    dj = new mod.Dj(voice as unknown as InstanceType<typeof mod.Voice>);
+    dj.status = readyStatus;
+    expect(player.track?.uri).toBe(song);
+    const again = await started();
+    expect(again.songs.map((s) => s.uri)).not.toContain(song);
+  });
+
   it("doesn't start with the song in the player, which it couldn't tell had begun", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const first = await started();
@@ -3169,8 +3184,10 @@ describe("what it picks from", () => {
     await playing(five.uri, 0);
     await playing(six.uri, 0);
     dj.stop();
-    // Days later, only two songs weren't skipped: the opening has to take some of those that were.
+    // Days later, with nothing in the player, only two songs weren't skipped: the opening has to take some of those
+    // that were.
     vi.setSystemTime(Date.now() + 4 * DAY);
+    player.track = null;
     const opening = await started();
     expect(opening.songs.map((s) => s.uri)).toEqual([three.uri, six.uri, one.uri]);
   });
