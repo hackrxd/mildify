@@ -1609,6 +1609,36 @@ describe("between sets", () => {
     expect(dj.onAir).toBeNull();
   });
 
+  it("skipping its talk over a song's end brings the next set in, and nothing more planned over that end happens", async () => {
+    speechMs = 20_000;
+    // Every song sings until 4 s before its end: the DJ talks over the last 3.3 s, then on its own.
+    backend.lyrics.mockImplementation(async () => sync(3000, DURATION - 4000));
+    const first = await started();
+    await lastSong(first);
+    player.pos = DURATION - (4000 - timing.VOCAL_GAP_MS);
+    await tick();
+    expect(dj.speaking).toBe(true);
+    backend.djDuck.mockClear();
+    dj.skipTalk();
+    expect(backend.device).toHaveBeenCalledWith({ action: "next" });
+    // The player is slow to move on: the silence planned at the old song's end isn't laid over the next one.
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(backend.djDuck).not.toHaveBeenCalledWith(0, expect.any(Number), MUTE_RAMP_MS);
+  });
+
+  it("brings the music back up when a request lets go of the set it was turned down for", async () => {
+    const first = await started();
+    await lastSong(first);
+    // The talk would start 3.7 s before the end; a second before that, the music goes down.
+    player.pos = DURATION - 4500;
+    await tick();
+    expect(backend.djDuck).toHaveBeenLastCalledWith(timing.DUCK_LEVEL, expect.any(Number), timing.DUCK_DOWN_MS);
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.speaking).toBe(false);
+    expect(backend.djDuck).toHaveBeenLastCalledWith(1, 0, timing.DUCK_UP_MS);
+  });
+
   it("lets a held song that comes in about on time play on", async () => {
     // 6 s of talk, none of it over the next intro: 5 s over the end, 1 s alone.
     dj.setOverStart(false);
