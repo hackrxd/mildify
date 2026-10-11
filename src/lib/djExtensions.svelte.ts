@@ -8,7 +8,7 @@
 import { untrack } from "svelte";
 import type { DjEvent, DjSet, OnAir, SaidLine } from "./dj.svelte";
 import type { Candidate, Reason, Segment, SegmentId } from "./djPicks";
-import { cleanTalk, cut, EXTENSION_INSTRUCTIONS_MAX, SEGMENT_BRIEF_MAX } from "./djTalk";
+import { cleanTalk, cut, EXTENSION_INSTRUCTIONS_MAX, fence, SEGMENT_BRIEF_MAX } from "./djTalk";
 import type { AddedItem } from "./menu.svelte";
 
 /** One of the DJ's songs. */
@@ -190,6 +190,12 @@ export const EXTENSION_SEGMENTS_MAX = 3;
 /** An extension's segment's own id: a short word, kept in the DJ's memory with each set from it. */
 const SEGMENT_ID = /^[A-Za-z0-9._-]{1,40}$/;
 
+/** A segment's name or phrase as the DJ can say it, and quote in a prompt: on one line, with no quote marks to end the
+ * quote early, and cut to `max`. */
+function sayable(text: unknown, max: number): string {
+  return cut(cleanTalk(String(text ?? "").replace(/["“”]/g, "")), max).trim();
+}
+
 /** A segment an extension added, as the DJ plays it. */
 export interface ExtensionSegment {
   owner: Owner;
@@ -204,14 +210,14 @@ class DjExtensions {
   // What changes these lists reads them too, untracked: an extension may call it from inside `ns.watch`, which would
   // otherwise run again on its own change, again and again.
 
-  /** Sets `owner`'s instructions, in place of any it gave before; empty ones clear them. The entry, if any: the same
-   * one when they say what they said. */
+  /** Sets `owner`'s instructions, in place of any it gave before; empty ones, or ones of nothing but quote marks, clear
+   * them. The entry, if any: the same one when they say what they said. */
   setInstructions(owner: Owner, text: string): ExtensionInstructions | null {
     return untrack(() => {
       const clean = cut(text.trim(), EXTENSION_INSTRUCTIONS_MAX).trim();
       const had = this.instructions.find((x) => x.owner.id === owner.id);
       if (had && had.text === clean) return had;
-      const entry = clean ? { owner, text: clean } : null;
+      const entry = fence(clean, EXTENSION_INSTRUCTIONS_MAX).length ? { owner, text: clean } : null;
       if (!had) this.instructions = entry ? [...this.instructions, entry] : this.instructions;
       else this.instructions = this.instructions.flatMap((x) => (x !== had ? [x] : entry ? [entry] : []));
       return entry;
@@ -227,8 +233,8 @@ class DjExtensions {
   segments = $state.raw<ExtensionSegment[]>([]);
 
   /** Adds `owner`'s segment `spec`, in place of the one with the same id. Throws for one without a short word for an id
-   * or without `fits`, or one past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say; a `fits`
-   * that throws doesn't fit, and is reported once. */
+   * or without `fits`, or one past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say, and its
+   * brief falls back to its name; a `fits` that throws doesn't fit, and is reported once. */
   addSegment(owner: Owner, spec: DjSegmentSpec): ExtensionSegment {
     return untrack(() => {
       const own = String(spec?.id ?? "");
@@ -238,9 +244,10 @@ class DjExtensions {
       const id: SegmentId = `ext:${owner.id}/${own}`;
       const others = this.segments.filter((x) => x.owner.id === owner.id && x.segment.id !== id);
       if (others.length >= EXTENSION_SEGMENTS_MAX) throw new Error(`An extension can add up to ${EXTENSION_SEGMENTS_MAX} DJ segments`);
-      const label = cut(cleanTalk(String(spec.label ?? "")), SEGMENT_LABEL_MAX).trim() || own;
-      const brief = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim() || label;
-      const phrase = cut(cleanTalk(String(spec.phrase ?? "")), SEGMENT_PHRASE_MAX).trim() || label;
+      const label = sayable(spec.label, SEGMENT_LABEL_MAX) || own;
+      const told = cut(String(spec.brief ?? "").trim(), SEGMENT_BRIEF_MAX).trim();
+      const brief = fence(told, SEGMENT_BRIEF_MAX).length ? told : label;
+      const phrase = sayable(spec.phrase, SEGMENT_PHRASE_MAX) || label;
       let failed = false;
       const segment: Segment = {
         id,

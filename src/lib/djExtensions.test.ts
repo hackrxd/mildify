@@ -306,6 +306,12 @@ describe("instructions", () => {
     expect(m.djExtensions.instructions[0].text).toBe("x".repeat(EXTENSION_INSTRUCTIONS_MAX - 1));
   });
 
+  it("of nothing but quote marks and invisible characters are none", () => {
+    m.djExtensions.setInstructions(a, "Keep it light.");
+    expect(m.djExtensions.setInstructions(a, ' "" \u200B" ')).toBeNull();
+    expect(given()).toEqual([]);
+  });
+
   it("said again are kept as they were, with the same remover", () => {
     const first = m.djExtensions.setInstructions(a, "Keep it light.");
     m.djExtensions.setInstructions(b, "No explicit songs.");
@@ -390,6 +396,9 @@ describe("segments", () => {
     expect(entry.segment.phrase).toBe("some short songs");
     expect(m.djExtensions.addSegment(a, { ...short, id: "y", phrase: "z".repeat(200) }).segment.phrase).toHaveLength(m.SEGMENT_PHRASE_MAX);
     expect(m.djExtensions.addSegment(a, { ...short, id: "z", label: " " }).segment.label).toBe("z");
+    // Quote marks would end the DJ's quote of them early.
+    const quoted = m.djExtensions.addSegment(a, { ...short, id: "y", label: '"Short" “songs”', phrase: 'some "short" ones' }).segment;
+    expect([quoted.label, quoted.phrase]).toEqual(["Short songs", "some short ones"]);
     // Never cut in the middle of a character.
     const wide = "x".repeat(m.SEGMENT_LABEL_MAX - 1) + "𠀀";
     const phrase = "x".repeat(m.SEGMENT_PHRASE_MAX - 1) + "𠀀";
@@ -397,6 +406,8 @@ describe("segments", () => {
     expect(cut.segment.label).toBe("x".repeat(m.SEGMENT_LABEL_MAX - 1));
     expect(cut.segment.phrase).toBe("x".repeat(m.SEGMENT_PHRASE_MAX - 1));
     expect(cut.segment.brief).toBe("y".repeat(SEGMENT_BRIEF_MAX - 1));
+    // A brief of nothing but quote marks says nothing: its name does.
+    expect(m.djExtensions.addSegment(a, { ...short, id: "y", brief: ' """" ' }).segment.brief).toBe("Short songs");
   });
 
   it("are up to three an extension, one with the same id replacing it", () => {
