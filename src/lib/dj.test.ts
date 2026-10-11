@@ -592,6 +592,37 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.requested).toBe("something calm");
   });
 
+  it("picks its first set for what the listener asked for as it starts", async () => {
+    player.isPlaying = false;
+    await dj.start("  something calm  ");
+    const first = dj.upNext!;
+    expect(first.segment).toBe("request");
+    expect(first.request).toBe("something calm");
+    expect((backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content).toContain('"""\nsomething calm\n"""');
+  });
+
+  it("takes a request made while it gets its first set ready for the set after it", async () => {
+    player.isPlaying = false;
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    dj.request("more Radiohead");
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
+    await starting;
+    expect(dj.upNext?.request ?? null).toBeNull();
+    expect(dj.requested).toBe("more Radiohead");
+  });
+
+  it("says when the music waits for a set picked again after a skip", async () => {
+    await started();
+    expect(dj.skippingSet).toBe(false);
+    backend.djGenerate.mockImplementationOnce(() => new Promise(() => {}));
+    await dj.skipSet();
+    expect(dj.skippingSet).toBe(true);
+    expect(dj.musicWaits).toBe(true);
+  });
+
   it("puts the songs of the set it lets go of back up for picking", async () => {
     // Six songs: the first set has three, and the set it lets go of has the rest.
     sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({

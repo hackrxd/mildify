@@ -688,6 +688,11 @@ class Dj {
     return this.#waitingForSet;
   }
 
+  /** The set playing was skipped, and the music waits for the one picked instead. */
+  get skippingSet(): boolean {
+    return this.#skipping();
+  }
+
   #setStage(stage: DjStage | null) {
     if (stage === this.stage) return;
     this.stage = stage;
@@ -847,8 +852,8 @@ class Dj {
     await player.next();
   }
 
-  /** Starts a session. */
-  async start() {
+  /** Starts a session: with `request`, its first set is what the listener asked for. */
+  async start(request?: string) {
     if (this.phase !== "off") return;
     if (!this.ready) {
       toasts.show("The DJ isn't ready yet. Turn it on in Settings, and let it finish downloading.");
@@ -863,6 +868,7 @@ class Dj {
     this.#resetShow();
     this.#sessionStart = Date.now();
     this.phase = "starting";
+    this.requested = request?.trim().slice(0, REQUEST_MAX) || null;
     this.activity = "Looking through your listening…";
     this.#setStage("listening");
     backend.djWarm().then(
