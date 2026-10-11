@@ -540,6 +540,12 @@ mod tests {
             split_sentences("That was great. and then more! and more? Yes. The No. 1 song. No. Not now."),
             vec!["That was great. and then more!", "and more?", "Yes.", "The No. 1 song.", "No.", "Not now."]
         );
+        // A quote or bracket closing after the full stop, or opening the next word, ends the sentence; two dots
+        // aren't an ellipsis.
+        assert_eq!(
+            split_sentences("He said \"great.\" next up is Drake. That was great. \"next\" is a word. Hey.. Next one."),
+            vec!["He said \"great.\"", "next up is Drake.", "That was great.", "\"next\" is a word.", "Hey..", "Next one."]
+        );
     }
 
     #[test]

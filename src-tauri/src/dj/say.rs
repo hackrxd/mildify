@@ -48,12 +48,14 @@ const BEFORE_NUMBERS: &[(&str, &str)] = &[("No", "number"), ("Vol", "volume"), (
 const ENDINGS: &[(&str, &str)] = &[("Jr", "Junior"), ("Sr", "Senior")];
 
 /// Whether a full stop after `word` goes on with the sentence, where `next` is the word after it: before a lowercase
-/// word, after an ellipsis, an abbreviation, an initial ("J. Cole") or a dotted acronym ("B.B. King").
+/// word, after an ellipsis, an abbreviation, an initial ("J. Cole") or a dotted acronym ("B.B. King"). As the
+/// program reads it: by the character right after the space, quote or bracket as it may be, and a quote or bracket
+/// closing after the full stop ends the sentence.
 pub fn keeps_going(word: &str, next: &str) -> bool {
-    let word = word.trim_start_matches(is_opening).trim_end_matches(is_closing);
+    let word = word.trim_start_matches(is_opening);
     let Some(core) = word.strip_suffix('.') else { return false };
-    let next_starts = next.trim_start_matches(is_opening).chars().next();
-    if next_starts.is_some_and(char::is_lowercase) || core.ends_with('.') {
+    let next_starts = next.chars().next();
+    if next_starts.is_some_and(char::is_lowercase) || core.ends_with("..") {
         return true;
     }
     if abbreviation(core, true).is_some() {
@@ -395,6 +397,11 @@ mod tests {
             assert!(keeps_going(word, next), "{word} {next}");
         }
         let ends = [
+            // The program looks at the very next character: a quote or bracket isn't lowercase.
+            ("great.", "\"next\""),
+            ("great.", "(more)"),
+            ("great.\"", "next"),
+            ("Hey..", "Next"),
             ("great.", "Next"),
             ("great.", "\"Next\""),
             ("great.", "2"),
