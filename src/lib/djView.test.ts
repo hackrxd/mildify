@@ -360,7 +360,7 @@ describe("songWhy", () => {
 });
 
 describe("extensionNotes", () => {
-  it("says what each extension tells the DJ, and when it isn't passed on", () => {
+  it("says what each extension tells the DJ, and when it isn't passed on, and the segments they add", () => {
     const a = { owner: { name: "DJ log" }, text: "Keep it light." };
     const b = { owner: { name: "Moods" }, text: "Play calm songs." };
     expect(extensionNotes([a, b], [a], 600)).toEqual([
@@ -372,5 +372,7 @@ describe("extensionNotes", () => {
       },
     ]);
     expect(extensionNotes([], [], 600)).toEqual([]);
+    const short = { owner: { name: "DJ log" }, segment: { label: "Short songs" } };
+    expect(extensionNotes([a], [a], 600, [short]).map((n) => n.what)).toEqual(["Tells it: “Keep it light.”", "Adds a segment: Short songs"]);
   });
 });

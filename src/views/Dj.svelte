@@ -40,7 +40,12 @@
   );
   /** What the extensions turned on add to the DJ. */
   const fromExtensions = $derived(
-    extensionNotes(djExtensions.instructions, djExtensions.promptInstructions(), EXTENSION_INSTRUCTIONS_BUDGET),
+    extensionNotes(
+      djExtensions.instructions,
+      djExtensions.promptInstructions(),
+      EXTENSION_INSTRUCTIONS_BUDGET,
+      djExtensions.segments,
+    ),
   );
   const lamp = $derived(
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
@@ -215,6 +220,7 @@
           </span>
         </div>
         {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
+        {#if b.set.from}<p class="muted small request-note">A segment from {b.set.from}</p>{/if}
         <DjSongs set={b.set} />
         {#if b.set.live}
           <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>

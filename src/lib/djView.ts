@@ -319,15 +319,19 @@ export interface ExtensionNote {
 }
 
 /** What the extensions turned on add to the DJ, a line each: the instructions they give it, and whether the model is
- * told them (`passed`), since they can only add so much in all. */
+ * told them (`passed`), since they can only add so much in all; then the segments they add. */
 export function extensionNotes(
   instructions: readonly { owner: { name: string }; text: string }[],
   passed: readonly unknown[],
   budget: number,
+  segments: readonly { owner: { name: string }; segment: { label: string } }[] = [],
 ): ExtensionNote[] {
-  return instructions.map((x) => ({
-    name: x.owner.name,
-    what: `Tells it: “${x.text}”`,
-    note: passed.includes(x) ? null : `Not passed on for now: extensions' instructions can add up to ${budget} characters in all.`,
-  }));
+  return [
+    ...instructions.map((x) => ({
+      name: x.owner.name,
+      what: `Tells it: “${x.text}”`,
+      note: passed.includes(x) ? null : `Not passed on for now: extensions' instructions can add up to ${budget} characters in all.`,
+    })),
+    ...segments.map((x) => ({ name: x.owner.name, what: `Adds a segment: ${x.segment.label}`, note: null })),
+  ];
 }
