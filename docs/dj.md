@@ -213,8 +213,11 @@ Instructions can change how it talks and which of the offered songs it picks, bu
 from. The voices speak English, so a DJ told to speak another language will read it with an English accent.
 
 [Extensions](mods.md#the-dj) you turn on can give the DJ instructions too, up to 300 characters each and 600 in
-all. They come after yours, and where they disagree with yours, yours come first. The DJ page lists them under
-**Tell your DJ**, so you can see everything the DJ is told; turning an extension off takes its instructions back.
+all. They come after yours, and where they disagree with yours, yours come first. They can also add segments of
+their own, such as short songs only, which take turns with the DJ's and play only songs from your listening; the
+DJ still opens with one of its own. The DJ page lists what each extension adds under **Tell your DJ**, so you can
+see everything the DJ is told, and marks the sets from an extension's segment. Turning an extension off takes it
+all back; a set already picked from its segment plays on.
 
 ## Its voice
 

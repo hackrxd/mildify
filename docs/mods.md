@@ -107,7 +107,7 @@ export default function (ns) {
 ```
 
 Turning an extension off undoes everything it registered through the API (styles, pages, menu
-items, watchers, DJ listeners and instructions, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
+items, watchers, what it added to the DJ, `onUnload` callbacks) and calls the function it returned. From then on, a timer or event handler
 the extension left running can't add styles, pages, menu items, watchers or toasts back through the `ns` it was
 given, its `ns.api` calls reject without reaching Spotify, and an `onUnload` registered then runs at once.
 `ns.player`, `ns.router` and `ns.storage` still work, so stop your own timers and listeners in the function you
@@ -131,7 +131,7 @@ offers a **Reload window** button then).
 | `addStyle(css)` | Adds a stylesheet. Returns a remove function. |
 | `addTrackMenuItem({ label, action, when? })` | Adds an entry to the right-click menu of every track, the DJ's songs included. `label` may be a function of the track; `when(track)` hides it for tracks it doesn't apply to; `action(track)` runs on click, and may be async: if it throws or its promise rejects, the error shows as a notice. An entry whose `label` or `when` throws is left out of that menu. The track is the Web API track object (`uri`, `name`, `artists`, `album`, …). Returns a remove function. |
 | `addPage({ id, label, icon?, render })` | Adds a page to the sidebar. `render(el)` draws it into an empty element each time the page opens and may return a cleanup for when it closes. `icon` is one of the app's icon names (`"queue"`, `"heart"`, `"disc"`, `"mic"`, `"lyrics"`, …); the default is a puzzle piece. Returns a remove function. |
-| `dj` | The AI DJ: what it plays and says, what happens in its sessions, entries for its sets' menus, and instructions for it. See [The DJ](#the-dj). |
+| `dj` | The AI DJ: what it plays and says, what happens in its sessions, entries for its sets' menus, instructions for it, and segments of your own. See [The DJ](#the-dj). |
 | `storage.get(key)`, `storage.set(key, value)`, `storage.remove(key)` | Settings that persist across restarts, kept separate per extension. Values are stored as JSON. |
 | `onUnload(fn)` | Runs `fn` when the extension is turned off or restarted. |
 
@@ -152,8 +152,9 @@ files next to the extension (`fetch(new URL("./data.json", ns.extension.url))`).
 | `speaking`, `showing` | Its voice is reading a line out; a line shows without it (Just play, or the voice failed). |
 | `requested` | What the listener asked the next set to be, until a set for it comes on. |
 
-A set is `{ id, name, segment, songs, talk, byModel, live, request }`: `segment` is the kind of set
-(`"onRepeat"`, `"favorites"`, `"throwbacks"`, `"fresh"`, `"rediscover"` or `"request"`), `talk` what the DJ says
+A set is `{ id, name, segment, from, songs, talk, byModel, live, request }`: `segment` is the kind of set
+(`"onRepeat"`, `"favorites"`, `"throwbacks"`, `"fresh"`, `"rediscover"`, `"request"`, or an extension's
+`"ext:<extension id>/<its id>"`), `from` the name of the extension whose segment it is, or `null`, `talk` what the DJ says
 to bring it in, `byModel` false when that came from a template, `live` true for a set picked song by song as it
 plays, and `request` what the listener asked for, when it's their request. A set picked as it goes grows: each
 step is a new copy with the same `id`. A song is `{ uri, name, artists, album, year, durationMs, explicit,
@@ -192,6 +193,18 @@ them, and an empty string takes them back, as does the remove function it return
 together can be 600 characters in a prompt; past that, the latest wait until there's room. The DJ page lists each
 extension's instructions, so the listener sees everything the DJ is told, and with a cloud model they go to its
 provider with the rest of the prompt. They apply from the next set the DJ picks.
+
+`ns.dj.addSegment({ id, label, brief, phrase?, fits })` adds a segment of its own: a kind of set the DJ plays from
+the listener's songs, as it does On repeat or Throwbacks. `fits(song)` says whether one of the listener's songs
+belongs in it, given a copy of the song as above; it's asked about every song the DJ could play each time it picks a
+set, so keep it quick, and its answers about the same song the same. `label` names the segment when the model
+doesn't, `brief` says what it is for the model ("songs under three minutes"), up to 200 characters, and `phrase` is
+how a template line brings it in ("some short songs"; the label by default). The DJ takes turns between its own
+segments and those extensions add, among those with at least three songs that fit, and not one of the last two
+while there are others; it opens the show with one of its own whenever it can. The songs only ever come from the listener's own
+listening. An extension can add up to three segments, and one with the same `id` replaces it. A `fits` that throws
+is taken as not fitting, and logged once. Returns a remove function. The model hears which segments came from an
+extension, and the DJ page says so on each of their sets.
 
 `ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
 play something else, use `ns.player`: the DJ steps out when other music plays.
