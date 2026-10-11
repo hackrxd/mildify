@@ -2660,6 +2660,39 @@ describe("picking as it goes", () => {
     expect(a).toBeDefined();
   });
 
+  it("doesn't hold the next set's song for a hand-over Previous left behind, as it comes in on its own", async () => {
+    await liveStarted();
+    const [, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    // The set's last song sings until 2 s before its end: the DJ talks after it, the next song held for its time.
+    const c = dj.current!.songs[2];
+    backend.lyrics.mockImplementation(async (id: string) => sync(3000, id === c.uri.split(":")[2] ? DURATION - 2000 : 150_000));
+    await finish();
+    await playing(c.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    await tick();
+    await tick();
+    // Previous just after it started: the song gone back to ends the set now, and the DJ talks over its long end.
+    await dj.previous();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await tick();
+    await tick();
+    const overOld = speechMs - (3000 - timing.VOCAL_GAP_MS);
+    player.pos = DURATION - overOld;
+    await tick();
+    expect(dj.speaking).toBe(true);
+    // Spotify moves on a little before the end is heard: the next set's song plays on under the end of the line.
+    await vi.advanceTimersByTimeAsync(overOld - 800);
+    backend.device.mockClear();
+    await playing(next.songs[0].uri, 0);
+    expect(dj.current?.id).toBe(next.id);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+  });
+
   it("lets go of all it planned over the set's last song when Previous leaves it", async () => {
     // A long line: the next set's first song is to wait at its start for its time in the line.
     speechMs = 20_000;
