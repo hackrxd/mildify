@@ -391,7 +391,8 @@ class Dj {
     }
   }
 
-  async configure(patch: Partial<DjConfig>) {
+  /** Saves a settings change; whether it was saved. */
+  async configure(patch: Partial<DjConfig>): Promise<boolean> {
     // Another model ends the session. A new voice carries on (a line already made keeps the old one), unless it has
     // to download first.
     const switching = patch.provider !== undefined || patch.model !== undefined;
@@ -404,10 +405,11 @@ class Dj {
       toasts.error(e);
     }
     if (patch.voice !== undefined && !this.ready) this.stop();
-    if (!saved) return;
+    if (!saved) return false;
     // A change that may have fixed the model or the voice: what was wrong is forgotten, and said again if it isn't.
     if (MODEL_SETTINGS.some((k) => patch[k] !== undefined)) this.#forgetModelTrouble();
     if (patch.voice !== undefined) this.#forgetVoiceTrouble();
+    return true;
   }
 
   /** Saves a cloud provider's API key in the system keychain, or removes it with null. Removing the key the DJ is

@@ -1185,6 +1185,13 @@ describe("settings", () => {
     expect(dj.phase).toBe("off");
   });
 
+  it("says whether a change was saved, so a picker can go back to what's in use when it wasn't", async () => {
+    expect(await dj.configure({ voice: "emma" })).toBe(true);
+    backend.djConfigure.mockRejectedValueOnce({ kind: "other", message: "Couldn't save" });
+    expect(await dj.configure({ voice: "light-male" })).toBe(false);
+    expect(toasts.error).toHaveBeenCalledTimes(1);
+  });
+
   it("asks for lines as long as the listener wants them", async () => {
     dj.setTalk("chatty");
     expect(localStorage.getItem("nativify:djTalk")).toBe("chatty");
