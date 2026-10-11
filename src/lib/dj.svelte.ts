@@ -42,10 +42,11 @@ import {
   type TalkStyle,
   type TemplatePick,
 } from "./djTalk";
-import { captionLines, DUCK_DOWN_MS, DUCK_LEVEL, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
+import { captionLines, DUCK_DOWN_MS, DUCK_UP_MS, planTalk, readLines, volumeGain, type Vocals } from "./djTiming";
 import { loadListening } from "./djListening";
 import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMemory";
 import { djExtensions } from "./djExtensions.svelte";
+import { Mixer } from "./djMixer";
 import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, previewLine, voiceNote } from "./djView";
@@ -102,19 +103,14 @@ const SKIP_SHARE = 0.5;
 export const FOREIGN_MS = 2500;
 /** A set asked for this long ago that still hasn't started isn't going to. */
 export const START_TIMEOUT_MS = 15_000;
-/** The music goes silent at the end of a song the DJ talks on after: this far ahead it's scheduled, early
- * enough to beat the player's output queue, and over this long it fades. */
+/** The music goes silent at the end of a song the DJ talks on after: this far ahead it's scheduled, early enough to
+ * beat the player's output queue. */
 export const MUTE_LEAD_MS = 1200;
-export const MUTE_RAMP_MS = 120;
 /** A held song that comes in this close to its time plays on: the DJ still ends inside the gap before the singer. */
 export const EARLY_TOLERANCE_MS = 300;
 /** Music playing when the DJ starts fades out over this long, from when the player's output queue has played. */
 export const OPENING_FADE_MS = 400;
 const OUTPUT_QUEUE_MS = 600;
-/** The song drifting this far from when its end's silence was timed (a pause, a small seek) times it again. */
-const RETIME_MS = 250;
-/** The player lifts a duck on its own after 90 s, in case the window went away; the DJ renews its own sooner. */
-const GAIN_REFRESH_MS = 30_000;
 /** The song lined up next can change (the listener liked something) until this long before the one playing
  * ends; the player starts loading the next song 30 s before. */
 export const REPICK_UNTIL_MS = 35_000;
@@ -303,13 +299,14 @@ class Dj {
   #musicAsked = false;
   /** The queued set's first song is to be held at its start when it comes in, until this far into the line. */
   #holdFor: { set: DjSet; musicAt: number } | null = null;
-  /** The music goes silent when this song reaches this position. */
-  #muteAtEnd: { uri: string; at: number } | null = null;
-  /** When that silence is heard, on performance.now()'s clock. */
-  #silentAt = 0;
-  /** The music's gain the DJ last asked the player for. */
-  #level = 1;
-  #gainSentAt = -Infinity;
+  /** The music's level under the DJ, and the silence at a song's end. */
+  #mixer = new Mixer({
+    gain: (level, delayMs, rampMs) => void backend.djDuck(level, delayMs, rampMs).catch(() => {}),
+    now: () => performance.now(),
+    track: () => player.track?.uri ?? null,
+    position: () => player.positionNow(),
+    speaking: () => this.speaking,
+  });
   #repausedAt = -Infinity;
   #stalledSince: number | null = null;
   /** The set's last song is paused at its end because the next set isn't ready yet. */
@@ -556,7 +553,7 @@ class Dj {
     if (!this.onAir && this.#skipping()) return void this.#rush?.();
     if (!this.onAir) {
       // Playing on toward a song's end that goes silent: the silence is timed anew from where it resumes.
-      if (!player.isPlaying) this.#refreshGain();
+      if (!player.isPlaying) this.#mixer.refresh();
       return player.togglePlay();
     }
     if (!this.paused) {
@@ -575,7 +572,7 @@ class Dj {
         // A song the DJ is holding stays held until its time in the line.
         if (!this.#heldMusic) backend.device({ action: "play" }).catch(() => {});
       }
-      this.#refreshGain();
+      this.#mixer.refresh();
     }
   }
 
@@ -673,10 +670,9 @@ class Dj {
     this.#cues = [];
     this.#bringIn = null;
     this.#holdFor = null;
-    this.#muteAtEnd = null;
-    this.#silentAt = 0;
+    this.#mixer.dropSilence();
     this.#plannedOn = null;
-    if (!this.speaking && !this.#heldMusic) this.#unduck();
+    if (!this.speaking && !this.#heldMusic) this.#mixer.unduck();
   }
 
   /** Skips the rest of the set playing, when the listener isn't feeling it: the next set comes in now, or as soon as
@@ -897,7 +893,7 @@ class Dj {
     this.#timers.clear();
     this.#voice.stop();
     this.#voice.resume();
-    this.#unduck();
+    this.#mixer.unduck();
     // Music the DJ held for its talk plays on; music the listener paused stays paused.
     if (this.#heldMusic && !this.paused) backend.device({ action: "play" }).catch(() => {});
     // What a set picked as it goes lined up, and hasn't reached, would otherwise play in the middle of whatever
@@ -967,8 +963,7 @@ class Dj {
     this.#pausedMusic = false;
     this.#musicAsked = false;
     this.#holdFor = null;
-    this.#muteAtEnd = null;
-    this.#silentAt = 0;
+    this.#mixer.dropSilence();
     this.#stalledSince = null;
     this.#setSkips = 0;
     this.#setEnds = false;
@@ -1329,7 +1324,7 @@ class Dj {
       // The play request replaces whatever the DJ was holding.
       this.#heldMusic = false;
       this.#musicAsked = true;
-      this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, 0);
+      this.#mixer.restore();
       const ok = await player.playUris(
         set.songs.map((s) => s.uri),
         0,
@@ -1355,7 +1350,7 @@ class Dj {
     // Whatever is playing here fades out and stops: the DJ's item comes first, not over the middle of a song.
     if (player.isPlaying && player.isLocal && !this.#heldMusic) {
       this.#heldMusic = true;
-      this.#gainTo(0, OUTPUT_QUEUE_MS, OPENING_FADE_MS);
+      this.#mixer.to(0, OUTPUT_QUEUE_MS, OPENING_FADE_MS);
       this.#after(OUTPUT_QUEUE_MS + OPENING_FADE_MS, () => {
         if (run === this.#run && this.#heldMusic && this.#awaiting === set) {
           backend.device({ action: "pause" }).catch(() => {});
@@ -1415,7 +1410,7 @@ class Dj {
   #talk(run: number, set: DjSet, speech: Spoken) {
     if (run !== this.#run) return;
     // Music under the voice goes down; music held back, or going silent at a song's end, is left to that.
-    if (!this.#heldMusic && !this.#muteAtEnd && this.#level !== DUCK_LEVEL) this.#duck(0);
+    if (!this.#heldMusic && !this.#mixer.silencing && !this.#mixer.ducked) this.#mixer.duck(0);
     this.#unshow();
     this.speaking = true;
     this.paused = false;
@@ -1447,7 +1442,7 @@ class Dj {
         c.fire();
       }
     }
-    this.#unduck();
+    this.#mixer.unduck();
     this.#endOnAir();
   }
 
@@ -1458,43 +1453,6 @@ class Dj {
     this.onAir = null;
     this.paused = false;
     this.#pausedMusic = false;
-  }
-
-  /** Asks the player to bring the music's gain to `level`, `delayMs` from now as heard, over `rampMs`. */
-  #gainTo(level: number, delayMs: number, rampMs: number) {
-    this.#level = level;
-    if (level > 0) this.#muteAtEnd = null;
-    this.#gainSentAt = performance.now();
-    backend.djDuck(level, Math.round(Math.max(0, delayMs)), Math.round(rampMs)).catch(() => {});
-  }
-
-  /** Turns the music down so it's low `delayMs` from now. */
-  #duck(delayMs: number) {
-    this.#gainTo(DUCK_LEVEL, delayMs, DUCK_DOWN_MS);
-  }
-
-  #unduck() {
-    if (this.#level < 1) this.#gainTo(1, 0, DUCK_UP_MS);
-  }
-
-  /** Silences the music as `uri` reaches `at` (its end), so whatever Spotify starts next isn't heard. */
-  #muteAt(uri: string, at: number) {
-    const left = at - player.positionNow();
-    this.#gainTo(0, left - MUTE_RAMP_MS, MUTE_RAMP_MS);
-    this.#muteAtEnd = { uri, at };
-    this.#silentAt = performance.now() + left;
-  }
-
-  /** Says the gain again: after a pause, the silence at a song's end has to be timed anew, and the player
-   * would lift a duck on its own after a while. */
-  #refreshGain() {
-    const mute = this.#muteAtEnd;
-    if (mute && player.track?.uri === mute.uri && player.positionNow() < mute.at) {
-      this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, 0);
-      this.#muteAt(mute.uri, mute.at);
-    } else if (this.#level < 1) {
-      this.#gainTo(this.#level, 0, 0);
-    }
   }
 
   #isDjSong(uri: string): Candidate | undefined {
@@ -1523,7 +1481,7 @@ class Dj {
         !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.showing &&
           !this.#preparing && !this.#rush && this.#queued === "no" && !this.#cues.length && !this.#speechCues.length &&
           !this.#bringIn && !this.#plannedOn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet &&
-          !this.#holdFor && !this.#muteAtEnd && !this.#queueFor && !this.#leftSet && !this.#setSkipped &&
+          !this.#holdFor && !this.#mixer.silencing && !this.#queueFor && !this.#leftSet && !this.#setSkipped &&
           !this.#lining && !this.#setEnds && !this.#heading && !this.requested,
         "stopped with playback state left",
       );
@@ -1587,7 +1545,7 @@ class Dj {
       this.#repausedAt = now;
       backend.device({ action: "pause" }).catch(() => {});
     }
-    if (this.#level < 1 && now - this.#gainSentAt > GAIN_REFRESH_MS) this.#refreshGain();
+    this.#mixer.renew(now);
     // The DJ is done but its song never came in: don't leave its item up for good.
     if (this.onAir && !this.speaking && !this.paused && !player.isPlaying) {
       this.#stalledSince ??= now;
@@ -1612,10 +1570,7 @@ class Dj {
     if (uri !== this.#lastUri) this.#trackChanged(run, uri);
     // The silence at the song's end is timed by the clock: after a pause, or a step too small to plan again, time
     // it anew from where the song is.
-    const mute = this.#muteAtEnd;
-    if (mute?.uri === uri && player.isPlaying && Math.abs(mute.at - pos - (this.#silentAt - now)) > RETIME_MS) {
-      this.#refreshGain();
-    }
+    this.#mixer.retime(now, uri, pos, player.isPlaying);
     this.#lastUri = uri;
     this.#lastPos = pos;
     this.#lastDuration = t?.durationMs ?? 0;
@@ -1833,9 +1788,9 @@ class Dj {
     if (wentBack && song) this.#forgive(song);
     if (!song) {
       // The listener's own pick is heard, under the voice, not held silent for the DJ's talk.
-      if (this.#level === 0) {
+      if (this.#mixer.level === 0) {
         this.#heldMusic = false;
-        this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, DUCK_UP_MS);
+        this.#mixer.restore(DUCK_UP_MS);
       }
       // Before a set the DJ started comes in, whatever was playing plays on under the voice. Otherwise the
       // listener moved on, and nothing the DJ planned is to be done to their song.
@@ -1876,7 +1831,7 @@ class Dj {
     this.#waitingForSet = false;
     this.#musicAsked = false;
     this.#bringIn = null;
-    this.#muteAtEnd = null;
+    this.#mixer.songEnded();
     this.current = set;
     this.upNext = null;
     this.#queued = "no";
@@ -1888,7 +1843,7 @@ class Dj {
       this.#speechCues = [];
       this.#holdSong(run, held.musicAt);
     } else {
-      if (this.#level === 0) this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, 0);
+      if (this.#mixer.level === 0) this.#mixer.restore();
       this.#endOnAir();
     }
     this.#setSkips = 0;
@@ -1925,7 +1880,7 @@ class Dj {
     }
     // Spotify moves on once the finishing song is decoded, before its last moments have left the player's
     // output: the DJ starts once they're heard.
-    const wait = Math.min(OUTPUT_QUEUE_MS, this.#silentAt - performance.now());
+    const wait = Math.min(OUTPUT_QUEUE_MS, this.#mixer.silentIn());
     if (wait > 0) this.#after(wait, () => this.current?.id === set.id && this.#announce(run, set));
     else this.#announce(run, set);
   }
@@ -1939,7 +1894,7 @@ class Dj {
       if (run !== this.#run) return;
       this.#heldMusic = false;
       this.#musicAsked = true;
-      this.#gainTo(this.speaking ? DUCK_LEVEL : 1, 0, 0);
+      this.#mixer.restore();
       backend.device({ action: "seek", position_ms: 0 }).catch(() => {});
       backend.device({ action: "play" }).catch(() => {});
       this.#endOnAir();
@@ -1963,10 +1918,9 @@ class Dj {
     this.#cues = [];
     this.#bringIn = null;
     this.#holdFor = null;
-    this.#muteAtEnd = null;
-    this.#silentAt = 0;
+    this.#mixer.dropSilence();
     this.#plannedOn = null;
-    this.#unduck();
+    this.#mixer.unduck();
   }
 
   /** Picks the next set, to follow `previous` (the set playing's last song, unless said). */
@@ -2065,7 +2019,7 @@ class Dj {
     if (plan.overOld > 0) {
       // The DJ starts over the end of the finishing song, once its singer is done.
       const talkAt = durationMs - plan.overOld;
-      cues.push(this.#cue(talkAt - 1000, () => this.#duck(talkAt - player.positionNow() - DUCK_DOWN_MS)));
+      cues.push(this.#cue(talkAt - 1000, () => this.#mixer.duck(talkAt - player.positionNow() - DUCK_DOWN_MS)));
       cues.push(this.#cue(talkAt, () => this.#announce(run, next)));
     }
     if (plan.hold > 0) {
@@ -2073,7 +2027,7 @@ class Dj {
       // silent there; the queued song Spotify starts next is held at its start until its time (#advance), or
       // the DJ's talk starts with it (#talkFirst) when it didn't start over the finishing song.
       this.#holdFor = { set: next, musicAt: plan.musicAt };
-      cues.push(this.#cue(durationMs - MUTE_LEAD_MS, () => this.#muteAt(uri, durationMs)));
+      cues.push(this.#cue(durationMs - MUTE_LEAD_MS, () => this.#mixer.silenceAt(uri, durationMs)));
     }
     // With no hold, the queued song follows the finishing one on its own, under the end of the line.
     this.#cues = cues;
