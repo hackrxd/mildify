@@ -2629,6 +2629,36 @@ describe("picking as it goes", () => {
     expect(a).toBeDefined();
   });
 
+  it("lets go of all it planned over the set's last song when Previous leaves it", async () => {
+    // A long line: the next set's first song is to wait at its start for its time in the line.
+    speechMs = 20_000;
+    await liveStarted();
+    const [, b] = dj.current!.songs;
+    await finish();
+    await playing(b.uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    await finish();
+    await playing(dj.current!.songs[2].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const next = dj.upNext!;
+    // Queued, and the hand-over planned over the end of the set's last song.
+    await tick();
+    await tick();
+    // Previous just after it started goes back a song; Next straight after starts the next set with a play request,
+    // the DJ talking first.
+    await dj.previous();
+    dj.skipTalk();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.onAir?.set).toBe(next);
+    backend.device.mockClear();
+    // The play request goes out ahead of the song's time in the line, and the song comes in quickly: it plays on.
+    await vi.advanceTimersByTimeAsync(speechMs - (3000 - timing.VOCAL_GAP_MS) - mod.PLAY_LATENCY_MS + mod.TICK_MS);
+    expect(player.playUris).toHaveBeenLastCalledWith(next.songs.map((s) => s.uri), 0, true);
+    await playing(next.songs[0].uri, 0);
+    expect(dj.current?.id).toBe(next.id);
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "pause" });
+  });
+
   it("still tells the model about a skip when the set after it was made from a template", async () => {
     const set = await liveStarted();
     await playing(dj.current!.songs[1].uri, 0);
