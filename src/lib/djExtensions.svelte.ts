@@ -288,9 +288,20 @@ class DjExtensions {
     untrack(() => (this.segments = this.segments.filter((x) => x !== entry)));
   }
 
-  /** The segments extensions added, for the DJ to take turns with its own. */
+  /** The segments extensions added, for the DJ to take turns with its own in one pick: each asks its extension once a
+   * song, so one that changes its mind can't count songs it then doesn't give. */
   promptSegments(): Segment[] {
-    return this.segments.map((x) => x.segment);
+    return this.segments.map(({ segment }) => {
+      const answers = new Map<string, boolean>();
+      return {
+        ...segment,
+        fits: (c) => {
+          let fits = answers.get(c.uri);
+          if (fits === undefined) answers.set(c.uri, (fits = segment.fits(c)));
+          return fits;
+        },
+      };
+    });
   }
 
   /** The instructions the model is told: in order, as many as fit in `EXTENSION_INSTRUCTIONS_BUDGET`. One that

@@ -3452,6 +3452,20 @@ describe("an extension's segments", () => {
     expect(dj.upNext?.segment).toBe("onRepeat");
     expect(dj.phase).toBe("on");
   });
+
+  it("are asked about each song once a pick, so one that changes its mind still gives the songs it counted", async () => {
+    const { djExtensions } = await import("./djExtensions.svelte");
+    // Each song fits the first two times it's asked about, and never again.
+    const asked = new Map<string, number>();
+    const fits = (s: { uri: string }) => {
+      asked.set(s.uri, (asked.get(s.uri) ?? 0) + 1);
+      return asked.get(s.uri)! <= 2;
+    };
+    djExtensions.addSegment(owner, { id: "fickle", label: "Fickle", brief: "whatever it likes", fits });
+    await started();
+    expect(dj.upNext).toMatchObject({ segment: "ext:x.js/fickle", from: "X" });
+    expect(dj.upNext!.songs.length).toBeGreaterThanOrEqual(3);
+  });
 });
 
 describe("hearing a voice before picking it", () => {

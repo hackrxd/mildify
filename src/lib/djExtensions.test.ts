@@ -458,6 +458,18 @@ describe("segments", () => {
     expect(error.mock.calls[0][1]).toMatchObject({ message: "fits(song) has to answer at once, not with a promise" });
   });
 
+  it("are asked about a song once in each pick, so one that changes its mind can't count songs it then won't give", () => {
+    let asked = 0;
+    m.djExtensions.addSegment(a, { ...short, fits: () => ++asked % 2 === 1 });
+    const [pick] = m.djExtensions.promptSegments();
+    expect([pick.fits(song(1)), pick.fits(song(1)), pick.fits(song(2)), pick.fits(song(1))]).toEqual([true, true, false, true]);
+    expect(asked).toBe(2);
+    // The next pick asks again.
+    const [next] = m.djExtensions.promptSegments();
+    expect(next.fits(song(2))).toBe(true);
+    expect(asked).toBe(3);
+  });
+
   it("are added through ns.dj, and taken away by its remover or by turning the extension off", () => {
     const { ns, t } = api();
     const remove = ns.addSegment(short);
