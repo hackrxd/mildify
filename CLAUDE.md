@@ -136,12 +136,16 @@ talk is an item of its own (`dj.onAir`, shown by the player bar and queue), over
 song's outro and of the next song's intro (under at most half the line), or none, each behind a setting
 (`overEnd`/`overStart`). `dj.svelte.ts` plays a set with `playUris(…, here)` and queues the next during its last
 song; cues on the song's clock (`player.positionNow()`) start the talk and, when it outlasts both overlaps, silence
-the music right at the song's end. Spotify's queued song is caught as it comes up, paused, and brought in from its
-start by a cue on the line's clock (`Voice.now()`, kept in the page between the backend's reports, which stands still
-while paused). While it talks, `dj_duck` lowers
-the music in the sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again
-every 30 s). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. A line with no speech (Just play,
-`dj.talk` "silent", or a voice that failed) is only shown (`dj.showing`), on a clock of its own, for as long as
+the music right at the song's end, planned once that song's vocals are known (or `PLAN_BY_MS` before its end without
+them). That plan is the `HandOver` (`djHandOver.ts`, with the cues it runs), let go of all at once by `drop()` (a
+request, a skipped set, Previous, a step back in the song, a song the DJ didn't pick) or handed to the set it brings
+in by `land()`, which keeps when the silence is heard for the talk to wait for it. Spotify's queued song is caught as
+it comes up, paused, and brought in from its start by a cue on the line's clock (`Voice.now()`, kept in the page
+between the backend's reports, which stands still while paused). While it talks, `dj_duck` lowers the music in the
+sink (`duck.rs`, by heard time, lifting itself after 90 s if nobody does, so the DJ says it again every 30 s),
+through the session's `Mixer` (`djMixer.ts`: the music's level, and the silence at a song's end, timed anew after a
+pause or a small seek). Captions are `LyricLine`s, so `DjCaption` reuses the lyric sweep. A line with no speech (Just
+play, `dj.talk` "silent", or a voice that failed) is only shown (`dj.showing`), on a clock of its own, for as long as
 `readLines` says it takes to read, while the music plays on. With `dj.live` (Settings: "Pick songs
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and

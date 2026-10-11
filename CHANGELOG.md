@@ -76,6 +76,11 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 
 ### Fixed
 
+- After playing something else for a moment and going back to the DJ's song, Next while the DJ talks over its end
+  brings the next set in again, instead of doing nothing.
+- With "Pick songs as it goes" on, going back a song from a set's last one no longer pauses the next set's first song
+  for a moment as it comes in, and the DJ no longer starts talking over the singer at the end of the song it went
+  back to.
 - The DJ's voice no longer stops mid-sentence after an initial or an abbreviation, as in J. Cole or Mr. Brightside,
   and its captions no longer break there.
 - Headphones that take a moment to wake up no longer cut off the first word of the DJ's lines: it keeps the sound
