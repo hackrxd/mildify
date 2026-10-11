@@ -445,6 +445,19 @@ describe("segments", () => {
     expect(error).toHaveBeenCalledWith('[A] the DJ segment "Short songs" couldn\'t tell whether a song fits', expect.any(Error));
   });
 
+  it("don't fit a song when they answer with a promise, too late to go by, and say so once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Plain JavaScript lets an extension give an async one.
+    const entry = m.djExtensions.addSegment(a, { ...short, fits: (async () => true) as never });
+    expect(entry.segment.fits(song(1))).toBe(false);
+    // One that fails later fails quietly.
+    m.djExtensions.addSegment(a, { ...short, id: "later", fits: () => Promise.reject(new Error("no")) as never });
+    expect(m.djExtensions.segments[1].segment.fits(song(2))).toBe(false);
+    await Promise.resolve();
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(error.mock.calls[0][1]).toMatchObject({ message: "fits(song) has to answer at once, not with a promise" });
+  });
+
   it("are added through ns.dj, and taken away by its remover or by turning the extension off", () => {
     const { ns, t } = api();
     const remove = ns.addSegment(short);

@@ -196,6 +196,11 @@ function sayable(text: unknown, max: number): string {
   return cut(cleanTalk(String(text ?? "").replace(/["“”]/g, "")), max).trim();
 }
 
+/** Whether `x` is a promise, or something like one. */
+function isThenable(x: unknown): boolean {
+  return (typeof x === "object" || typeof x === "function") && x !== null && typeof (x as { then?: unknown }).then === "function";
+}
+
 /** A segment an extension added, as the DJ plays it. */
 export interface ExtensionSegment {
   owner: Owner;
@@ -234,7 +239,7 @@ class DjExtensions {
 
   /** Adds `owner`'s segment `spec`, in place of the one with the same id. Throws for one without a short word for an id
    * or without `fits`, or one past `EXTENSION_SEGMENTS_MAX`. Its name and phrase are cleaned for the DJ to say, and its
-   * brief falls back to its name; a `fits` that throws doesn't fit, and is reported once. */
+   * brief falls back to its name; a `fits` that throws, or answers with a promise, doesn't fit, and is reported once. */
   addSegment(owner: Owner, spec: DjSegmentSpec): ExtensionSegment {
     return untrack(() => {
       const own = String(spec?.id ?? "");
@@ -257,7 +262,13 @@ class DjExtensions {
         from: owner.name,
         fits: (c) => {
           try {
-            return !!fits(songView(c));
+            const answer: unknown = fits(songView(c));
+            if (isThenable(answer)) {
+              // Whatever it comes to is too late, and a failure needs no telling again.
+              Promise.resolve(answer).catch(() => {});
+              throw new Error("fits(song) has to answer at once, not with a promise");
+            }
+            return !!answer;
           } catch (e) {
             if (!failed) console.error(`[${owner.name}] the DJ segment "${label}" couldn't tell whether a song fits`, e);
             failed = true;
