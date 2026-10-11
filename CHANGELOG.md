@@ -25,7 +25,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
   menu.
 - Extensions can follow the AI DJ, what it plays and says and what happens while it plays, add entries to the
-  menus of its sets, and give it instructions, which the DJ page lists under yours.
+  menus of its sets, give it instructions, and add segments of their own from your listening. The DJ page lists
+  what each extension adds.
 - Your DJ remembers, on this computer and for each Spotify account, what it played and what you skipped and liked
   while it played. With a model on your computer or your own server, it also greets you some other way than it did
   lately. Settings → AI DJ can forget it.
