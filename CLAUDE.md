@@ -150,9 +150,9 @@ play, `dj.talk` "silent", or a voice that failed) is only shown (`dj.showing`), 
 as it goes") a set keeps the model's picks as `plan` and grows song by song (a new object per step, same `id`):
 `#goLive` picks each next song with `djPicks.nextInSet` (likes noticed through `liked.has`, skips, the plan) and
 lines it up with the device's `clear_queue` + `queue` commands (librespot's own queue), and the next set is
-picked only as the last song starts. How the set playing is going (its likes and skips, whether it ends, where a Next
-is headed) is its `SetProgress` (`djLive.ts`), made anew as each set comes in.
-Likes let a set run on past its plan (`setCap`: a song each, up to `RUN_ON`,
+picked only as the last song starts. How the set playing is going (its likes and skips, whether it ends or picks its
+next song again, where a Next or Previous is headed) is its `SetProgress` (`djLive.ts`), made anew as each set comes
+in. Likes let a set run on past its plan (`setCap`: a song each, up to `RUN_ON`,
 while there's more like them), and an artist doesn't play twice running, by every artist a song credits
 (`sharesArtist`), unless liked or named by the set's request. A set's own songs are left out only for artists skipped
 since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set
