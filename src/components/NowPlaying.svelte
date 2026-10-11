@@ -14,6 +14,7 @@
   import Icon from "./Icon.svelte";
   import Pop from "./Pop.svelte";
   import Slider from "./Slider.svelte";
+  import SpicyLyricsIcon from "./SpicyLyricsIcon.svelte";
 
   let { queueOpen, ontogglequeue }: { queueOpen: boolean; ontogglequeue: () => void } = $props();
 
@@ -167,7 +168,7 @@
       title="Lyrics"
       aria-pressed={router.current.name === "lyrics"}
     >
-      <Icon name="lyrics" size={18} />
+      <SpicyLyricsIcon size={18} />
     </button>
     <button class="icon-btn" class:on={queueOpen} onclick={ontogglequeue} title="Queue" aria-pressed={queueOpen}>
       <Icon name="queue" size={18} />
