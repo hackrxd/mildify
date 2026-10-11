@@ -48,7 +48,7 @@ import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMem
 import { djExtensions } from "./djExtensions.svelte";
 import { cue, HandOver, runCues, type Cue, type Hold } from "./djHandOver";
 import { Mixer } from "./djMixer";
-import { NextSet } from "./djNext";
+import { NextSet, SetQueue } from "./djNext";
 import { askModel, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, previewLine, voiceNote } from "./djView";
@@ -270,7 +270,8 @@ class Dj {
   #sessionStart = 0;
   /** The next set on its way: being picked, and the wait for the model. */
   #next = new NextSet();
-  #queued: "no" | "pending" | "done" | "failed" = "no";
+  /** The next set in the player's queue, after the set playing's last song. */
+  #queue = new SetQueue<DjSet>();
   /** Cues on the clock of the line being spoken. */
   #speechCues: Cue[] = [];
   /** When the line showing without the voice came up, on performance.now()'s clock, and for how long. */
@@ -339,9 +340,6 @@ class Dj {
   #heading: { uri: string; at: number } | null = null;
   /** Those Nexts and Previouses, one after another: each goes from where the one before left the player. */
   #steps: Promise<unknown> = Promise.resolve();
-  /** The next set's first song on its way into the player's queue, and the set being queued. */
-  #queuing: Promise<void> = Promise.resolve();
-  #queueFor: DjSet | null = null;
   /** Previous went back to this song: leaving the one before isn't a skip. */
   #goingBack: string | null = null;
   /** The listener has been told the voice isn't working, this session. */
@@ -681,7 +679,7 @@ class Dj {
     if (!cur || !this.canSkipSet(cur)) return;
     const run = this.#run;
     // A song on its way into the player's queue lands before the queue is cleared.
-    await Promise.all([this.#linedUpDone, this.#queuing]);
+    await Promise.all([this.#linedUpDone, this.#queue.settled]);
     const now = this.current;
     if (run !== this.#run || now?.id !== cur.id || this.onAir || this.#awaiting) return;
     // A Next on its way into the next set, or the player already past this one: there's nothing left to skip.
@@ -697,8 +695,7 @@ class Dj {
     // What's lined up after the song playing (the set's next song, the next set's, or what was left there) goes:
     // the next set starts with a play request of its own.
     backend.device({ action: "clear_queue" }).catch(() => {});
-    this.#queueFor = null;
-    this.#queued = "no";
+    this.#queue.forget();
     // A set picked as it goes lines nothing more up.
     this.#setEnds = true;
     this.#replan();
@@ -741,7 +738,7 @@ class Dj {
     if (!this.#live()) return player.prev();
     const run = this.#run;
     // Changes on their way to the player's queue land first, or they'd land after the song gone back to.
-    await Promise.all([this.#linedUpDone, this.#queuing]);
+    await Promise.all([this.#linedUpDone, this.#queue.settled]);
     if (run !== this.#run || this.onAir || !this.#live()) return;
     const cur = this.current!;
     const heading = this.#headed();
@@ -775,7 +772,7 @@ class Dj {
     this.#repick = false;
     // The next set's first song was in the queue just cleared: it's queued again, after the song gone back to, and
     // planned over its end anew.
-    if (this.#queued !== "no") this.#queued = "no";
+    this.#queue.forget();
     this.#dropHandOver();
     if (this.#setEnds) this.#readyNext(run, this.current, back);
   }
@@ -803,7 +800,7 @@ class Dj {
     if (at === set.songs.length - 1) {
       if (this.#setEnds) {
         // The next set follows from the player's queue once it's there; until then the music waits for it.
-        if (this.#queued !== "done" || !this.upNext || heading) return this.#skipToNextSet();
+        if (!this.upNext || this.#queue.of(this.upNext) !== "done" || heading) return this.#skipToNextSet();
         this.#headTo(this.upNext.songs[0].uri);
         return player.next();
       }
@@ -887,7 +884,8 @@ class Dj {
     // What a set picked as it goes lined up, and hasn't reached, would otherwise play in the middle of whatever
     // the listener plays next.
     const cur = this.current;
-    if (cur?.live && player.isLocal && (player.track?.uri !== cur.songs[cur.songs.length - 1].uri || this.#queued !== "no")) {
+    const queued = this.#queue.of(this.upNext) !== "no";
+    if (cur?.live && player.isLocal && (player.track?.uri !== cur.songs[cur.songs.length - 1].uri || queued)) {
       backend.device({ action: "clear_queue" }).catch(() => {});
     }
     const modes = this.#modes;
@@ -938,8 +936,7 @@ class Dj {
     this.#setSkipped = null;
     this.#leftSet = null;
     this.#next.reset();
-    this.#queued = "no";
-    this.#queueFor = null;
+    this.#queue.forget();
     this.#handOver.drop();
     this.#speechCues = [];
     this.#bringIn = null;
@@ -1439,14 +1436,15 @@ class Dj {
     rule(!this.#waitingForSet || !this.upNext, "waiting for a set that's ready");
     rule(!this.#handOver.on || !!this.upNext, "a hand-over planned with no next set");
     rule(!this.#mixer.silencing || !!this.#handOver.on, "a silence left over from a dropped plan");
-    rule(!this.#queueFor || this.#queueFor === this.upNext || this.#queueFor === this.current, "queueing a set let go of");
+    const adding = this.#queue.adding;
+    rule(!adding || adding === this.upNext || adding === this.current, "queueing a set let go of");
     rule(!this.showing || (!this.speaking && !!this.caption && !!this.#shown), "a line shown without captions, or spoken");
     if (this.phase === "off") {
       rule(
         !this.current && !this.upNext && !this.announced && !this.onAir && !this.speaking && !this.showing &&
-          !this.#next.picking && !this.#next.waiting && this.#queued === "no" && !this.#handOver.on &&
+          !this.#next.picking && !this.#next.waiting && this.#queue.idle && !this.#handOver.on &&
           !this.#speechCues.length && !this.#bringIn && !this.#awaiting && !this.#heldMusic && !this.#waitingForSet &&
-          !this.#mixer.silencing && !this.#queueFor && !this.#leftSet && !this.#setSkipped &&
+          !this.#mixer.silencing && !this.#leftSet && !this.#setSkipped &&
           !this.#lining && !this.#setEnds && !this.#heading && !this.requested,
         "stopped with playback state left",
       );
@@ -1570,12 +1568,14 @@ class Dj {
       }
       return;
     }
-    if (!next || this.#queued === "failed") return this.#holdForNextSet(run, next, left);
-    if (this.#queued === "no") {
-      this.#queue(run, next);
+    const queued = this.#queue.of(next);
+    if (!next || queued === "failed") return this.#holdForNextSet(run, next, left);
+    if (queued === "no") {
+      // In Spotify's queue, the next set follows the last song without a gap.
+      this.#queue.add(next, next.songs.map((s) => s.uri), (uri) => sp.addToQueue(uri, session.device?.device_id));
       return;
     }
-    if (this.#queued !== "done") return;
+    if (queued !== "done") return;
     const known = this.#lastVocals?.uri === uri;
     if (this.#handOver.on !== uri && (known || left < PLAN_BY_MS)) this.#plan(run, next, t.durationMs, pos, uri);
     // Paused, the song's cues wait: a seek while paused only moves where they'll fire from.
@@ -1700,7 +1700,7 @@ class Dj {
     const cur = this.current;
     const uri = player.track?.uri;
     if (this.phase !== "on" || !cur || !uri || this.#awaiting || this.onAir || !player.isLocal) return false;
-    return uri === cur.songs[cur.songs.length - 1].uri && this.#queued !== "done";
+    return uri === cur.songs[cur.songs.length - 1].uri && this.#queue.of(this.upNext) !== "done";
   }
 
   /** Skipped past the end of a set with nothing after it: the player would stop. A song left before half way
@@ -1799,7 +1799,6 @@ class Dj {
     this.#bringIn = null;
     this.current = set;
     this.upNext = null;
-    this.#queued = "no";
     if (this.announced !== set) this.#talkFirst(run, set);
     else if (held && this.speaking && this.#voice.now() < held.musicAt - EARLY_TOLERANCE_MS) {
       // Here before its time, with more of the line left than its intro has room for: back to its start.
@@ -1923,43 +1922,10 @@ class Dj {
     );
   }
 
-  /** Adds the next set to Spotify's queue, so it can follow the last song without a gap. */
-  #queue(run: number, set: DjSet) {
-    this.#queued = "pending";
-    this.#queueFor = set;
-    // After whatever's on its way to the queue already, a clear included.
-    this.#queuing = this.#queuing.then(() => this.#queueSongs(run, set));
-  }
-
   /** Takes the next set back out of the player's queue: what's on its way stops, and what made it in comes out
    * before anything else is queued. The rest of a set the listener skipped into while it was queued still goes. */
   #unqueue() {
-    if (this.#queueFor === this.upNext) this.#queueFor = null;
-    if (this.#queued !== "no" && player.isLocal) {
-      this.#queuing = this.#queuing.then(() => backend.device({ action: "clear_queue" }).then(() => {}, () => {}));
-    }
-    this.#queued = "no";
-  }
-
-  async #queueSongs(run: number, set: DjSet) {
-    // Let go of while it waited its turn.
-    if (run !== this.#run || this.#queueFor !== set) return;
-    const device = session.device?.device_id;
-    try {
-      for (const s of set.songs) {
-        // Let go of meanwhile, or started with a play request instead: the rest of it isn't wanted.
-        if (run !== this.#run || this.#queueFor !== set) return;
-        await sp.addToQueue(s.uri, device);
-      }
-      // The listener may have skipped into this set meanwhile: then the next one is queued in its turn.
-      if (run === this.#run && this.upNext === set) this.#queued = "done";
-    } catch (e) {
-      console.warn("DJ: couldn't queue the next set:", e);
-      if (run === this.#run && this.upNext === set) this.#queued = "failed";
-    } finally {
-      // Done with it: nothing is on its way into the queue any more.
-      if (this.#queueFor === set) this.#queueFor = null;
-    }
+    this.#queue.remove(this.upNext, player.isLocal ? () => backend.device({ action: "clear_queue" }) : null);
   }
 
   /** Plans the DJ's item between the finishing song and the queued set, from both songs' vocals. */
