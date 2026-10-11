@@ -75,10 +75,33 @@ pub fn say(sentence: &str) -> String {
     let words: Vec<&str> = body.split(' ').filter(|w| !w.is_empty()).collect();
     let said: Vec<String> = words.iter().enumerate().map(|(i, w)| say_word(w, words.get(i + 1).copied())).collect();
     let mut out = said.join(" ");
+    // A sentence that didn't start lowercase still doesn't: said so ("#1" as "number 1"), it would run on from the one
+    // before, as the program reads on past a full stop before a lowercase word.
+    if !sentence.starts_with(char::is_lowercase) {
+        out = capitalised(&out);
+    }
     if let Some(end) = ending {
         out.push_str(end);
     }
     out
+}
+
+/// `s` starting with a capital, if it starts with a letter.
+fn capitalised(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) if first.is_lowercase() => first.to_uppercase().chain(chars).collect(),
+        _ => s.to_owned(),
+    }
+}
+
+/// A name as it's said, starting lowercase where it was written so: "sza" is "sizza".
+fn in_case_of(written: &str, said: &str) -> String {
+    let mut chars = said.chars();
+    match chars.next() {
+        Some(first) if written.starts_with(char::is_lowercase) => first.to_lowercase().chain(chars).collect(),
+        _ => said.to_owned(),
+    }
 }
 
 /// The sentence's own ending: its run of ". ! ? …" (a "?!" or "..." together) and any closing quotes or brackets,
@@ -176,8 +199,9 @@ fn say_core(core: &str, next: Option<&str>) -> String {
     if core.is_empty() {
         return String::new();
     }
+    // In the case it was written in: "sza", said "Sizza", would end the sentence before it for the program.
     if let Some(said) = name(core) {
-        return said.to_owned();
+        return in_case_of(core, said);
     }
     if let Some(said) = abbreviation(core, false) {
         return said.to_owned();
@@ -336,7 +360,21 @@ mod tests {
             ("It's 2:00 AM, or 2:30, or 2:05pm, or 4:00.", "It's 2 AM, or 2 30, or 2 oh 5 pm, or 4 o'clock."),
             ("Tickets were $5, or $1.", "Tickets were 5 dollars, or 1 dollar."),
             ("A big EDM track, from her debut EP.", "A big E D M track, from her debut E P."),
-            ("#throwback to 1999!", "throwback to 19 99!"),
+            ("#throwback to 1999!", "Throwback to 19 99!"),
+        ] {
+            assert_eq!(say(shown), said, "{shown}");
+        }
+    }
+
+    #[test]
+    fn keeps_a_sentence_starting_as_it_did_so_the_program_ends_the_one_before() {
+        for (shown, said) in [
+            ("#1 for six weeks in 1999.", "Number 1 for six weeks in 19 99."),
+            ("90s babies, this one's for you.", "Nineties babies, this one's for you."),
+            ("+ more to come.", "And more to come."),
+            ("$5 a ticket.", "5 dollars a ticket."),
+            // Starting lowercase, it reads on from the sentence before for the program and the captions alike.
+            ("sza is up next.", "sizza is up next."),
         ] {
             assert_eq!(say(shown), said, "{shown}");
         }
@@ -380,7 +418,7 @@ mod tests {
         }
         // Names are words only where they're names: "Sade" is matched as written.
         assert_eq!(say("sade"), "sade");
-        assert_eq!(say("sza"), "Sizza");
+        assert_eq!(say("sza and a$ap"), "sizza and a-sap");
     }
 
     #[test]
