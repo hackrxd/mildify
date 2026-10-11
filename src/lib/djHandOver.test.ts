@@ -78,6 +78,14 @@ describe("HandOver", () => {
     expect(h.cues).toBe(cues);
   });
 
+  it("planned again without a hold has none", () => {
+    const { h } = handOver();
+    h.plan("a", [], { set: "next", musicAt: 4000 });
+    h.plan("b", [], null);
+    expect(h.on).toBe("b");
+    expect(h.land("next")).toBeNull();
+  });
+
   it("settled, fires none of its cues any more", () => {
     const { h } = handOver();
     const fire = vi.fn();
