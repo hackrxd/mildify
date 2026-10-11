@@ -10,16 +10,21 @@ language model and voice, so only what you picked downloads. Turning it off stop
 model; Settings → AI DJ → **Remove the DJ's files** deletes all of it, once you've said so under the button.
 
 Switching to another language model stops the DJ, so while it plays, Settings asks first, under the picker, which
-shows the model it's asking about until you answer. A new voice doesn't stop it: the next line uses it. A voice
-from a package that isn't downloaded yet does stop it, without asking first, while it downloads.
+shows the model it's asking about until you answer. A new voice or speaking speed doesn't stop it: it comes in after
+any line the DJ already has ready. A voice from a package that isn't downloaded yet does stop it while it downloads,
+so while it plays, Settings asks first there too.
 
 ## What it plays
 
 The DJ reads your listening through the Spotify Web API, the same way the rest of the app does:
 
-- your top tracks over the last few weeks, six months and all time,
+- your top tracks over the last few weeks, six months and all time, 50 of each,
 - what you played recently,
-- your liked songs: the newest, and two pages from further back.
+- your liked songs: the newest 50, and 50 from each half of the rest, from somewhere else each session.
+
+That's seven requests in all. When all of it came, what it read serves a session started within half an hour, so
+stopping and starting the DJ doesn't read it again. If Spotify refuses 50 top tracks at a time, as it may for a
+development-mode app, the DJ reads them in pages of 20 instead, ten requests in all.
 
 From these it builds segments, the way Spotify's DJ does: **On repeat**, **Your favorites lately**,
 **Throwbacks** (all-time favorites and songs you liked long ago), **Fresh in your library** and
@@ -29,7 +34,15 @@ names the segment and writes what to say. It's only allowed to use those facts, 
 ([Looking songs up](#looking-songs-up)), not made-up trivia.
 
 Songs the DJ played in the last three days aren't picked again at the start of a session. When you skip a DJ
-song before halfway, that artist sits out the rest of the session.
+song before halfway, its artist sits out the next two sets the DJ picks, and the rest of the session once you've
+skipped them twice. A featured artist doesn't sit out. A song you skipped stays out for three weeks, and an artist
+you skipped twice stays out for a day, in the sessions after too. Ask for an artist by their whole name, or a song
+by its title or album, and it's back. When nothing else is left, the DJ plays songs you skipped again rather than
+stop.
+
+When a segment has more songs than it offers, it leans toward the ones you'll more likely want: songs your listening
+shows several ways, and by artists you liked while the DJ played them. It offers less of what you skipped, and of
+what it played lately, less so as time goes by: an artist's skips fade over days, a song's over weeks.
 
 The 2026 Web API has no recommendations, so the DJ plays only music you already listen to.
 
@@ -49,9 +62,13 @@ commits to one song at a time: while a song plays, it picks the next and lines i
 you do changes what comes next:
 
 - **Like a song** (the heart in the player bar, or anywhere in the app) and the DJ leans toward it for the rest of
-  the set: more by that artist, or from that album, even from outside the set. It can change the song it lined up until about 35
-  seconds before the one playing ends, when the player starts loading it.
-- **Skip a song** before halfway and that artist sits out. Skip two in a set and the DJ moves on to a new set.
+  the set: more by that artist, or from that album, even from outside the set. A like before the set's last song
+  starts can run it a song longer, up to two, while there's more like it to play. It can change the song it lined
+  up until about 35 seconds before the one playing ends, when the player starts loading it.
+- The DJ doesn't play an artist twice running, counting everyone a song credits, unless you liked or asked for
+  more of them.
+- **Skip a song** before halfway and its artist sits out the rest of the set, and the next two. Skip two in a set
+  and the DJ moves on to a new set.
 - The next set is picked as the last song of a set starts, and the DJ knows what you liked and skipped since the
   last one, so it can mention it. It introduces only the set's first song, even with **Let the DJ name every song in
   a set** on: the rest aren't picked yet.
@@ -130,7 +147,9 @@ singing.
 
 While it talks over music, the music is turned down inside the player's own output, not with the volume slider.
 Your volume and other Spotify apps see no change. The voice plays on this computer's sound output, as the music
-does, and follows the volume slider, so it sits at the same loudness as the music.
+does, and follows the volume slider, so it sits at the same loudness as the music. Each line is brought to one level
+first, so every voice sounds as loud as the others. While the DJ is on, it keeps that output open, so headphones
+that take a moment to wake up don't cut off its first word.
 
 What it says shows up as captions: in the player bar where the current lyric line usually is, and over the
 lyrics view. Each word lights up as it's spoken (without a voice, at about the pace it would be), the same way synced
@@ -193,6 +212,30 @@ Call me Captain.
 Instructions can change how it talks and which of the offered songs it picks, but not where its songs come
 from. The voices speak English, so a DJ told to speak another language will read it with an English accent.
 
+[Extensions](mods.md#the-dj) you turn on can give the DJ instructions too, up to 300 characters each and 600 in
+all. They come after yours, and where they disagree with yours, yours come first. They can also add segments of
+their own, such as short songs only, which take turns with the DJ's and play only songs from your listening; the
+DJ opens with one of its own when it can. The DJ page lists what each extension adds under **Tell your DJ**, with
+what each segment tells the model it is, so you can see everything the DJ is told, and marks the sets from an
+extension's segment. Turning an extension off takes it all back from the next set the DJ picks; a set already
+picked, or being picked, plays on.
+
+## Its voice
+
+Settings → AI DJ → **Voice** picks who reads the DJ's lines out: one of ten Kokoro voices, six American and four
+British, or one of two Light ones, quicker on a slow computer. They're listed by the package they download in, each
+with its size until it's downloaded; any voice in a package is ready once it's in. **Speaking speed** sets how fast
+it talks: from 20% slower to 30% faster than the voice's own pace. **Hear it**, beside the voice, plays a short line
+in it at that speed, once its package is downloaded, whether the DJ is on or not, but not while it talks; a line the
+DJ starts takes its place. Like a new voice, a new speed comes in after any line the DJ already has
+ready, and the music plays on.
+
+The voice says some things the way a host would rather than as they're spelled: "#1" as "number one", 1999 as
+"nineteen ninety-nine" and 2011 as "twenty eleven", "the 90s" as "the nineties", 2:00 as "two o'clock", "feat." as
+"featuring", AC/DC without its slash, and artists who spell their names their own way, such as SZA, A$AP Rocky, P!nk,
+Ke$ha and deadmau5. The captions show the words as they're written. An initial or an abbreviation, as in J. Cole or
+Mr. Brightside, doesn't end a sentence, in the voice or in the captions.
+
 ## What it downloads
 
 Everything comes from the projects' own releases and goes in a `dj` folder in the app's data directory
@@ -201,7 +244,7 @@ on macOS, `%APPDATA%\dev.hackrxd.nativespotify\dj` on Windows).
 
 | Part | From | Size | License |
 | --- | --- | --- | --- |
-| Language model runtime | [llama.cpp](https://github.com/ggml-org/llama.cpp) b11382, CPU build (Metal on Apple silicon) | 12–19 MB | MIT |
+| Language model runtime | [llama.cpp](https://github.com/ggml-org/llama.cpp) b11382: Vulkan build on Windows and Linux PCs, CPU build on Arm and Intel Macs, Metal on Apple silicon | 11–33 MB | MIT |
 | Speech runtime | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13.8 | 20–44 MB | Apache-2.0 |
 | Model: Qwen2.5 1.5B Instruct (default) | [Qwen on Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF), Q4_K_M | 1.1 GB | Apache-2.0 |
 | Model: Qwen3 4B | [Qwen on Hugging Face](https://huggingface.co/Qwen/Qwen3-4B-GGUF), Q4_K_M | 2.5 GB | Apache-2.0 |
@@ -215,6 +258,14 @@ Hugging Face repository, so a file changed there later is never picked up.
 
 The Qwen2.5 model needs about 2 GB of memory while the DJ is on, and Qwen3 4B about 4 GB. The model is unloaded
 when you stop the DJ, or after 10 minutes without use.
+
+The model runs on your graphics card when llama.cpp finds one it can use (through Vulkan on Windows and Linux PCs,
+Metal on Apple silicon), with as much of it as fits in the card's memory, and on the processor otherwise. If the card
+can't load the model within four minutes, or stops while running it, the DJ loads it again on the processor and
+leaves the card out until the app restarts, you pick another model, or you remove the DJ's files. **Use the graphics
+card** (Settings → AI DJ) says where the model runs, and why not on the card when it isn't; turning it off keeps the
+model on the processor, and turning it back on tries the card again. A change there loads the model again for the
+DJ's next set, and the music plays on.
 
 ## Your own model server
 
@@ -263,8 +314,21 @@ your own on this computer, directly, never through a proxy set for your system.
 
 With a cloud model, what the DJ is asked goes to that provider: the name it calls you (none with **Use my name**
 off), the songs it's choosing from with when you played or liked them, what it looked up about them, what it said
-before, and your instructions.
+before in this session, your instructions, and your extensions' instructions and what their segments are.
 Song look-ups ask Spotify, and MusicBrainz if you allow it.
+
+### What it remembers
+
+The DJ remembers, for each Spotify account, from one session to the next:
+- what it played, for a month;
+- what you skipped and liked while it played, for up to a year, fading as it goes;
+- how its sets went, for two months;
+- how it opened its last ten sessions, for a month, without the name it called you.
+
+It's kept in the app's own storage on this computer, at most 128 KB, and nothing of it goes to Spotify. A model on
+your computer or your own model server is told how the DJ opened lately, so it greets you some other way. A cloud
+model is told nothing from earlier sessions. Settings → AI DJ → **What your DJ remembers** → **Forget it** clears
+it for the account signed in. Removing the DJ's files doesn't.
 
 ## Platforms
 

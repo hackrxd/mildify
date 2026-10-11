@@ -2,8 +2,8 @@
 // voice reads it out. Pure, so the wording is tested without a page.
 import { DAY_MS, type Candidate } from "./djPicks";
 import { monthYear, popularityWord, type TalkStyle } from "./djTalk";
-import type { DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
-import { formatBytes } from "./util";
+import type { DjChoice, DjCloud, DjConfig, DjModelChoice, DjSongInfo, DjStatus } from "./ipc";
+import { formatBytes, lowerFirst } from "./util";
 
 export const CLOUD_NAMES: Record<DjCloud, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini" };
 /** A cloud provider's model before one is picked: the backend's own default (src-tauri/src/dj/mod.rs). */
@@ -55,6 +55,60 @@ export function modelName(status: DjStatus): string {
 
 export function voiceName(status: DjStatus): string {
   return status.voices.find((v) => v.id === status.settings.voice)?.label ?? status.settings.voice;
+}
+
+/** Where the downloaded model runs, for Settings, under "Use the graphics card". */
+export function deviceNote(status: DjStatus): string {
+  const runs = status.runs_on;
+  if (!status.settings.gpu) return "Off, the model runs on the processor.";
+  if (runs?.card) return `The model runs on ${runs.card}, with as much of it as fits in the card's memory.`;
+  if (runs?.card_failed) {
+    const why = lowerFirst(runs.card_failed).replace(/\.$/, "");
+    return `The graphics card couldn't run the model, so it runs on the processor: ${why}. Turn this off and on to try the card again.`;
+  }
+  if (runs) return "This computer has no graphics card the model can use, so it runs on the processor.";
+  return "The model runs on it when this computer has one it can use, and on the processor otherwise, or if the card fails.";
+}
+
+/** Voices that download together, as Settings lists them. */
+export interface VoiceGroup {
+  name: string;
+  /** "Kokoro (downloaded)", "Light (27 MB)". */
+  label: string;
+  installed: boolean;
+  voices: DjChoice[];
+}
+
+/** The voices by the package they download in, in the order they're listed. */
+export function voiceGroups(voices: DjChoice[]): VoiceGroup[] {
+  const groups: VoiceGroup[] = [];
+  for (const v of voices) {
+    const name = v.group ?? "Voices";
+    let group = groups.find((g) => g.name === name);
+    if (!group) {
+      group = { name, label: `${name} (${v.installed ? "downloaded" : formatBytes(v.bytes)})`, installed: v.installed, voices: [] };
+      groups.push(group);
+    }
+    group.voices.push(v);
+  }
+  return groups;
+}
+
+/** A short line to hear a voice by before it's picked, in its own name where it has one: "Lewis (British)" is
+ * Lewis, while "Light (male, faster)" is named after its group. */
+export function previewLine(voice: DjChoice): string {
+  const name = voice.label.split(" (")[0];
+  return `${name === voice.group ? "Hi there." : `Hi, I'm ${name}.`} This is how I'd sound between your songs.`;
+}
+
+/** Settings' range for how fast the voice speaks, against its own pace: the backend's (src-tauri/src/dj/voice.rs). */
+export const VOICE_SPEED = { min: 0.8, max: 1.3, step: 0.05 } as const;
+
+/** How fast the voice speaks, in words: "At its usual pace", "15% faster than usual". */
+export function speedWords(speed: number): string {
+  const percent = Math.round((speed - 1) * 100);
+  if (percent === 0) return "At its usual pace";
+  return `${Math.abs(percent)}% ${percent > 0 ? "faster" : "slower"} than usual`;
 }
 
 /** A cloud model's name as people write it, from its id: "claude-sonnet-5-5" is Claude Sonnet 5.5, "gpt-5.5-mini"
@@ -157,8 +211,14 @@ export function troubleNotes(trouble: { model: string | null; voice: string | nu
   return notes;
 }
 
-/** A change in Settings that can stop the DJ: another model, its key removed, or its files deleted. */
-export type DjChange = { kind: "model"; choice: string } | { kind: "key"; provider: DjCloud } | { kind: "files" };
+/** A change in Settings that can stop the DJ or can't be taken back: another model, a voice still to download, its
+ * key removed, its files deleted, or what it remembers forgotten. */
+export type DjChange =
+  | { kind: "model"; choice: string }
+  | { kind: "voice"; choice: string }
+  | { kind: "key"; provider: DjCloud }
+  | { kind: "files" }
+  | { kind: "forget" };
 
 /** What Settings asks under a setting before a change, and its two answers. */
 export interface Question {
@@ -173,9 +233,17 @@ function choiceName(choice: string, status: DjStatus): string {
   return settings.provider === "local" ? modelName({ ...status, settings }) : providerName(settings);
 }
 
-/** What Settings asks before `change`, or null to go ahead: another model or removing the key in use only while the
- * DJ plays, since either stops it; deleting its files always, gigabytes that take a while to download again. */
+/** What Settings asks before `change`, or null to go ahead: another model, a voice that has to download first, or
+ * removing the key in use only while the DJ plays, since each stops it; deleting its files always, gigabytes that take
+ * a while to download again; and forgetting what it remembers always, which can't be taken back. */
 export function askBefore(change: DjChange, status: DjStatus, playing: boolean): Question | null {
+  if (change.kind === "forget") {
+    return {
+      text: "Forget what your DJ remembers? That's what it played, what you skipped and liked while it played, how its sets went and how it opened lately. It learns again as you listen.",
+      confirm: "Forget it",
+      cancel: "Keep it",
+    };
+  }
   if (change.kind === "files") {
     return {
       text: `Remove the DJ's files, ${formatBytes(status.disk_bytes)}? ${playing ? "It stops playing and turns off" : "The DJ turns off"}, and they download again when you turn it back on.`,
@@ -188,6 +256,15 @@ export function askBefore(change: DjChange, status: DjStatus, playing: boolean):
     if (change.choice === modelChoiceOf(status.settings)) return null;
     return {
       text: `Switch the DJ to ${choiceName(change.choice, status)}? It stops playing to switch. Start it again from the DJ page.`,
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    };
+  }
+  if (change.kind === "voice") {
+    const voice = status.voices.find((v) => v.id === change.choice);
+    if (!voice || voice.installed || change.choice === status.settings.voice) return null;
+    return {
+      text: `Switch the DJ's voice to ${voice.label}? ${voice.group ?? "Its"} voices download first, ${formatBytes(voice.bytes)}, so the DJ stops. Start it again from the DJ page once they're in.`,
       confirm: "Switch and stop",
       cancel: "Keep playing",
     };
@@ -261,4 +338,36 @@ export function songWhy(c: Candidate, info: DjSongInfo | undefined, now = new Da
     if (info.related_artists.length) found.push(`For fans of ${info.related_artists.slice(0, 2).join(" and ")}`);
   }
   return { yours, found, bio: info?.artist_bio?.trim() || null };
+}
+
+/** Something an extension adds to the DJ, for the DJ page. */
+export interface ExtensionNote {
+  /** The extension's name. */
+  name: string;
+  what: string;
+  /** Why it doesn't reach the DJ, when it doesn't. */
+  note: string | null;
+}
+
+/** What the extensions turned on add to the DJ, a line each: the instructions they give it, and whether the model is
+ * told them (`passed`), since they can only add so much in all; then the segments they add, with what they tell the
+ * model each is. */
+export function extensionNotes(
+  instructions: readonly { owner: { name: string }; text: string }[],
+  passed: readonly unknown[],
+  budget: number,
+  segments: readonly { owner: { name: string }; segment: { label: string; brief: string } }[] = [],
+): ExtensionNote[] {
+  return [
+    ...instructions.map((x) => ({
+      name: x.owner.name,
+      what: `Tells it: “${x.text}”`,
+      note: passed.includes(x) ? null : `Not passed on for now: extensions' instructions can add up to ${budget} characters in all.`,
+    })),
+    ...segments.map(({ owner, segment }) => ({
+      name: owner.name,
+      what: segment.brief === segment.label ? `Adds a segment: ${segment.label}` : `Adds a segment, ${segment.label}: “${segment.brief}”`,
+      note: null,
+    })),
+  ];
 }

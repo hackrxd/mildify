@@ -5,10 +5,11 @@
   import Icon from "../components/Icon.svelte";
   import OnAirLamp from "../components/OnAirLamp.svelte";
   import { dj, type DjSet } from "../lib/dj.svelte";
+  import { djExtensions, EXTENSION_INSTRUCTIONS_BUDGET } from "../lib/djExtensions.svelte";
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
   import { setMenu } from "../lib/djMenu";
-  import { djLead, offNote, providerName, troubleNotes } from "../lib/djView";
+  import { djLead, extensionNotes, offNote, providerName, troubleNotes } from "../lib/djView";
   import { contextMenu, menu } from "../lib/menu.svelte";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
@@ -36,6 +37,15 @@
   /** What's wrong with the DJ's model or voice, until it's fixed; it plays on all the same. */
   const troubles = $derived(
     troubleNotes({ model: dj.modelTrouble, voice: dj.voiceTrouble, talk: dj.talk, playing: dj.phase !== "off" }),
+  );
+  /** What the extensions turned on add to the DJ. */
+  const fromExtensions = $derived(
+    extensionNotes(
+      djExtensions.instructions,
+      djExtensions.promptInstructions(),
+      EXTENSION_INSTRUCTIONS_BUDGET,
+      djExtensions.segments,
+    ),
   );
   const lamp = $derived(
     dj.phase === "off" ? "off" : dj.phase === "starting" ? "warming" : dj.paused ? "held" : dj.speaking ? "talking" : "on",
@@ -210,6 +220,7 @@
           </span>
         </div>
         {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
+        {#if b.set.from}<p class="muted small request-note">A segment from {b.set.from}</p>{/if}
         <DjSongs set={b.set} />
         {#if b.set.live}
           <p class="muted small live-note">Picked as you listen: like a song for more like it, or skip what isn't working.</p>
@@ -240,6 +251,18 @@
           oninput={(e) => dj.setInstructions(e.currentTarget.value)}
         ></textarea>
         <span class="muted small count">{dj.instructions.length} / {INSTRUCTIONS_MAX}</span>
+        {#if fromExtensions.length}
+          <h3 class="small">From your extensions</h3>
+          <ul class="extensions">
+            {#each fromExtensions as x, i (i)}
+              <li>
+                <span class="segment">{x.name}</span>
+                <p>{x.what}</p>
+                {#if x.note}<span class="muted small">{x.note}</span>{/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </section>
   {/each}
@@ -444,5 +467,24 @@
   }
   .count {
     justify-self: end;
+  }
+  h3 {
+    margin-top: 6px;
+    color: var(--text-muted);
+    font-weight: 700;
+  }
+  .extensions {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .extensions li {
+    display: grid;
+    gap: 2px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--surface);
   }
 </style>

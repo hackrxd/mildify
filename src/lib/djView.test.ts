@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   askBefore,
+  deviceNote,
   choicePatch,
   cloudModelOf,
   cloudOf,
@@ -10,11 +11,16 @@ import {
   modelChoiceOf,
   modelLabel,
   modelName,
+  previewLine,
   offNote,
   providerName,
   songWhy,
+  speedWords,
   troubleNotes,
+  voiceGroups,
   voiceName,
+  VOICE_SPEED,
+  extensionNotes,
 } from "./djView";
 import type { Candidate } from "./djPicks";
 import type { DjConfig, DjSongInfo, DjStatus } from "./ipc";
@@ -24,6 +30,8 @@ const settings: DjConfig = {
   provider: "local",
   model: "qwen2.5-1.5b",
   voice: "michael",
+  voice_speed: 1,
+  gpu: true,
   server_url: "",
   server_model: "",
   own_tools: false,
@@ -45,10 +53,15 @@ function status(patch: Partial<DjConfig> = {}): DjStatus {
     disk_bytes: 0,
     folder: "/dj",
     models: [
-      { id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1 },
-      { id: "qwen3-4b", label: "Qwen3 4B", detail: null, bytes: 2 },
+      { id: "qwen2.5-1.5b", label: "Qwen2.5 1.5B", detail: null, bytes: 1, installed: true, group: null },
+      { id: "qwen3-4b", label: "Qwen3 4B", detail: null, bytes: 2, installed: false, group: null },
     ],
-    voices: [{ id: "michael", label: "Michael (American)", detail: null, bytes: 1 }],
+    voices: [
+      { id: "michael", label: "Michael (American)", detail: null, bytes: 103_248_205, installed: true, group: "Kokoro" },
+      { id: "lewis", label: "Lewis (British)", detail: null, bytes: 103_248_205, installed: true, group: "Kokoro" },
+      { id: "light-male", label: "Light (male, faster)", detail: null, bytes: 26_586_708, installed: false, group: "Light" },
+    ],
+    runs_on: null,
   };
 }
 
@@ -87,6 +100,47 @@ describe("names", () => {
     ]);
     expect([modelName(status()), voiceName(status())]).toEqual(["Qwen2.5 1.5B", "Michael (American)"]);
     expect([modelName(status({ model: "new-model" })), voiceName(status({ voice: "emma" }))]).toEqual(["new-model", "emma"]);
+  });
+
+  it("says where the model runs, and why not on the graphics card when it doesn't", () => {
+    const on = (runs_on: DjStatus["runs_on"], gpu = true) => deviceNote({ ...status({ gpu }), runs_on });
+    expect(on({ card: "NVIDIA GeForce RTX 3060", card_failed: null })).toBe(
+      "The model runs on NVIDIA GeForce RTX 3060, with as much of it as fits in the card's memory.",
+    );
+    expect(on({ card: null, card_failed: "The DJ's model stopped while loading (exit status: 1)" })).toBe(
+      "The graphics card couldn't run the model, so it runs on the processor: the DJ's model stopped while loading (exit status: 1). Turn this off and on to try the card again.",
+    );
+    expect(on({ card: null, card_failed: "The DJ's model took too long to load." })).toMatch(/to load\. Turn this off/);
+    expect(on({ card: null, card_failed: null })).toBe("This computer has no graphics card the model can use, so it runs on the processor.");
+    expect(on(null)).toMatch(/^The model runs on it when this computer has one it can use/);
+    expect(on({ card: "NVIDIA GeForce RTX 3060", card_failed: null }, false)).toBe("Off, the model runs on the processor.");
+  });
+
+  it("lets a voice introduce itself by its name, or its group's", () => {
+    const [michael, , light] = status().voices;
+    expect(previewLine(michael)).toBe("Hi, I'm Michael. This is how I'd sound between your songs.");
+    expect(previewLine({ ...light, label: "Light (male, faster)" })).toBe("Hi there. This is how I'd sound between your songs.");
+  });
+
+  it("lists the voices by the package they download in", () => {
+    const groups = voiceGroups(status().voices);
+    expect(groups.map((g) => [g.label, g.installed, g.voices.map((v) => v.id)])).toEqual([
+      ["Kokoro (downloaded)", true, ["michael", "lewis"]],
+      ["Light (27 MB)", false, ["light-male"]],
+    ]);
+    expect(voiceGroups([{ id: "x", label: "X", detail: null, bytes: 2_000_000, installed: false, group: null }])[0].label).toBe("Voices (2 MB)");
+  });
+
+  it("says how fast the voice speaks against its usual pace", () => {
+    expect([1, 1.15, 0.85, VOICE_SPEED.max, VOICE_SPEED.min].map(speedWords)).toEqual([
+      "At its usual pace",
+      "15% faster than usual",
+      "15% slower than usual",
+      "30% faster than usual",
+      "20% slower than usual",
+    ]);
+    // What a float a step off 1 comes back as from the backend.
+    expect(speedWords(1.0000001)).toBe("At its usual pace");
   });
 });
 
@@ -208,6 +262,19 @@ describe("askBefore", () => {
     expect(askBefore({ kind: "model", choice: "local:qwen2.5-1.5b" }, status(), true)).toBeNull();
   });
 
+  it("asks before a voice that has to download, while the DJ plays, since it stops until it's in", () => {
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status(), true)).toEqual({
+      text: "Switch the DJ's voice to Light (male, faster)? Light voices download first, 27 MB, so the DJ stops. Start it again from the DJ page once they're in.",
+      confirm: "Switch and stop",
+      cancel: "Keep playing",
+    });
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status(), false)).toBeNull();
+    // Downloaded with the voice in use, or the one in use.
+    expect(askBefore({ kind: "voice", choice: "lewis" }, status(), true)).toBeNull();
+    expect(askBefore({ kind: "voice", choice: "light-male" }, status({ voice: "light-male" }), true)).toBeNull();
+    expect(askBefore({ kind: "voice", choice: "nobody" }, status(), true)).toBeNull();
+  });
+
   it("asks before removing the key the DJ is using, while it plays", () => {
     const openai = status({ provider: "openai" });
     expect(askBefore({ kind: "key", provider: "openai" }, openai, true)).toEqual({
@@ -217,6 +284,13 @@ describe("askBefore", () => {
     });
     expect(askBefore({ kind: "key", provider: "openai" }, openai, false)).toBeNull();
     expect(askBefore({ kind: "key", provider: "gemini" }, openai, true)).toBeNull();
+  });
+
+  it("always asks before forgetting what the DJ remembers", () => {
+    for (const playing of [true, false]) {
+      expect(askBefore({ kind: "forget" }, status(), playing)).toMatchObject({ confirm: "Forget it", cancel: "Keep it" });
+    }
+    expect(askBefore({ kind: "forget" }, status(), false)?.text).toMatch(/^Forget what your DJ remembers\? /);
   });
 
   it("always asks before removing the DJ's files", () => {
@@ -312,5 +386,29 @@ describe("songWhy", () => {
     expect(songWhy(song(), found({ languages: ["zxx"] }), NOW).found).toEqual(["Instrumental"]);
     expect(songWhy(song(), found({ languages: ["en", "ja", "xx"] }), NOW).found).toEqual(["Sung in Japanese"]);
     expect(songWhy(song(), found({ artist_bio: "   " }), NOW).bio).toBeNull();
+  });
+});
+
+describe("extensionNotes", () => {
+  it("says what each extension tells the DJ, and when it isn't passed on, and the segments they add", () => {
+    const a = { owner: { name: "DJ log" }, text: "Keep it light." };
+    const b = { owner: { name: "Moods" }, text: "Play calm songs." };
+    expect(extensionNotes([a, b], [a], 600)).toEqual([
+      { name: "DJ log", what: "Tells it: “Keep it light.”", note: null },
+      {
+        name: "Moods",
+        what: "Tells it: “Play calm songs.”",
+        note: "Not passed on for now: extensions' instructions can add up to 600 characters in all.",
+      },
+    ]);
+    expect(extensionNotes([], [], 600)).toEqual([]);
+    const short = { owner: { name: "DJ log" }, segment: { label: "Short songs", brief: "songs under three minutes" } };
+    const named = { owner: { name: "Moods" }, segment: { label: "Calm", brief: "Calm" } };
+    expect(extensionNotes([a], [a], 600, [short, named]).map((n) => n.what)).toEqual([
+      "Tells it: “Keep it light.”",
+      "Adds a segment, Short songs: “songs under three minutes”",
+      // A segment told nothing more than its name.
+      "Adds a segment: Calm",
+    ]);
   });
 });

@@ -38,6 +38,10 @@ pub const LLAMA_SERVER: &str = if cfg!(windows) { "llama-server.exe" } else { "l
 pub const TTS_PROGRAM: &str = if cfg!(windows) { "sherpa-onnx-offline-tts.exe" } else { "sherpa-onnx-offline-tts" };
 
 /// The runtimes for an OS and CPU, as `std::env::consts` names them; `None` where there are no prebuilt ones.
+///
+/// On Windows and Linux x64, llama.cpp's Vulkan build: its CPU build and the Vulkan backend beside it, which runs the
+/// model on the graphics card where there's a Vulkan driver, and stays unused where there isn't. Apple silicon's
+/// build has Metal built in; elsewhere there's only the processor.
 pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
     let llm = |file: &'static str, sha256, bytes, pack| Component {
         id: "llama-b11382",
@@ -46,6 +50,11 @@ pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
         sha256,
         bytes,
         pack,
+    };
+    // Its own id: a computer with the CPU build in place downloads this one, and the other is cleared away.
+    let vulkan = |file: &'static str, sha256, bytes, pack| Component {
+        id: "llama-b11382-vulkan",
+        ..llm(file, sha256, bytes, pack)
     };
     let tts = |file: &'static str, sha256, bytes| Component {
         id: "sherpa-onnx-v1.13.8",
@@ -58,10 +67,10 @@ pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
     // URLs are spelled out whole, so each can be checked by eye; the tests hold them to one release each.
     Some(match (os, arch) {
         ("linux", "x86_64") => Runtime {
-            llm: llm(
-                "https://github.com/ggml-org/llama.cpp/releases/download/b11382/llama-b11382-bin-ubuntu-x64.tar.gz",
-                "34407d59947ed4ab35fe4ab2db5f61bb4d5aedfe25e6a72f702f3ae9758a396d",
-                17_669_957,
+            llm: vulkan(
+                "https://github.com/ggml-org/llama.cpp/releases/download/b11382/llama-b11382-bin-ubuntu-vulkan-x64.tar.gz",
+                "f6e5729ca608b980e3f17b28c6497f71c558913b53fa5b1142a3be8fe27f303a",
+                31_614_190,
                 Pack::TarGz,
             ),
             tts: tts(
@@ -111,10 +120,10 @@ pub fn runtime(os: &str, arch: &str) -> Option<Runtime> {
             ),
         },
         ("windows", "x86_64") => Runtime {
-            llm: llm(
-                "https://github.com/ggml-org/llama.cpp/releases/download/b11382/llama-b11382-bin-win-cpu-x64.zip",
-                "40d55282382909be50d27a3e182885860c28ff148e4d952beca7aaad91504051",
-                19_366_882,
+            llm: vulkan(
+                "https://github.com/ggml-org/llama.cpp/releases/download/b11382/llama-b11382-bin-win-vulkan-x64.zip",
+                "5fb6aadc98f85599ff060decd8867e8c1732dd552797913ae6c0295dd4b47482",
+                33_287_292,
                 Pack::Zip,
             ),
             tts: tts(
@@ -219,6 +228,14 @@ impl VoiceKind {
             VoiceKind::Kitten => "kitten",
         }
     }
+
+    /// What Settings calls the voices of this kind's package, which download together.
+    pub fn group(self) -> &'static str {
+        match self {
+            VoiceKind::Kokoro => "Kokoro",
+            VoiceKind::Kitten => "Light",
+        }
+    }
 }
 
 const KOKORO: Component = Component {
@@ -250,14 +267,19 @@ pub struct Voice {
 }
 
 /// Kokoro's English package numbers its speakers af, af_bella, af_nicole, af_sarah, af_sky, am_adam,
-/// am_michael, bf_emma, bf_isabella, bm_george, bm_lewis (0–10); Kitten nano v0.2 alternates m/f voices.
+/// am_michael, bf_emma, bf_isabella, bm_george, bm_lewis (0–10); all but `af`, a blend of two, are offered. Kitten
+/// nano v0.2 alternates m/f voices. Settings lists them in this order, a package's together.
 pub const VOICES: &[Voice] = &[
     Voice { id: "michael", label: "Michael (American)", kind: VoiceKind::Kokoro, sid: 6, component: KOKORO },
     Voice { id: "adam", label: "Adam (American)", kind: VoiceKind::Kokoro, sid: 5, component: KOKORO },
     Voice { id: "bella", label: "Bella (American)", kind: VoiceKind::Kokoro, sid: 1, component: KOKORO },
     Voice { id: "sarah", label: "Sarah (American)", kind: VoiceKind::Kokoro, sid: 3, component: KOKORO },
+    Voice { id: "nicole", label: "Nicole (American)", kind: VoiceKind::Kokoro, sid: 2, component: KOKORO },
+    Voice { id: "sky", label: "Sky (American)", kind: VoiceKind::Kokoro, sid: 4, component: KOKORO },
     Voice { id: "george", label: "George (British)", kind: VoiceKind::Kokoro, sid: 9, component: KOKORO },
+    Voice { id: "lewis", label: "Lewis (British)", kind: VoiceKind::Kokoro, sid: 10, component: KOKORO },
     Voice { id: "emma", label: "Emma (British)", kind: VoiceKind::Kokoro, sid: 7, component: KOKORO },
+    Voice { id: "isabella", label: "Isabella (British)", kind: VoiceKind::Kokoro, sid: 8, component: KOKORO },
     Voice { id: "light-male", label: "Light (male, faster)", kind: VoiceKind::Kitten, sid: 2, component: KITTEN },
     Voice { id: "light-female", label: "Light (female, faster)", kind: VoiceKind::Kitten, sid: 1, component: KITTEN },
 ];
@@ -268,9 +290,10 @@ pub fn voice(id: &str) -> Option<&'static Voice> {
     VOICES.iter().find(|v| v.id == id)
 }
 
-/// Every component id this build knows, on any platform, so stale folders can be told apart.
-pub fn known_ids() -> Vec<&'static str> {
-    let mut ids = vec!["llama-b11382", "sherpa-onnx-v1.13.8"];
+/// The component ids this computer's DJ folder can hold, with `runtime`: anything else there is stale, such as a
+/// runtime another version used.
+pub fn known_ids(runtime: Option<Runtime>) -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = runtime.iter().flat_map(|r| [r.llm.id, r.tts.id]).collect();
     ids.extend(MODELS.iter().map(|m| m.component.id));
     ids.extend(VOICES.iter().map(|v| v.component.id));
     ids.sort_unstable();
@@ -344,7 +367,33 @@ mod tests {
             assert!(!c.id.is_empty());
             assert!(c.id.chars().all(|ch| ch.is_ascii_alphanumeric() || "._-".contains(ch)), "{}", c.id);
             assert!(!c.id.starts_with('.'));
-            assert!(known_ids().contains(&c.id), "{}", c.id);
+        }
+    }
+
+    #[test]
+    fn knows_the_folders_this_computer_can_have_and_no_others() {
+        for (os, arch) in PLATFORMS {
+            let r = runtime(os, arch).unwrap();
+            let known = known_ids(Some(r));
+            let downloads = MODELS.iter().map(|m| m.component).chain(VOICES.iter().map(|v| v.component));
+            for c in [r.llm, r.tts].into_iter().chain(downloads) {
+                assert!(known.contains(&c.id), "{os} {arch}: {}", c.id);
+            }
+        }
+        // The CPU build a Windows or Linux PC had before is cleared away.
+        let linux = known_ids(runtime("linux", "x86_64"));
+        assert!(linux.contains(&"llama-b11382-vulkan") && !linux.contains(&"llama-b11382"), "{linux:?}");
+        assert!(!known_ids(None).iter().any(|id| id.starts_with("llama") || id.starts_with("sherpa")));
+    }
+
+    #[test]
+    fn windows_and_linux_pcs_get_the_runtime_that_can_use_the_graphics_card() {
+        for (os, arch) in PLATFORMS {
+            let llm = runtime(os, arch).unwrap().llm;
+            let vulkan = matches!((*os, *arch), ("linux", "x86_64") | ("windows", "x86_64"));
+            assert_eq!(llm.url.contains("-vulkan-"), vulkan, "{}", llm.url);
+            assert_eq!(llm.id, if vulkan { "llama-b11382-vulkan" } else { "llama-b11382" });
+            assert_eq!(llm.label, "Language model runtime (llama.cpp)");
         }
     }
 
@@ -365,6 +414,22 @@ mod tests {
         let kokoro: Vec<_> = VOICES.iter().filter(|v| v.kind == VoiceKind::Kokoro).collect();
         assert!(kokoro.len() > 1);
         assert!(kokoro.iter().all(|v| v.component == KOKORO));
-        assert_eq!(known_ids().iter().filter(|id| **id == KOKORO.id).count(), 1);
+        assert_eq!(known_ids(None).iter().filter(|id| **id == KOKORO.id).count(), 1);
+    }
+
+    #[test]
+    fn each_voice_is_its_own_speaker_and_a_packages_voices_are_listed_together() {
+        let mut speakers: Vec<_> = VOICES.iter().map(|v| (v.component.id, v.sid)).collect();
+        speakers.sort_unstable();
+        speakers.dedup();
+        assert_eq!(speakers.len(), VOICES.len());
+        // Kokoro's English package has 11 speakers, Kitten nano's 8.
+        assert!(VOICES.iter().all(|v| v.sid <= if v.kind == VoiceKind::Kokoro { 10 } else { 7 }));
+        let groups: Vec<_> = VOICES.iter().map(|v| v.kind.group()).collect();
+        let mut seen = groups.clone();
+        seen.dedup();
+        assert_eq!(seen, ["Kokoro", "Light"]);
+        assert_eq!(voice("lewis").map(|v| v.sid), Some(10));
+        assert_eq!(voice("nicole").map(|v| v.sid), Some(2));
     }
 }

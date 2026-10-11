@@ -10,6 +10,13 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - "How much your DJ talks", in Settings → AI DJ: Brief, Normal or Chatty lines, or Just play, where the music plays
   straight through and what the DJ would say shows only as captions.
 - "What your DJ calls you" and "Use my name", in Settings → AI DJ.
+- "Speaking speed", in Settings → AI DJ: the DJ's voice can talk up to 20% slower or 30% faster.
+- "Hear it", beside the DJ's voice in Settings, plays a short line in that voice at the speed set.
+- The DJ's model runs on the graphics card on Windows and Linux PCs too, as it does on Apple silicon, and goes back to
+  the processor when the card can't run it. "Use the graphics card", in Settings → AI DJ, says where the model runs
+  and can keep it on the processor. On those PCs the DJ downloads its new model runtime once, about 32 MB.
+- Four more voices for the DJ: Nicole and Sky (American), Isabella and Lewis (British). Settings lists the voices by
+  the package they download in, and asks before a voice that has to download first stops the DJ while it plays.
 - Settings asks before a change that stops the DJ while it plays, switching its model or removing the key it uses,
   and before removing the DJ's files.
 - Each of the DJ's songs can say why it's there: what your listening shows, and what the DJ looked up about it.
@@ -17,6 +24,12 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   list. Its "Skip this set" button shows only while the set can be skipped.
 - Songs in the queue panel have the right-click menu songs have elsewhere, and the DJ's item there opens its set's
   menu.
+- Extensions can follow the AI DJ, what it plays and says and what happens while it plays, add entries to the
+  menus of its sets, give it instructions, and add segments of their own from your listening. The DJ page lists
+  what each extension adds.
+- Your DJ remembers, on this computer and for each Spotify account, what it played and what you skipped and liked
+  while it played. With a model on your computer or your own server, it also greets you some other way than it did
+  lately. Settings → AI DJ can forget it.
 
 ### Changed
 
@@ -33,15 +46,36 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   and Chatty, it says why the song is here.
 - A cloud model that writes the DJ more than it asked for is cut to whole sentences, keeping the one that brings in
   the song.
+- Every voice of the DJ's plays at the same loudness. The Light voices were about twice as loud as most Kokoro ones,
+  and Michael, Sky and Lewis a little quieter.
 - The DJ page says which model writes what the DJ says and which voice reads it out, whichever model you use.
+- The DJ reads your top tracks 50 at a time, digs up different old likes each session, and doesn't read your
+  listening again when it's started within half an hour of the last time.
+- When you skip a DJ song, its artist sits out the next two sets, or the rest of the session once you've skipped them
+  twice, instead of always the rest of the session. A song you skip stays out for three weeks. Asking for either by
+  name brings it back.
+- The DJ offers more of what you're likely to want: more by artists you liked while it played, less of what you
+  skipped or it played lately.
+- With "Pick songs as it goes" on, liking a song before a set's last one can run the set a song or two longer when
+  there's more like it, and a set you asked for an artist in can play them back to back. Keeping an artist from
+  playing twice running counts featured artists too.
 - The DJ is in the sidebar while it's off too, so you can find it before turning it on. Its page's "Choose a model
   and voice" opens Settings at the AI DJ, which shows the model and voice to pick before anything downloads.
 - When the DJ's model or voice fails in a way you can fix, the DJ page says so until it's fixed, with a button to the
   DJ's settings, instead of only in a notice that goes away.
 - The DJ page's songs have their covers, artist links, a heart, and the right-click menu songs have elsewhere.
+- The DJ's voice says numbers, symbols and some artists' names the way a host would: "#1" as "number one", 1999 as
+  "nineteen ninety-nine", "the 90s" as "the nineties", "feat." as "featuring", and SZA, A$AP Rocky and P!nk as
+  they're said. The captions still show them as they're written.
 
 ### Fixed
 
+- The DJ's voice no longer stops mid-sentence after an initial or an abbreviation, as in J. Cole or Mr. Brightside,
+  and its captions no longer break there.
+- Headphones that take a moment to wake up no longer cut off the first word of the DJ's lines: it keeps the sound
+  output open while it's on.
+- The DJ's first set no longer starts with the song already in the player. When it did, the DJ couldn't tell its set
+  had begun, and stopped with "The DJ couldn't get its songs playing".
 - In Settings, buttons beside a setting sit side by side instead of stacked, and keep their words on one line.
 - A song's menu opens when two of its artists share a name, or an extension adds an entry named like one of the
   app's own. An extension's entry that fails is left out, or says what went wrong, instead of breaking the menu.
@@ -68,6 +102,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
   provider asks for a longer wait, the DJ says how long.
 - When the DJ looks songs up before picking, every song gets Spotify's facts first, so a slow MusicBrainz no longer
   leaves the last songs with nothing.
+- What the DJ looked up about songs, which it keeps for a month, is no longer thrown away each time it downloads
+  something.
 
 ## 1.3.0 - 2026-10-06
 
