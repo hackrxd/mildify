@@ -97,6 +97,8 @@ pub struct Engine {
     stops: AtomicU64,
     /// `CARD_LOAD_TIMEOUT`, but for tests.
     card_load_timeout: Duration,
+    /// Held while a load chooses where the model runs and loads it there: one waiting on it sees how the card did.
+    choosing: Mutex<()>,
     /// For checking on it: straight to the loopback port, never through a proxy.
     http: reqwest::Client,
     last_used: StdMutex<Option<Instant>>,
@@ -115,6 +117,7 @@ impl Default for Engine {
             next_id: AtomicU64::new(1),
             stops: AtomicU64::new(0),
             card_load_timeout: CARD_LOAD_TIMEOUT,
+            choosing: Mutex::default(),
             http: reqwest::Client::builder().no_proxy().build().unwrap_or_default(),
             last_used: StdMutex::default(),
             card: StdMutex::default(),
@@ -144,6 +147,11 @@ impl Engine {
         card: Option<String>,
         mut spawn: impl FnMut(u16, &str, Device) -> Result<Child>,
     ) -> Result<Target> {
+        let stops = self.stops.load(Ordering::SeqCst);
+        let _one_at_a_time = self.choosing.lock().await;
+        if self.stops.load(Ordering::SeqCst) != stops {
+            return Err(unloaded());
+        }
         self.notice_card_stopped();
         if let Some(name) = card.filter(|_| self.card_failed().is_none()) {
             let on_card = |port: u16, key: &str| spawn(port, key, Device::Gpu);
@@ -867,6 +875,83 @@ mod tests {
         loaded.unwrap();
         assert_eq!(tried, [Device::Gpu]);
         e.stop().await;
+    }
+
+    /// Loads with `run` twice at once, as the DJ's warm-up and its first ask do, starting the server for each device as
+    /// `on` says; the devices it was started on.
+    #[cfg(unix)]
+    async fn run_twice(
+        e: &std::sync::Arc<Engine>,
+        on: impl Fn(Device, u16, &Path) -> Result<Child> + Send + Sync + 'static,
+    ) -> (Result<Target>, Result<Target>, Vec<Device>) {
+        let tried = std::sync::Arc::new(StdMutex::new(Vec::new()));
+        let on = std::sync::Arc::new(on);
+        let load = || {
+            let (e, tried, on) = (e.clone(), tried.clone(), on.clone());
+            tokio::spawn(async move {
+                let log = log_path();
+                e.run(Path::new("/m.gguf"), &log, Some("Card".into()), |port, _, device| {
+                    tried.lock().unwrap().push(device);
+                    on(device, port, &log)
+                })
+                .await
+            })
+        };
+        let (first, second) = (load(), load());
+        let (first, second) =
+            tokio::time::timeout(Duration::from_secs(10), async { (first.await.unwrap(), second.await.unwrap()) })
+                .await
+                .unwrap();
+        let tried = tried.lock().unwrap().clone();
+        (first, second, tried)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn two_loads_at_once_try_a_failing_card_once() {
+        let e = std::sync::Arc::new(Engine::default());
+        let (first, second, tried) = run_twice(&e, |device, port, log| match device {
+            Device::Gpu => failing(log, "ggml_vulkan: device lost"),
+            Device::Cpu => answers_on(port),
+        })
+        .await;
+        assert_eq!(tried, [Device::Gpu, Device::Cpu]);
+        // Both are given the one server the processor runs.
+        assert_eq!(first.unwrap().url, second.unwrap().url);
+        e.stop().await;
+        let e = std::sync::Arc::new(Engine { card_load_timeout: Duration::from_millis(600), ..Engine::default() });
+        let (_, _, tried) = run_twice(&e, |device, port, _| match device {
+            Device::Gpu => sleeper(),
+            Device::Cpu => answers_on(port),
+        })
+        .await;
+        assert_eq!(tried, [Device::Gpu, Device::Cpu]);
+        e.stop().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_load_waiting_for_another_gives_up_when_the_model_is_stopped() {
+        let e = std::sync::Arc::new(Engine::default());
+        let started = std::sync::Arc::new(StdMutex::new(0));
+        let load = || {
+            let (e, started) = (e.clone(), started.clone());
+            tokio::spawn(async move {
+                e.run(Path::new("/m.gguf"), &log_path(), None, |_, _, _| {
+                    *started.lock().unwrap() += 1;
+                    sleeper()
+                })
+                .await
+            })
+        };
+        let (first, waiting) = (load(), load());
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        e.stop().await;
+        for load in [first, waiting] {
+            let err = tokio::time::timeout(Duration::from_secs(2), load).await.unwrap().unwrap().unwrap_err();
+            assert!(err.to_string().contains("unloaded before it finished loading"), "{err}");
+        }
+        assert_eq!(*started.lock().unwrap(), 1);
     }
 
     #[cfg(unix)]
