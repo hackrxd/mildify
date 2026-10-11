@@ -48,7 +48,8 @@ import { DjMemory, load, persist, PLAYED_MEMORY_MS, type SetNote } from "./djMem
 import { djExtensions } from "./djExtensions.svelte";
 import { cue, HandOver, runCues, type Cue, type Hold } from "./djHandOver";
 import { Mixer } from "./djMixer";
-import { askModel, GaveUp, songVocals, type ModelRound } from "./djPicker";
+import { GaveUp } from "./djNext";
+import { askModel, songVocals, type ModelRound } from "./djPicker";
 import { SessionTaste } from "./djTaste";
 import { modelNote, previewLine, voiceNote } from "./djView";
 import { Voice, type Spoken } from "./djVoice";
