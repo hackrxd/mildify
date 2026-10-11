@@ -2019,6 +2019,26 @@ describe("between sets", () => {
     expect(sp.addToQueue.mock.calls.map((c) => c[0])).toEqual([...next.songs, ...after.songs].map((s) => s.uri));
   });
 
+  it("still queues the rest of a set skipped into while it's queueing when the set after it is asked for again", async () => {
+    const first = await started();
+    const next = dj.upNext!;
+    let release!: () => void;
+    sp.addToQueue.mockImplementationOnce(() => new Promise((r) => (release = () => r(null))));
+    await lastSong(first);
+    await playing(next.songs[0].uri, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    const after = dj.upNext!;
+    expect(after).not.toBeNull();
+    backend.device.mockClear();
+    await askAgain();
+    expect(dj.upNext).not.toBe(after);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    // Only the set let go of comes out of the queue: none of it was in there.
+    expect(backend.device).not.toHaveBeenCalledWith({ action: "clear_queue" });
+    expect(sp.addToQueue.mock.calls.map((c) => c[0])).toEqual(next.songs.map((s) => s.uri));
+  });
+
   it("renews the turned-down music while the DJ is paused, and times the silence at a song's end again", async () => {
     speechMs = 20_000;
     backend.lyrics.mockImplementation(async () => sync(3000, DURATION - 4000));

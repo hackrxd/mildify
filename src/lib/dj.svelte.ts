@@ -1932,9 +1932,9 @@ class Dj {
   }
 
   /** Takes the next set back out of the player's queue: what's on its way stops, and what made it in comes out
-   * before anything else is queued. */
+   * before anything else is queued. The rest of a set the listener skipped into while it was queued still goes. */
   #unqueue() {
-    this.#queueFor = null;
+    if (this.#queueFor === this.upNext) this.#queueFor = null;
     if (this.#queued !== "no" && player.isLocal) {
       this.#queuing = this.#queuing.then(() => backend.device({ action: "clear_queue" }).then(() => {}, () => {}));
     }
