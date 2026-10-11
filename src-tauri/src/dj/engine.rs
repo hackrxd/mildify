@@ -200,14 +200,14 @@ impl Engine {
     }
 
     /// The graphics card `server` would run the model on, by name: asked once (`--list-devices`), and none when it
-    /// finds none it can use.
+    /// finds none it can use. A listing that couldn't be had is asked for again next time.
     async fn card(&self, server: &Path) -> Option<String> {
         if let Some((asked, card)) = self.card.lock().unwrap().as_ref() {
             if asked == server {
                 return card.clone();
             }
         }
-        let card = list_devices(server).await.and_then(|said| first_card(&said));
+        let card = first_card(&list_devices(server).await?);
         log::info!("DJ: the model's runtime can use {}", card.as_deref().unwrap_or("no graphics card"));
         *self.card.lock().unwrap() = Some((server.to_owned(), card.clone()));
         card
@@ -228,6 +228,7 @@ impl Engine {
     pub fn reset_device(&self) {
         *self.card_failed.lock().unwrap() = None;
         *self.runs_on.lock().unwrap() = None;
+        *self.card.lock().unwrap() = None;
     }
 
     /// The server for `model` on `device`, loaded. One still loading for it, which its caller stopped waiting for, is
@@ -1098,9 +1099,22 @@ printf 'Available devices:\n  Vulkan0: Test Card (100 MiB, 90 MiB free)\n'
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(card.as_deref(), Some("Test Card"));
-        let asked = std::fs::read_to_string(dir.join("asked")).unwrap().lines().count();
+        let asked = || std::fs::read_to_string(dir.join("asked")).unwrap().lines().count();
+        let before = asked();
         assert_eq!(e.card(&server).await.as_deref(), Some("Test Card"));
-        assert_eq!(std::fs::read_to_string(dir.join("asked")).unwrap().lines().count(), asked, "asked again");
+        assert_eq!(asked(), before, "asked again");
+        // Asked anew once the device is chosen again.
+        e.reset_device();
+        assert_eq!(e.card(&server).await.as_deref(), Some("Test Card"));
+        assert_eq!(asked(), before + 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn asks_again_when_the_runtime_couldnt_be_asked() {
+        let e = Engine::default();
+        let missing = std::env::temp_dir().join(format!("mildify-engine-{}/llama-server", crate::config::random_hex(8)));
+        assert_eq!(e.card(&missing).await, None);
+        assert!(e.card.lock().unwrap().is_none(), "a listing that couldn't be had was kept");
     }
 }
