@@ -209,6 +209,9 @@ extension, and the DJ page says so on each of their sets.
 `ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
 play something else, use `ns.player`: the DJ steps out when other music plays.
 
+[DJ log](mods/extensions/dj-log.js) uses all of it: a page that logs what the DJ does, a Short songs segment,
+a line of instructions and an entry in each set's menu.
+
 ## When something breaks
 
 If a theme or extension leaves the app unusable, start it once with `--safe-mode`: no theme,
