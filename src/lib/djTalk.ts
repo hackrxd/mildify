@@ -148,10 +148,11 @@ export function cut(text: string, max: number): string {
   return text.slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
 }
 
-/** Someone else's words, cut to `max` and set between triple quotes they can't close: any run of quote marks
- * in them becomes one. Nothing when there's nothing but space and quote marks. */
+/** Someone else's words, cut to `max` and set between triple quotes they can't close: any run of quote marks in them
+ * becomes one, with no invisible characters (zero-width spaces, …) left to space them apart. Nothing when there's
+ * nothing but space and quote marks. */
 export function fence(text: string, max: number): string[] {
-  const inside = cut(text.trim(), max).replace(/"{2,}/g, '"').trim();
+  const inside = cut(text.replace(/\p{Cf}/gu, "").trim(), max).replace(/"{2,}/g, '"').trim();
   return inside.replace(/"/g, "").trim() ? ['"""', inside, '"""'] : [];
 }
 

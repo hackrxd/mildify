@@ -196,6 +196,9 @@ describe("segmentMessages", () => {
     expect(fence('  ""  ', 10)).toEqual([]);
     expect(fence("calm", 10)).toEqual(['"""', "calm", '"""']);
     expect(fence('a""b', 10)).toEqual(['"""', 'a"b', '"""']);
+    // Invisible characters can't keep quote marks apart, or be all there is.
+    expect(fence('a"\u200B"\u2060"b', 10)).toEqual(['"""', 'a"b', '"""']);
+    expect(fence('\u200B"\uFEFF', 10)).toEqual([]);
   });
 
   it("cuts text without leaving half a character, which the backend would turn away", () => {
