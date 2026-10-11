@@ -396,6 +396,35 @@ describe("extensions", () => {
     expect(setMenu(set).map((i) => i.label)).not.toContain("Log this set");
   });
 
+  it("the DJ log example works with the API, and leaves nothing behind", async () => {
+    list.extensions = [mod("dj-log.js")];
+    localStorage.setItem("nativify:extensions", '["dj-log.js"]');
+    // Plain JavaScript, as extensions are: run here, not type-checked.
+    const example = "../../docs/mods/extensions/dj-log.js";
+    modules["dj-log.js"] = await import(/* @vite-ignore */ example);
+    await boot();
+    await mods.startExtensions();
+    expect(mods.states["dj-log.js"]).toBe("on");
+    const { djExtensions } = await import("./djExtensions.svelte");
+    expect(djExtensions.segments.map((x) => x.segment.label)).toEqual(["Short songs"]);
+    expect(djExtensions.instructions.map((x) => x.text)).toEqual(["Keep your lines short and upbeat."]);
+    const el = document.createElement("div");
+    const close = mods.page("dj-log.js/log")!.render(el);
+    flushSync();
+    expect(el.textContent).toContain("Nothing yet");
+    const song = { uri: "spotify:track:1", name: "Song 1", artists: ["Artist 1"], album: "", year: null, durationMs: 1, explicit: false, reasons: [], likedAt: null, playedAt: null };
+    for (const fn of djListeners) fn({ type: "song-skipped", song });
+    await Promise.resolve();
+    expect(el.textContent).toContain("You skipped Song 1 by Artist 1");
+    if (typeof close === "function") close();
+
+    await mods.setEnabled("dj-log.js", false);
+    expect(mods.pages).toEqual([]);
+    expect(djExtensions.segments).toEqual([]);
+    expect(djExtensions.instructions).toEqual([]);
+    expect(djListeners.size).toBe(0);
+  });
+
   it("removers returned by the API only run once", async () => {
     list.extensions = [mod("a.js")];
     localStorage.setItem("nativify:extensions", '["a.js"]');
