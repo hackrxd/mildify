@@ -128,6 +128,10 @@ describe("NextSet", () => {
     next.wait(new Promise<string>(() => {}), 10_000).catch(() => {});
     next.reset();
     expect(heard).toEqual([true, false, true, false]);
+    // A pick let go of has no wait to cut short any more.
+    next.wait(new Promise<string>(() => {}), 10_000).catch(() => {});
+    next.letGo();
+    expect(next.waiting).toBe(false);
   });
 
   it("starts afresh: what was being picked is let go of, and no wait can be hurried", async () => {

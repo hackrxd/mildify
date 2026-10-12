@@ -57,10 +57,12 @@ export class NextSet {
     });
   }
 
-  /** Lets go of the pick under way: whatever it comes to is dropped. */
+  /** Lets go of the pick under way: whatever it comes to is dropped, and its wait for the model isn't one to cut
+   * short any more. */
   letGo() {
     this.#gen++;
     this.#picking = null;
+    this.#rush = null;
   }
 
   /** Waits for the model's `answer`, up to `timeoutMs`, or until `hurry`: then with `GaveUp`. A newer wait takes the
