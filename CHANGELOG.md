@@ -16,6 +16,8 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - You can tell your DJ what you have in mind for its first set as you start it, and ask for the next set while it's
   still getting ready.
 - While the DJ talks, the DJ page's skip button skips the talk instead of disappearing.
+- Extensions can ask your DJ for its next set, as you can. Your own request always comes first, and the DJ page says
+  which extension asked.
 
 ### Fixed
 
