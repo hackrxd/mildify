@@ -223,15 +223,16 @@ even after a like. The DJ page lists each segment with its brief, and marks the 
 
 `ns.dj.request(text)` asks for the next set, as the listener can on the DJ page, and returns whether it was taken:
 
-- Only while the DJ is on and nothing else is asked for. The listener's own request takes the place of one, and
-  another extension's waits its turn.
+- Only while the DJ is on or getting ready, and nothing else is asked for: it returns false while the listener's
+  request or another extension's is waiting, and never takes the place of a set picked for the listener's request.
+  The listener's own request takes the place of an extension's.
 - It takes the place of a next set the DJ hasn't started to bring in; once it has, it's for the set after.
 - The model hears that an extension the listener turned on asked for it, with the words fenced off as the
   listener's are, and up to 200 characters of them. It isn't told to say it's the listener's request, and a
   template doesn't either. Without the model, the DJ plays only songs the request names.
 - The DJ page says which extension asked. The listener's **Never mind** takes it back, and so does
   `ns.dj.cancelRequest()`, which takes back only the extension's own. Turning the extension off takes back a
-  request it hasn't had played.
+  request no set has been picked for yet; a set already picked for it plays as it was picked.
 
 `ns.dj` doesn't offer the DJ's settings or keys, what went wrong with its model, or a way to start or stop it. To
 play something else, use `ns.player`: the DJ steps out when other music plays.
