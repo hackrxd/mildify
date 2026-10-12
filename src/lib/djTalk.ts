@@ -126,6 +126,8 @@ export interface SegmentAsk {
   lookedUp?: string[];
   /** What the listener asked for this set. */
   request?: string;
+  /** The extension that asked for it instead, by name. */
+  requestBy?: string;
   /** The set the listener skipped the rest of since the last prompt, by name. */
   skippedSet?: string;
   /** The DJ picks the set's songs after the first as it goes. */
@@ -261,7 +263,7 @@ const ANGLES: Record<Angle, { applies: (ask: SegmentAsk) => boolean; line: strin
   // Not out of a set the listener skipped: the show goes somewhere else.
   bridge: { applies: (ask) => !!ask.previous && !ask.skippedSet, line: "Lead with a link from the song that's ending to the first song." },
   moment: { applies: () => true, line: "Lead with the moment: the time of day, or the day of the week." },
-  request: { applies: (ask) => !!ask.request?.trim(), line: "Lead with what they asked for." },
+  request: { applies: (ask) => !!ask.request?.trim() && !ask.requestBy, line: "Lead with what they asked for." },
 };
 
 /** How a set's line starts: one that fits the set, and neither of the last two used. None at the opening, which
@@ -314,7 +316,13 @@ function situation(ask: SegmentAsk, opening: boolean, now: Date): string[] {
   where.push(...reactionLines(ask.reactions));
   if (ask.angle) where.push(ANGLES[ask.angle].line);
   const request = fence(ask.request ?? "", REQUEST_MAX);
-  if (request.length) {
+  if (request.length && ask.requestBy) {
+    where.push(
+      "An extension the listener turned on asked for this set:",
+      ...request,
+      "Pick the songs that fit it best. If none really do, pick the closest.",
+    );
+  } else if (request.length) {
     where.push(
       "The listener asked for this set:",
       ...request,
