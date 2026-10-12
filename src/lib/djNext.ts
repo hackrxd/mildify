@@ -2,14 +2,38 @@
 // request, a skipped set), with the wait for the model cut short when the music can't wait for it; then put in the
 // player's queue after the last song of the set playing.
 
-/** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. */
-export class GaveUp extends Error {}
+/** The DJ stopped waiting for its model: too slow, or the music couldn't wait. Not something to fix. `why` says so to
+ * the listener when it isn't that the model was too slow. */
+export class GaveUp extends Error {
+  constructor(
+    message: string,
+    readonly why?: string,
+  ) {
+    super(message);
+  }
+}
 
 /** The next set being picked, if any, and the wait for the model. */
 export class NextSet {
   #gen = 0;
   #picking: Promise<void> | null = null;
-  #rush: (() => void) | null = null;
+  #rushing: ((why?: string) => void) | null = null;
+  readonly #onWaiting: (waiting: boolean) => void;
+
+  /** `onWaiting` hears whenever a wait for the model can, or no longer can, be cut short. */
+  constructor(onWaiting: (waiting: boolean) => void = () => {}) {
+    this.#onWaiting = onWaiting;
+  }
+
+  get #rush(): ((why?: string) => void) | null {
+    return this.#rushing;
+  }
+
+  set #rush(rush: ((why?: string) => void) | null) {
+    const was = this.#rushing !== null;
+    this.#rushing = rush;
+    if (was !== (rush !== null)) this.#onWaiting(rush !== null);
+  }
 
   /** A pick under way. */
   get picking(): boolean {
@@ -33,29 +57,34 @@ export class NextSet {
     });
   }
 
-  /** Lets go of the pick under way: whatever it comes to is dropped. */
+  /** Lets go of the pick under way: whatever it comes to is dropped, and its wait for the model isn't one to cut
+   * short any more. */
   letGo() {
     this.#gen++;
     this.#picking = null;
+    this.#rush = null;
   }
 
   /** Waits for the model's `answer`, up to `timeoutMs`, or until `hurry`: then with `GaveUp`. A newer wait takes the
    * hurry over. */
   wait<T>(answer: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const t = setTimeout(() => reject(new GaveUp("the model took too long")), timeoutMs);
-      const rush = () => reject(new GaveUp("the music can't wait"));
-      this.#rush = rush;
-      answer.then(resolve, reject).finally(() => {
+      // Over once given up on, or answered: there's nothing more to cut short.
+      const over = () => {
         clearTimeout(t);
         if (this.#rush === rush) this.#rush = null;
-      });
+      };
+      const t = setTimeout(() => (over(), reject(new GaveUp("the model took too long"))), timeoutMs);
+      const rush = (why?: string) => (over(), reject(new GaveUp("the music can't wait", why)));
+      this.#rush = rush;
+      answer.then(resolve, reject).finally(over);
     });
   }
 
-  /** The music can't wait: the model isn't waited for any longer, and the set comes from a template. */
-  hurry() {
-    this.#rush?.();
+  /** The music can't wait: the model isn't waited for any longer, and the set comes from a template. `why` tells the
+   * listener, when it's for them to know (they didn't want to wait). */
+  hurry(why?: string) {
+    this.#rush?.(why);
   }
 
   /** The session stopped: nothing picked or waited for, for the next one to start from. */

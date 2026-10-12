@@ -9,6 +9,7 @@
   import { dj } from "../lib/dj.svelte";
   import DeckLyric from "./DeckLyric.svelte";
   import DjCaption from "./DjCaption.svelte";
+  import DjControls from "./DjControls.svelte";
   import DjCover from "./DjCover.svelte";
   import DevicePicker from "./DevicePicker.svelte";
   import Icon from "./Icon.svelte";
@@ -151,11 +152,7 @@
   </div>
 
   <div class="extras">
-    {#if dj.phase !== "off" && !air}
-      <button class="dj-chip" class:busy={dj.phase === "starting"} onclick={() => router.go({ name: "dj" })} title="Your DJ">
-        <Icon name="dj" size={14} /><span>{dj.current?.name ?? dj.upNext?.name ?? "DJ"}</span>
-      </button>
-    {/if}
+    {#if dj.phase !== "off"}<DjControls />{/if}
     {#if player.deviceId && !player.isLocal}
       <span class="remote" title="Playing on another device">
         <Icon name="speaker" size={14} />{player.deviceName}
@@ -383,36 +380,5 @@
   .volume {
     width: 110px;
     flex: none;
-  }
-  /* The DJ is on: its segment, a click from the DJ page. */
-  .dj-chip {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 180px;
-    height: 26px;
-    margin-right: 6px;
-    padding: 0 10px;
-    border-radius: 13px;
-    background: color-mix(in srgb, var(--highlight) 16%, transparent);
-    color: var(--highlight);
-    font-size: var(--t-xs);
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .dj-chip span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .dj-chip :global(svg) {
-    flex: none;
-  }
-  .dj-chip.busy {
-    animation: breathe 1.6s ease-in-out infinite;
-  }
-  @keyframes breathe {
-    50% {
-      opacity: 0.55;
-    }
   }
 </style>

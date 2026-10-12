@@ -1,6 +1,8 @@
 <script lang="ts">
   import { flip } from "svelte/animate";
   import { cubicOut } from "svelte/easing";
+  import DjAsk from "../components/DjAsk.svelte";
+  import DjGettingReady from "../components/DjGettingReady.svelte";
   import DjSongs from "../components/DjSongs.svelte";
   import Icon from "../components/Icon.svelte";
   import OnAirLamp from "../components/OnAirLamp.svelte";
@@ -9,7 +11,7 @@
   import { REQUEST_MAX } from "../lib/djPicks";
   import { INSTRUCTIONS_MAX } from "../lib/djTalk";
   import { setMenu } from "../lib/djMenu";
-  import { djLead, extensionNotes, offNote, providerName, troubleNotes } from "../lib/djView";
+  import { djLead, extensionNotes, offNote, providerName, stageText, troubleNotes } from "../lib/djView";
   import { contextMenu, menu } from "../lib/menu.svelte";
   import { reducedMotion, rise } from "../lib/motion";
   import { router } from "../lib/router.svelte";
@@ -28,12 +30,8 @@
   const share = $derived(install?.running && install.total ? Math.min(1, install.received / install.total) : null);
   const said = $derived([...dj.said].reverse());
   const ready = $derived(!!status?.supported && dj.enabled && !missing.length && !status.setup);
-  let request = $state("");
-  function ask() {
-    if (!request.trim()) return;
-    dj.request(request);
-    request = "";
-  }
+  /** What the listener has in mind for the first set, if anything. */
+  let startWith = $state("");
   /** What's wrong with the DJ's model or voice, until it's fixed; it plays on all the same. */
   const troubles = $derived(
     troubleNotes({ model: dj.modelTrouble, voice: dj.voiceTrouble, talk: dj.talk, playing: dj.phase !== "off" }),
@@ -152,9 +150,26 @@
         {:else}
           <section class="card start" in:rise>
             {#if dj.phase === "off"}
-              <button class="btn primary big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.start()}>
-                <Icon name="play" size={18} /> Start the DJ
-              </button>
+              <form
+                class="start-form"
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  void dj.start(startWith);
+                  // Kept when it didn't start (not ready, no player), for another try.
+                  if (dj.phase !== "off") startWith = "";
+                }}
+              >
+                <input
+                  class="field"
+                  aria-label="Start with something in mind (optional)"
+                  maxlength={REQUEST_MAX}
+                  placeholder="Something in mind? A mood, an artist, a decade…"
+                  bind:value={startWith}
+                />
+                <button class="btn primary big" type="submit" in:rise={{ y: 4, scale: 0.96, duration: 300 }}>
+                  <Icon name="play" size={18} /> Start the DJ
+                </button>
+              </form>
               <p class="muted small" in:rise={{ y: 4, delay: 60, duration: 300 }}>
                 It plays on this computer, and talks over the ends and starts of songs, never over the singing.
               </p>
@@ -162,28 +177,16 @@
               <button class="btn quiet big" in:rise={{ y: 4, scale: 0.96, duration: 300 }} onclick={() => dj.stop()}>
                 <Icon name="close" size={18} /> Stop the DJ
               </button>
-              {#if dj.activity}{#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}{/if}
-              {#if dj.phase === "on"}
-                <form class="ask" onsubmit={(e) => (e.preventDefault(), ask())}>
-                  <label class="muted small" for="dj-request">Ask for the next set</label>
-                  <div class="ask-row">
-                    <input
-                      id="dj-request"
-                      class="field"
-                      maxlength={REQUEST_MAX}
-                      placeholder="Something upbeat, more Radiohead, the 90s…"
-                      bind:value={request}
-                    />
-                    <button class="btn primary" type="submit" disabled={!request.trim()}>Ask</button>
-                  </div>
-                </form>
-                {#if dj.requested}
-                  <p class="small requested" in:rise={{ y: 4, duration: 240 }}>
-                    Your request is next: “{dj.requested}”
-                    <button class="link" onclick={() => dj.cancelRequest()}>Never mind</button>
-                  </p>
+              {#if dj.phase === "starting"}
+                <DjGettingReady />
+              {:else if dj.activity}
+                {#key dj.activity}<p class="muted small busy">{dj.activity}</p>{/key}
+                {#if dj.stage}<p class="muted small">{stageText(dj.stage)}</p>{/if}
+                {#if dj.musicWaits && dj.canHurry}
+                  <button class="btn quiet" onclick={() => dj.hurry()}>Play now with a short intro</button>
                 {/if}
               {/if}
+              <DjAsk />
             {/if}
           </section>
         {/if}
@@ -202,7 +205,13 @@
             {b.set.name}
           </h2>
           <span class="set-actions">
-            {#if now && dj.canSkipSet(b.set)}
+            {#if now && dj.onAir}
+              <button class="btn quiet" title="Bring the next song in now." onclick={() => dj.skipTalk()}>
+                <Icon name="next" size={16} /> Skip the talk
+              </button>
+            {:else if now && dj.skippingSet}
+              <button class="btn quiet" disabled><Icon name="next" size={16} /> Picking something else…</button>
+            {:else if now && dj.canSkipSet(b.set)}
               <button class="btn quiet" title="Not feeling it? Go on to the next set." onclick={() => dj.skipSet()}>
                 <Icon name="next" size={16} /> Skip this set
               </button>
@@ -219,7 +228,11 @@
             </button>
           </span>
         </div>
-        {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
+        {#if b.set.request}
+          <p class="muted small request-note">
+            {b.set.requestBy ? `Asked for by ${b.set.requestBy.name}` : "Your request"}: “{b.set.request}”
+          </p>
+        {/if}
         {#if b.set.from}<p class="muted small request-note">A segment from {b.set.from}</p>{/if}
         <DjSongs set={b.set} />
         {#if b.set.live}
@@ -392,26 +405,17 @@
   .request-note {
     padding: 0 10px;
   }
-  .ask {
-    display: grid;
-    gap: 6px;
-    width: 100%;
-    max-width: 520px;
-    margin-top: 6px;
-  }
-  .ask-row {
-    display: flex;
-    gap: 8px;
-  }
-  .ask-row .field {
-    flex: 1;
-    min-width: 0;
-  }
-  .requested {
+  .start-form {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+  }
+  .start-form .field {
+    flex: 1;
+    min-width: 220px;
+    max-width: 380px;
   }
   .said {
     display: grid;

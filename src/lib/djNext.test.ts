@@ -80,6 +80,8 @@ describe("NextSet", () => {
     const e = await caught;
     expect(e).toBeInstanceOf(GaveUp);
     expect((e as Error).message).toBe("the model took too long");
+    // Over: nothing left to cut short, though the answer may yet come.
+    expect(next.waiting).toBe(false);
   });
 
   it("stops waiting when hurried, and only while it waits", async () => {
@@ -109,6 +111,29 @@ describe("NextSet", () => {
     expect(next.waiting).toBe(true);
     next.hurry();
     expect(await newerWait).toBeInstanceOf(GaveUp);
+  });
+
+  it("says when a wait can be cut short, and when it no longer can, with why it was", async () => {
+    const heard: boolean[] = [];
+    const next = new NextSet((waiting) => heard.push(waiting));
+    const answer = deferred<string>();
+    const first = next.wait(answer.promise, 10_000);
+    // A newer wait while one is under way: still waiting, nothing new to say.
+    const second = next.wait(new Promise<string>(() => {}), 10_000).catch((e: unknown) => e);
+    answer.resolve("answer");
+    await first;
+    expect(heard).toEqual([true]);
+    next.hurry("you didn't want to wait");
+    const e = (await second) as InstanceType<typeof GaveUp>;
+    expect(e.why).toBe("you didn't want to wait");
+    expect(heard).toEqual([true, false]);
+    next.wait(new Promise<string>(() => {}), 10_000).catch(() => {});
+    next.reset();
+    expect(heard).toEqual([true, false, true, false]);
+    // A pick let go of has no wait to cut short any more.
+    next.wait(new Promise<string>(() => {}), 10_000).catch(() => {});
+    next.letGo();
+    expect(next.waiting).toBe(false);
   });
 
   it("starts afresh: what was being picked is let go of, and no wait can be hurried", async () => {

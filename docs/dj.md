@@ -163,6 +163,12 @@ from a template, and why. When the model fails in a way you can fix, such as a c
 your account running out of credit, the DJ says so once and plays on from templates. Removing the key the DJ is
 using stops it.
 
+While it gets its first set ready, the DJ page ticks off each step: reading your listening, loading its model (on
+your computer), looking songs up (with a model that does), writing what to say and recording its voice. A slow
+model gets 2½ minutes for the first set; after 15 seconds the page offers **Start now with a short intro**, which
+starts at once from a template. Later, when the music is waiting for the next set, **Play now with a short intro**
+does the same.
+
 The DJ page keeps saying what's wrong with the model or the voice until it's fixed, with a button to the DJ's
 settings, and through stopping and starting again. The model's note goes once the model answers again, or after you
 change its model, server or key; the voice's once a line plays through, or after you pick another voice. A change
@@ -176,12 +182,14 @@ another device. Songs it already added to Spotify's queue stay there; Spotify ha
 
 ## Asking for a set, and skipping one
 
-While the DJ is on, **Ask for the next set** on the DJ page takes a request in your own words: "something
+Beside **Start the DJ**, you can say what you have in mind for its first set. Once it's going, **Ask for the next
+set** on the DJ page takes a request in your own words: "something
 upbeat", "more Radiohead", "the 90s", "songs for a rainy evening". The DJ offers its model the songs from your
 listening that the request names (by artist, album, title, decade or year: "U2", "the eighties", "2012") first, then a spread of the rest for it to
 judge a mood or genre by, and the set it picks says it's your request. If the next set is already picked but not yet
-introduced, the request takes its place; once its introduction has started, the request is the set after it. Never
-mind takes a request back.
+introduced, the request takes its place; once its introduction has started, the request is the set after it. A
+request made while the DJ gets its first set ready is for that set if it hasn't started writing it yet, in place of
+anything you started it with, and for the set after it otherwise. Never mind takes a request back.
 
 Things a request says to leave out stay out: "anything but Drake", "no more 80s", "no Drake, but Future". A "but"
 can turn the other way too: "Drake but also Future", "nothing but Radiohead". When the
@@ -191,8 +199,12 @@ ordinary set while your request waits for the next one.
 **Skip this set**, beside the set playing, stops the music and has the model pick the next set again, from the song
 you skipped: it hears that you skipped the set, so it goes somewhere else. The music waits up to 8 seconds for it
 before the DJ talks from a template. A next set whose introduction has already started plays as it is. Leaving the
-set doesn't count as skipping the song that was playing. The button shows only while the set can be skipped: not
-while the DJ talks or brings the next set in, nor while the music plays on another device.
+set doesn't count as skipping the song that was playing. While the DJ talks, the button is **Skip the talk**, which
+brings the next song in now; while the music waits for a set picked again, it says so. It's missing while the DJ
+brings the next set in, and while the music plays on another device.
+
+Wherever you are in the app, the DJ's chip in the player bar opens its controls: what's on and what's up next,
+**Skip this set** or **Skip the talk**, asking for the next set, **Stop the DJ**, and the way to the DJ page.
 
 Each set's **…** button, or a right-click on its name, opens its menu: **Skip this set** for the set playing, and
 **Copy the song list**, which copies the set's name and its songs, numbered, to paste anywhere.

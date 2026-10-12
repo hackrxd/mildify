@@ -350,7 +350,17 @@ export const REQUEST_MAX = 200;
 export const REQUEST_CHOICES = 20;
 
 /** A set the listener asked for. */
-export function requestSegment(request: string): Segment {
+export function requestSegment(request: string, byExtension = false): Segment {
+  // An extension's request isn't the listener's to be told they asked for.
+  if (byExtension) {
+    return {
+      id: "request",
+      label: "A request",
+      brief: "a set an extension the listener turned on asked for, in its words below",
+      phrase: "a set picked on request",
+      fits: () => true,
+    };
+  }
   return {
     id: "request",
     label: "Your request",

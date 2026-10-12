@@ -592,6 +592,117 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.requested).toBe("something calm");
   });
 
+  it("picks its first set for what the listener asked for as it starts", async () => {
+    player.isPlaying = false;
+    await dj.start("  something calm  ");
+    const first = dj.upNext!;
+    expect(first.segment).toBe("request");
+    expect(first.request).toBe("something calm");
+    expect((backend.djGenerate.mock.calls[0] as unknown as [{ content: string }[]])[0][1].content).toContain('"""\nsomething calm\n"""');
+  });
+
+  it("takes a request made while it gets its first set ready for the set after it", async () => {
+    player.isPlaying = false;
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    dj.request("more Radiohead");
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
+    await starting;
+    expect(dj.upNext?.request ?? null).toBeNull();
+    expect(dj.requested).toBe("more Radiohead");
+  });
+
+  it("says when the music waits for a set picked again after a skip", async () => {
+    await started();
+    expect(dj.skippingSet).toBe(false);
+    backend.djGenerate.mockImplementationOnce(() => new Promise(() => {}));
+    await dj.skipSet();
+    expect(dj.skippingSet).toBe(true);
+    expect(dj.musicWaits).toBe(true);
+  });
+
+  it("picks a set an extension asks for, told it's the extension's, until the listener asks for something", async () => {
+    const timer = { id: "focus.js", name: "Focus timer" };
+    await started();
+    const old = dj.upNext!;
+    expect(dj.request("songs for focus", timer)).toBe(true);
+    expect(dj.requestedBy).toEqual(timer);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext).not.toBe(old);
+    expect(dj.upNext?.requestBy).toEqual(timer);
+    expect(lastPrompt()[1].content).toContain('An extension the listener turned on asked for this set:\n"""\nsongs for focus\n"""');
+    expect(lastPrompt()[1].content).not.toContain("a set the listener asked for");
+    // Another extension is turned away while it's asked for; the listener isn't.
+    expect(dj.request("something loud", { id: "loud.js", name: "Loud" })).toBe(false);
+    expect(dj.request("something calm")).toBe(true);
+    expect(dj.requestedBy).toBeNull();
+    expect(dj.request("songs for focus", timer)).toBe(false);
+    expect(dj.requested).toBe("something calm");
+  });
+
+  it("doesn't let an extension's request take the place of a set the listener asked for", async () => {
+    await started();
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("something calm");
+    // Never mind takes the request back; the set picked for it stays, and an extension can't push it out.
+    dj.cancelRequest();
+    expect(dj.request("songs for focus", { id: "focus.js", name: "Focus timer" })).toBe(false);
+    expect(dj.upNext?.request).toBe("something calm");
+  });
+
+  it("leaves how far picking has got to the pick that's wanted", async () => {
+    await started();
+    // The next set is picked again while the one before it is still being written: that one's answer comes late.
+    const answers: ((v: unknown) => void)[] = [];
+    backend.djGenerate.mockImplementation(() => new Promise((r) => answers.push(r)));
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    dj.request("more Radiohead");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    expect(dj.canHurry).toBe(true);
+    answers[0]({ name: "Late", songs: [1, 2, 3], talk: "This one's late." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+  });
+
+  it("lets an extension take back only its own request", async () => {
+    const timer = { id: "focus.js", name: "Focus timer" };
+    await started();
+    dj.request("songs for focus", timer);
+    dj.cancelRequest({ id: "loud.js", name: "Loud" });
+    expect(dj.requested).toBe("songs for focus");
+    dj.cancelRequest(timer);
+    expect(dj.requested).toBeNull();
+    dj.request("something calm");
+    dj.cancelRequest(timer);
+    expect(dj.requested).toBe("something calm");
+    // The listener's Never mind takes back whoever's it is.
+    dj.cancelRequest();
+    expect(dj.requested).toBeNull();
+  });
+
+  it("doesn't say an extension's request is the listener's when it talks from a template", async () => {
+    const radiohead = (n: number) => ({ ...song(n), artists: [{ id: "rh", name: "Radiohead", uri: "spotify:artist:rh" }] });
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items: range === "short_term" && offset === 0 ? Array.from({ length: 18 }, (_, i) => (i >= 12 ? radiohead(i + 1) : song(i + 1))) : [],
+      next: null,
+      total: 18,
+      offset,
+      limit: 20,
+    }));
+    await started();
+    backend.djGenerate.mockRejectedValue({ kind: "dj", message: "no model" });
+    dj.request("more Radiohead", { id: "focus.js", name: "Focus timer" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.segment).toBe("request");
+    expect(dj.upNext?.requestBy?.name).toBe("Focus timer");
+    expect(dj.upNext!.talk).not.toMatch(/you asked|your request|as requested/i);
+  });
+
   it("puts the songs of the set it lets go of back up for picking", async () => {
     // Six songs: the first set has three, and the set it lets go of has the rest.
     sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
@@ -1233,6 +1344,93 @@ describe("settings", () => {
 });
 
 describe("starting", () => {
+  it("says how far getting its first set ready has got", async () => {
+    player.isPlaying = false;
+    let warmed!: () => void;
+    backend.djWarm.mockImplementationOnce(() => new Promise<void>((r) => (warmed = r)));
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    let spoken!: () => void;
+    backend.djSpeak.mockImplementationOnce(
+      (text: string) =>
+        new Promise((r) => (spoken = () => r({ id: 1, duration_ms: speechMs, sentences: [{ text, start_ms: 0, end_ms: speechMs }] }))),
+    );
+    const starting = dj.start();
+    expect(dj.stage).toBe("listening");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    expect(dj.canHurry).toBe(true);
+    expect(dj.modelLoaded).toBe(false);
+    warmed();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.modelLoaded).toBe(true);
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("voicing");
+    expect(dj.canHurry).toBe(false);
+    spoken();
+    await starting;
+    expect(dj.stage).toBeNull();
+    expect(dj.phase).toBe("on");
+  });
+
+  it("looks songs up before it writes, with a model that can", async () => {
+    dj.status = { ...readyStatus, tools: true };
+    player.isPlaying = false;
+    let looked!: (v: unknown) => void;
+    backend.djLookUp.mockImplementationOnce(() => new Promise((r) => (looked = r)));
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("lookingUp");
+    looked({ calls: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
+    await starting;
+    expect(dj.phase).toBe("on");
+  });
+
+  it("does nothing when told not to wait while nothing is waited for", async () => {
+    await started();
+    await vi.advanceTimersByTimeAsync(0);
+    // The next set is picked: nothing is being picked now.
+    expect(dj.stage).toBeNull();
+    expect(dj.canHurry).toBe(false);
+    dj.hurry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.byModel).toBe(true);
+  });
+
+  it("starts from a template at once when the listener doesn't want to wait for the model", async () => {
+    player.isPlaying = false;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    const starting = dj.start();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(dj.phase).toBe("starting");
+    expect(dj.canHurry).toBe(true);
+    dj.hurry();
+    await starting;
+    expect(dj.phase).toBe("on");
+    const set = dj.said[0] ?? dj.upNext;
+    expect(set?.byModel).toBe(false);
+    expect(set?.why).toBe(mod.HURRIED);
+    expect(dj.modelTrouble).toBeNull();
+    expect(toasts.show).not.toHaveBeenCalledWith(expect.stringContaining("talking from templates"), "error", 8000);
+  });
+
+  it("has nothing being picked or waited for once it stops while getting ready", async () => {
+    player.isPlaying = false;
+    backend.djGenerate.mockImplementation(() => new Promise(() => {}));
+    void dj.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    dj.stop();
+    expect(dj.stage).toBeNull();
+    expect(dj.canHurry).toBe(false);
+  });
+
   it("waits until everything is downloaded", async () => {
     dj.status = { ...readyStatus, ready: false };
     await dj.start();

@@ -21,6 +21,8 @@ import {
   voiceName,
   VOICE_SPEED,
   extensionNotes,
+  readySteps,
+  stageText,
 } from "./djView";
 import type { Candidate } from "./djPicks";
 import type { DjConfig, DjSongInfo, DjStatus } from "./ipc";
@@ -410,5 +412,48 @@ describe("extensionNotes", () => {
       // A segment told nothing more than its name.
       "Adds a segment: Calm",
     ]);
+  });
+});
+
+describe("readySteps", () => {
+  const shown = (r: Parameters<typeof readySteps>[0]) => readySteps(r).map((s) => `${s.state} ${s.label}`);
+
+  it("lists what getting the first set ready takes on this computer, and how far it's got", () => {
+    expect(shown({ stage: "listening", status: status(), talk: "normal", modelLoaded: false })).toEqual([
+      "now Looking through your listening",
+      "later Loading its model",
+      "later Writing what to say",
+      "later Recording its voice",
+    ]);
+    expect(shown({ stage: "writing", status: status(), talk: "normal", modelLoaded: false })).toEqual([
+      "done Looking through your listening",
+      "now Loading its model",
+      "now Writing what to say",
+      "later Recording its voice",
+    ]);
+    expect(shown({ stage: "voicing", status: status(), talk: "normal", modelLoaded: true })).toEqual([
+      "done Looking through your listening",
+      "done Loading its model",
+      "done Writing what to say",
+      "now Recording its voice",
+    ]);
+  });
+
+  it("leaves out loading for a model elsewhere, and the voice on Just play, and has look-ups for a model that does them", () => {
+    const cloud = { ...status({ provider: "openai" }), tools: true };
+    expect(shown({ stage: "lookingUp", status: cloud, talk: "silent", modelLoaded: false })).toEqual([
+      "done Looking through your listening",
+      "now Looking up some of the songs",
+      "later Writing what to say",
+    ]);
+    // Picked: all of it done.
+    expect(shown({ stage: null, status: cloud, talk: "silent", modelLoaded: false }).every((s) => s.startsWith("done"))).toBe(true);
+  });
+});
+
+describe("stageText", () => {
+  it("says what picking the next set is busy with", () => {
+    expect(stageText("writing")).toBe("Writing what to say…");
+    expect(stageText("lookingUp")).toBe("Looking up some songs…");
   });
 });

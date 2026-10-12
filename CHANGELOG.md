@@ -8,6 +8,16 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 ### Added
 
 - Minor release bump for the branded lyrics button and recent playback polish.
+- While your DJ gets its first set ready, its page ticks off each step, from reading your listening to recording its
+  voice, and after a little while offers to start right away with a short intro. When the music is waiting for the
+  next set, "Play now with a short intro" does the same.
+- The DJ's chip in the player bar opens its controls wherever you are: what's on and up next, skip, ask for the next
+  set, or stop it.
+- You can tell your DJ what you have in mind for its first set as you start it, and ask for the next set while it's
+  still getting ready.
+- While the DJ talks, the DJ page's skip button skips the talk instead of disappearing.
+- Extensions can ask your DJ for its next set, as you can. Your own request always comes first, and the DJ page says
+  which extension asked.
 
 ### Fixed
 
