@@ -157,7 +157,9 @@ while there's more like them), and an artist doesn't play twice running, by ever
 (`sharesArtist`), unless liked or named by the set's request. A set's own songs are left out only for artists skipped
 since it was picked (`#leftOutAtPick`): a request or a fallback may have let others in on purpose. Only songs a set
 was started with sit behind the player, so Next and Previous go through `dj.skipTalk()`/`dj.previous()`, which line
-up a song before moving. `dj.request(text)` makes the next set a requested one (`requestSegment`/`requestChoices`),
+up a song before moving. `dj.request(text, from?)` makes the next set a requested one
+(`requestSegment`/`requestChoices`; an extension's, `requestedBy`, only while nothing else is asked for, and never
+called the listener's), and `dj.start(request?)` the first,
 replacing an `upNext` not yet introduced (taken out of the player's queue after what's on its way by the `SetQueue`,
 its hand-over dropped by `#dropHandOver`, a set still being picked let go of by the `NextSet`, which drops what it
 comes to; both in `djNext.ts`); `dj.skipSet()` clears the queue, holds the music and picks the next set again from
@@ -183,7 +185,9 @@ plays through or another voice is picked, through stopping and starting. A set k
 (`DjSet.lookedUp`, by song URI), and each song its Web API track (`Candidate.track`) for its row's cover, links and
 menu. `dj.canSkipSet(set)` is the one rule for skipping, and `djMenu.ts` builds a set's menu, where
 `addSetAction` adds entries (guarded like extensions' track entries); `dj.onAir.set` lets the queue panel open it.
-User guide: `docs/dj.md`.
+While a set is picked, `dj.stage` says how far (`DjGettingReady` ticks the opening's steps off), and `dj.hurry()`
+cuts the wait for the model short while `dj.canHurry`, through the `NextSet`'s wait. `DjControls` puts the DJ's
+skip, ask (`DjAsk`) and stop in the player bar. User guide: `docs/dj.md`.
 
 **mild-lyrics bridge.** `devtools.rs` serves what mild-lyrics reads from the Spotify app's
 `--remote-debugging-port`: `/json` with one `xpui` page target, and its websocket's `Runtime.evaluate`. It runs
