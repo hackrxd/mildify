@@ -9,13 +9,21 @@
   // in a panel under the DJ's chip. It opens and closes like the device picker beside it.
   let open = $state(false);
   let root: HTMLDivElement | undefined = $state();
+  let chip: HTMLButtonElement | undefined = $state();
 
   const next = $derived(
-    dj.upNext?.name ?? (dj.stage ? stageText(dj.stage) : dj.phase === "starting" ? "Getting ready…" : "Being picked…"),
+    dj.upNext?.name ??
+      (dj.stage ? stageText(dj.stage) : dj.phase === "starting" ? "Getting ready…" : dj.musicWaits ? "Being picked…" : "Not picked yet"),
   );
 
+  // By the click's path, as it was: a button the click removed (Skip the talk, Never mind) is still inside.
   function onWindowClick(e: MouseEvent) {
-    if (open && root && !root.contains(e.target as Node)) open = false;
+    if (open && root && !e.composedPath().includes(root)) open = false;
+  }
+  function onKey(e: KeyboardEvent) {
+    if (!open || e.key !== "Escape") return;
+    open = false;
+    chip?.focus();
   }
   function go() {
     open = false;
@@ -23,10 +31,11 @@
   }
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={(e) => e.key === "Escape" && (open = false)} />
+<svelte:window onclick={onWindowClick} onkeydown={onKey} />
 
 <div class="controls" bind:this={root}>
   <button
+    bind:this={chip}
     class="dj-chip"
     class:busy={dj.phase === "starting"}
     aria-expanded={open}

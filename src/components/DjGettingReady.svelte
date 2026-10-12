@@ -12,13 +12,13 @@
   const OFFER_MS = 15_000;
 
   const steps = $derived(readySteps({ stage: dj.stage, status: dj.status, talk: dj.talk, modelLoaded: dj.modelLoaded }));
-  const since = performance.now();
   let now = $state(performance.now());
   $effect(() => {
     const t = setInterval(() => (now = performance.now()), 1000);
     return () => clearInterval(t);
   });
-  const waited = $derived(now - since);
+  // From when the session started, so coming back to the page doesn't start the count again.
+  const waited = $derived(now - dj.startedAt);
   const minutes = OPENING_TIMEOUT_MS / 60_000;
 </script>
 
@@ -35,14 +35,16 @@
     {/each}
   </ol>
   {#if waited >= SHOW_TIME_MS}
-    <p class="muted small" aria-live="polite">
+    <p class="muted small">
       {Math.floor(waited / 1000)} s so far. If its model takes more than {minutes === 2.5 ? "2½" : minutes} minutes, it
       starts with a short intro from a template.
     </p>
   {/if}
-  {#if dj.canHurry && waited >= OFFER_MS}
-    <button class="btn quiet" onclick={() => dj.hurry()}>Start now with a short intro</button>
-  {/if}
+  <div aria-live="polite">
+    {#if dj.canHurry && waited >= OFFER_MS}
+      <button class="btn quiet" onclick={() => dj.hurry()}>Start now with a short intro</button>
+    {/if}
+  </div>
 </div>
 
 <style>
