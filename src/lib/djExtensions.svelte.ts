@@ -406,6 +406,8 @@ export function djApi(
   let untrackInstructions = none;
   /** The same for each of its segments, by id. */
   const untrackSegment = new Map<string, () => void>();
+  /** What takes back the extension's request when it's turned off: one, however many it makes. */
+  let untrackRequest: (() => void) | null = null;
   return Object.freeze({
     get phase() {
       return dj.phase;
@@ -437,13 +439,16 @@ export function djApi(
     get requestedBy() {
       return dj.requestedBy?.name ?? null;
     },
+    // Untracked, as what an extension changes is (`ns.watch` would otherwise rerun on every step the DJ takes for it).
     request(text: string) {
-      if (!live() || !dj.request(String(text), owner)) return false;
-      track(() => dj.cancelRequest(owner));
-      return true;
+      return untrack(() => {
+        if (!live() || !dj.request(String(text ?? ""), owner)) return false;
+        untrackRequest ??= track(() => dj.cancelRequest(owner));
+        return true;
+      });
     },
     cancelRequest() {
-      dj.cancelRequest(owner);
+      untrack(() => dj.cancelRequest(owner));
     },
     on(fn: (event: DjExtensionEvent) => void) {
       if (!live()) return none;
