@@ -46,8 +46,10 @@ export interface DjSetView {
   byModel: boolean;
   /** Picked song by song as it plays (Settings → AI DJ, "Pick songs as it goes"). */
   live: boolean;
-  /** What the listener asked for, when the set is their request. */
+  /** What was asked for, when the set is a request: the listener's, or an extension's (`requestBy`). */
   request: string | null;
+  /** The extension that asked for it, by name; null when it was the listener. */
+  requestBy: string | null;
 }
 
 /** A line the DJ said. */
@@ -121,6 +123,7 @@ export function setView(s: DjSet): DjSetView {
     byModel: s.byModel,
     live: s.live,
     request: s.request,
+    requestBy: s.requestBy?.name ?? null,
   }));
 }
 
@@ -335,7 +338,10 @@ export interface DjSource {
   readonly speaking: boolean;
   readonly showing: boolean;
   readonly requested: string | null;
+  readonly requestedBy: { id: string; name: string } | null;
   on(fn: (event: DjEvent) => void): () => void;
+  request(text: string, from?: { id: string; name: string }): boolean;
+  cancelRequest(from?: { id: string; name: string }): void;
 }
 
 /** `ns.dj`. Its state is reactive, as `ns.player`'s is: read it in `ns.watch`. */
@@ -354,8 +360,17 @@ export interface DjExtensionApi {
   /** Its voice is reading a line out; or a line shows without it (Just play, or the voice failed). */
   readonly speaking: boolean;
   readonly showing: boolean;
-  /** What the listener asked the next set to be, until a set for it comes on. */
+  /** What the next set is asked to be, until a set for it comes on; and the extension that asked, by name, or null
+   * when it was the listener. */
   readonly requested: string | null;
+  readonly requestedBy: string | null;
+  /** Asks for the next set, as the listener can on the DJ page: in place of a next set it hasn't started to bring in,
+   * or as the set after it. Only while the DJ is on and nothing else is asked for; the listener's own request takes
+   * the place of one. Whether it was taken. A request it hasn't played is taken back when the extension is turned
+   * off. */
+  request(text: string): boolean;
+  /** Takes back the extension's request; a set already picked for it stays. */
+  cancelRequest(): void;
   /** Calls `fn` with each thing that happens in a session, just after it happens. Returns a function that stops it. */
   on(fn: (event: DjExtensionEvent) => void): () => void;
   /** Adds an entry to every set's menu on the DJ page. Returns a remove function. */
@@ -418,6 +433,17 @@ export function djApi(
     },
     get requested() {
       return dj.requested;
+    },
+    get requestedBy() {
+      return dj.requestedBy?.name ?? null;
+    },
+    request(text: string) {
+      if (!live() || !dj.request(String(text), owner)) return false;
+      track(() => dj.cancelRequest(owner));
+      return true;
+    },
+    cancelRequest() {
+      dj.cancelRequest(owner);
     },
     on(fn: (event: DjExtensionEvent) => void) {
       if (!live()) return none;

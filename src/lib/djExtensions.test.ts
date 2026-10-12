@@ -75,6 +75,19 @@ function fakeDj() {
     speaking: false,
     showing: false,
     requested: null as string | null,
+    requestedBy: null as { id: string; name: string } | null,
+    /** As the session takes a request: an extension's only while nothing else is asked for. */
+    request(text: string, from?: { id: string; name: string }) {
+      if (this.phase === "off" || (from && this.requested !== null)) return false;
+      this.requested = text;
+      this.requestedBy = from ?? null;
+      return true;
+    },
+    cancelRequest(from?: { id: string; name: string }) {
+      if (from && this.requestedBy?.id !== from.id) return;
+      this.requested = null;
+      this.requestedBy = null;
+    },
     listeners,
     on(fn: (e: DjEvent) => void) {
       listeners.add(fn);
@@ -118,7 +131,18 @@ describe("copies", () => {
   it("are frozen, and leave out what the DJ keeps to itself", () => {
     const s = set(1);
     const view = m.setView(s);
-    expect(Object.keys(view).sort()).toEqual(["byModel", "from", "id", "live", "name", "request", "segment", "songs", "talk"]);
+    expect(Object.keys(view).sort()).toEqual([
+      "byModel",
+      "from",
+      "id",
+      "live",
+      "name",
+      "request",
+      "requestBy",
+      "segment",
+      "songs",
+      "talk",
+    ]);
     expect(view).toMatchObject({ id: 1, name: "Set 1", segment: "onRepeat", talk: "Here's one you've had on repeat." });
     expect(Object.isFrozen(view)).toBe(true);
     expect(Object.isFrozen(view.songs)).toBe(true);
@@ -195,6 +219,41 @@ describe("ns.dj", () => {
       expect(key in ns, key).toBe(false);
     }
     expect(Object.isFrozen(ns)).toBe(true);
+  });
+});
+
+describe("asking for the next set", () => {
+  it("asks as the extension, and says who asked", () => {
+    const { ns, dj } = api();
+    expect(ns.request("songs for focus")).toBe(true);
+    expect(dj.requested).toBe("songs for focus");
+    expect(ns.requestedBy).toBe("DJ log");
+    expect(m.setView({ ...set(2), request: "songs for focus", requestBy: owner }).requestBy).toBe("DJ log");
+  });
+
+  it("isn't taken while something else is asked for, or the DJ is off", () => {
+    const { ns, dj } = api();
+    dj.requested = "something calm";
+    expect(ns.request("songs for focus")).toBe(false);
+    expect(dj.requested).toBe("something calm");
+    dj.requested = null;
+    dj.phase = "off";
+    expect(ns.request("songs for focus")).toBe(false);
+  });
+
+  it("is taken back by the extension, or when it's turned off, but not the listener's", () => {
+    const { ns, dj, t } = api();
+    ns.request("songs for focus");
+    ns.cancelRequest();
+    expect(dj.requested).toBeNull();
+    ns.request("songs for focus");
+    t.turnOff();
+    expect(dj.requested).toBeNull();
+    // Turned off, it can't ask; and what the listener asks for isn't its to take back.
+    expect(ns.request("again")).toBe(false);
+    dj.request("something calm");
+    ns.cancelRequest();
+    expect(dj.requested).toBe("something calm");
   });
 });
 
