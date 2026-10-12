@@ -213,7 +213,7 @@ export interface Asker {
 export type DjStage = "listening" | "lookingUp" | "writing" | "voicing";
 
 /** Why a set talks from a template when the listener didn't wait for the model. */
-export const HURRIED = "you started it without waiting for the model";
+export const HURRIED = "you didn't want to wait for the model";
 
 class Dj {
   /** The backend's view: settings, downloads, disk use. */
@@ -245,6 +245,8 @@ class Dj {
   modelLoaded = $state(false);
   /** The model is being waited for, and the listener can say not to wait (`hurry`). */
   canHurry = $state(false);
+  /** When the session started, on performance.now()'s clock, for how long getting ready has taken. */
+  startedAt = $state(0);
   /** The set playing now. */
   current = $state.raw<DjSet | null>(null);
   /** The set after it, once it's picked. */
@@ -624,8 +626,9 @@ class Dj {
   request(text: string, from?: Asker): boolean {
     const ask = text.trim().slice(0, REQUEST_MAX);
     if (this.phase === "off" || !ask) return false;
-    // An extension asks only while nothing else is asked for: the listener's own request always wins.
-    if (from && this.requested !== null) return false;
+    // An extension asks only while nothing else is asked for, and doesn't take the place of a set the listener asked
+    // for: the listener's own request always wins.
+    if (from && (this.requested !== null || (this.upNext?.request && !this.upNext.requestBy))) return false;
     this.requested = ask;
     this.requestedBy = from ?? null;
     const next = this.upNext;
@@ -884,6 +887,7 @@ class Dj {
     this.#resetShow();
     this.#sessionStart = Date.now();
     this.phase = "starting";
+    this.startedAt = performance.now();
     this.requested = request?.trim().slice(0, REQUEST_MAX) || null;
     this.requestedBy = null;
     this.activity = "Looking through your listening…";
@@ -1495,6 +1499,7 @@ class Dj {
     const broken: string[] = [];
     const rule = (ok: boolean, name: string) => void (ok || broken.push(name));
     rule(!this.#next.picking || !this.upNext, "a set being picked while one is ready");
+    rule(this.canHurry === this.#next.waiting, "told it can hurry when it can't, or not when it can");
     rule(!this.#awaiting || this.#awaiting === this.upNext, "awaiting a set that isn't next");
     rule(!this.#waitingForSet || !this.upNext, "waiting for a set that's ready");
     rule(!this.#handOver.on || !!this.upNext, "a hand-over planned with no next set");

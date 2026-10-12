@@ -633,12 +633,39 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.upNext).not.toBe(old);
     expect(dj.upNext?.requestBy).toEqual(timer);
     expect(lastPrompt()[1].content).toContain('An extension the listener turned on asked for this set:\n"""\nsongs for focus\n"""');
-    // Another extension waits its turn; the listener doesn't.
+    // Another extension is turned away while it's asked for; the listener isn't.
     expect(dj.request("something loud", { id: "loud.js", name: "Loud" })).toBe(false);
     expect(dj.request("something calm")).toBe(true);
     expect(dj.requestedBy).toBeNull();
     expect(dj.request("songs for focus", timer)).toBe(false);
     expect(dj.requested).toBe("something calm");
+  });
+
+  it("doesn't let an extension's request take the place of a set the listener asked for", async () => {
+    await started();
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.request).toBe("something calm");
+    // Never mind takes the request back; the set picked for it stays, and an extension can't push it out.
+    dj.cancelRequest();
+    expect(dj.request("songs for focus", { id: "focus.js", name: "Focus timer" })).toBe(false);
+    expect(dj.upNext?.request).toBe("something calm");
+  });
+
+  it("leaves how far picking has got to the pick that's wanted", async () => {
+    await started();
+    // The next set is picked again while the one before it is still being written: that one's answer comes late.
+    const answers: ((v: unknown) => void)[] = [];
+    backend.djGenerate.mockImplementation(() => new Promise((r) => answers.push(r)));
+    dj.request("something calm");
+    await vi.advanceTimersByTimeAsync(0);
+    dj.request("more Radiohead");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    expect(dj.canHurry).toBe(true);
+    answers[0]({ name: "Late", songs: [1, 2, 3], talk: "This one's late." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
   });
 
   it("lets an extension take back only its own request", async () => {
@@ -1351,12 +1378,26 @@ describe("starting", () => {
     player.isPlaying = false;
     let looked!: (v: unknown) => void;
     backend.djLookUp.mockImplementationOnce(() => new Promise((r) => (looked = r)));
+    let answer!: (v: unknown) => void;
+    backend.djGenerate.mockImplementationOnce(() => new Promise((r) => (answer = r)));
     const starting = dj.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(dj.stage).toBe("lookingUp");
     looked({ calls: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.stage).toBe("writing");
+    answer({ name: "Set 1", songs: [1, 2, 3], talk: "Here's a first set for you." });
     await starting;
-    expect(backend.djGenerate).toHaveBeenCalled();
+    expect(dj.phase).toBe("on");
+  });
+
+  it("does nothing when told not to wait while nothing is waited for", async () => {
+    await started();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.canHurry).toBe(false);
+    dj.hurry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.byModel).toBe(true);
   });
 
   it("starts from a template at once when the listener doesn't want to wait for the model", async () => {
