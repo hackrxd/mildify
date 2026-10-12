@@ -220,7 +220,11 @@
             </button>
           </span>
         </div>
-        {#if b.set.request}<p class="muted small request-note">Your request: “{b.set.request}”</p>{/if}
+        {#if b.set.request}
+          <p class="muted small request-note">
+            {b.set.requestBy ? `Asked for by ${b.set.requestBy.name}` : "Your request"}: “{b.set.request}”
+          </p>
+        {/if}
         {#if b.set.from}<p class="muted small request-note">A segment from {b.set.from}</p>{/if}
         <DjSongs set={b.set} />
         {#if b.set.live}

@@ -31,7 +31,7 @@
 </form>
 {#if dj.requested}
   <p class="small requested" in:rise={{ y: 4, duration: 240 }}>
-    Your request is next: “{dj.requested}”
+    {#if dj.requestedBy}{dj.requestedBy.name} asked for the next set{:else}Your request is next{/if}: “{dj.requested}”
     <button class="link" onclick={() => dj.cancelRequest()}>Never mind</button>
   </p>
 {/if}
