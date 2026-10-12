@@ -623,6 +623,58 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.musicWaits).toBe(true);
   });
 
+  it("picks a set an extension asks for, told it's the extension's, until the listener asks for something", async () => {
+    const timer = { id: "focus.js", name: "Focus timer" };
+    await started();
+    const old = dj.upNext!;
+    expect(dj.request("songs for focus", timer)).toBe(true);
+    expect(dj.requestedBy).toEqual(timer);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext).not.toBe(old);
+    expect(dj.upNext?.requestBy).toEqual(timer);
+    expect(lastPrompt()[1].content).toContain('An extension the listener turned on asked for this set:\n"""\nsongs for focus\n"""');
+    // Another extension waits its turn; the listener doesn't.
+    expect(dj.request("something loud", { id: "loud.js", name: "Loud" })).toBe(false);
+    expect(dj.request("something calm")).toBe(true);
+    expect(dj.requestedBy).toBeNull();
+    expect(dj.request("songs for focus", timer)).toBe(false);
+    expect(dj.requested).toBe("something calm");
+  });
+
+  it("lets an extension take back only its own request", async () => {
+    const timer = { id: "focus.js", name: "Focus timer" };
+    await started();
+    dj.request("songs for focus", timer);
+    dj.cancelRequest({ id: "loud.js", name: "Loud" });
+    expect(dj.requested).toBe("songs for focus");
+    dj.cancelRequest(timer);
+    expect(dj.requested).toBeNull();
+    dj.request("something calm");
+    dj.cancelRequest(timer);
+    expect(dj.requested).toBe("something calm");
+    // The listener's Never mind takes back whoever's it is.
+    dj.cancelRequest();
+    expect(dj.requested).toBeNull();
+  });
+
+  it("doesn't say an extension's request is the listener's when it talks from a template", async () => {
+    const radiohead = (n: number) => ({ ...song(n), artists: [{ id: "rh", name: "Radiohead", uri: "spotify:artist:rh" }] });
+    sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({
+      items: range === "short_term" && offset === 0 ? Array.from({ length: 18 }, (_, i) => (i >= 12 ? radiohead(i + 1) : song(i + 1))) : [],
+      next: null,
+      total: 18,
+      offset,
+      limit: 20,
+    }));
+    await started();
+    backend.djGenerate.mockRejectedValue({ kind: "dj", message: "no model" });
+    dj.request("more Radiohead", { id: "focus.js", name: "Focus timer" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dj.upNext?.segment).toBe("request");
+    expect(dj.upNext?.requestBy?.name).toBe("Focus timer");
+    expect(dj.upNext!.talk).not.toMatch(/you asked|your request|as requested/i);
+  });
+
   it("puts the songs of the set it lets go of back up for picking", async () => {
     // Six songs: the first set has three, and the set it lets go of has the rest.
     sp.topTracksIn.mockImplementation(async (range: string, offset: number) => ({

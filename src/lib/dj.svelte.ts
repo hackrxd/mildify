@@ -154,6 +154,8 @@ export interface DjSet {
   why: string | null;
   /** What the listener asked for, when the set is their request. */
   request: string | null;
+  /** The extension that asked for it, when one did and not the listener. */
+  requestBy: Asker | null;
   /** The talk, read aloud; null when the voice failed and the DJ plays on without it. */
   speech: Spoken | null;
   /** The first song's vocals, for timing the talk. */
@@ -198,6 +200,12 @@ export interface OnAir {
   next: Candidate;
   /** The set it introduces, for its menu wherever the item is shown. */
   set: DjSet;
+}
+
+/** An extension asking for a set, by its id and its name. */
+export interface Asker {
+  id: string;
+  name: string;
 }
 
 /** How far picking a set has got: the listening read (the opening only), songs looked up (a model that calls tools),
@@ -252,6 +260,8 @@ class Dj {
   voiceTrouble = $state<string | null>(null);
   /** What the listener asked the next set to be, until a set for it comes on. */
   requested = $state<string | null>(null);
+  /** The extension that asked for it, when it wasn't the listener. */
+  requestedBy = $state.raw<Asker | null>(null);
   speaking = $state(false);
   /** A line shows without the voice (Just play, or the voice failed), for about as long as it would take to say. */
   showing = $state(false);
@@ -611,18 +621,24 @@ class Dj {
 
   /** Asks for the next set: what the listener wants to hear ("something upbeat", "more Radiohead", "90s"). It takes
    * the place of a next set that isn't on its way yet; once one is (its talk has started), it's the set after. */
-  request(text: string) {
+  request(text: string, from?: Asker): boolean {
     const ask = text.trim().slice(0, REQUEST_MAX);
-    if (this.phase === "off" || !ask) return;
+    if (this.phase === "off" || !ask) return false;
+    // An extension asks only while nothing else is asked for: the listener's own request always wins.
+    if (from && this.requested !== null) return false;
     this.requested = ask;
+    this.requestedBy = from ?? null;
     const next = this.upNext;
-    if (next && (this.announced === next || this.#awaiting === next)) return;
+    if (next && (this.announced === next || this.#awaiting === next)) return true;
     if (next || this.#next.picking) this.#replaceNext();
+    return true;
   }
 
-  /** Takes a request back; a set already picked for it stays. */
-  cancelRequest() {
+  /** Takes a request back; a set already picked for it stays. An extension takes back only its own. */
+  cancelRequest(from?: Asker) {
+    if (from && this.requestedBy?.id !== from.id) return;
     this.requested = null;
+    this.requestedBy = null;
   }
 
   /** Lets go of the next set, and of one being picked, for one picked anew. */
@@ -869,6 +885,7 @@ class Dj {
     this.#sessionStart = Date.now();
     this.phase = "starting";
     this.requested = request?.trim().slice(0, REQUEST_MAX) || null;
+    this.requestedBy = null;
     this.activity = "Looking through your listening…";
     this.#setStage("listening");
     backend.djWarm().then(
@@ -973,6 +990,7 @@ class Dj {
     this.upNext = null;
     this.announced = null;
     this.requested = null;
+    this.requestedBy = null;
     this.#setSkipped = null;
     this.#leftSet = null;
     this.#next.reset();
@@ -1099,7 +1117,8 @@ class Dj {
     /** Given up on: a new session, or another set wanted instead. */
     const stale = () => run !== this.#run || !wanted();
     const request = this.requested;
-    const chosen = this.#chooseSegment(request);
+    const requestBy = this.requestedBy;
+    const chosen = this.#chooseSegment(request, !!requestBy);
     if (!chosen) return null;
     let { segment, choices } = chosen;
     const leftOut = this.#avoid(request).skippedArtists;
@@ -1126,6 +1145,7 @@ class Dj {
       live,
       reactions,
       request: segment.id === "request" ? (request ?? undefined) : undefined,
+      requestBy: segment.id === "request" ? requestBy?.name : undefined,
       // A request's set grows only by songs it names: a mood isn't for the DJ's list to guess.
       topUp: segment.id === "request" ? choices.filter((c) => requestScore(request ?? "")(c) > 0) : undefined,
       skippedSet,
@@ -1138,7 +1158,7 @@ class Dj {
     if (stale()) return null;
     const byModel = !!pick;
     if (!pick && segment.id === "request") {
-      const instead = this.#forTemplate(request ?? "", choices);
+      const instead = this.#forTemplate(request ?? "", choices, !!requestBy);
       if (!instead) return null;
       ({ segment, choices } = instead);
     }
@@ -1149,7 +1169,8 @@ class Dj {
         listener,
         previous: prev,
         skipped: skippedSet !== undefined,
-        request: segment.id === "request",
+        // A template says "you asked": not for an extension's request.
+        request: segment.id === "request" && !requestBy,
         liked,
         talk: this.talk,
         last: this.#lastTemplate,
@@ -1193,6 +1214,7 @@ class Dj {
       byModel,
       why,
       request: segment.id === "request" ? request : null,
+      requestBy: segment.id === "request" ? requestBy : null,
       speech,
       firstVocals,
       lookedUp: asked.found,
@@ -1201,10 +1223,10 @@ class Dj {
 
   /** The segment to pick from, and its choices: what the listener asked for, when the listening has enough to
    * choose from for it, or the next of the usual segments. None when the listening has nothing left. */
-  #chooseSegment(request: string | null): { segment: Segment; choices: Candidate[] } | null {
+  #chooseSegment(request: string | null, byExtension: boolean): { segment: Segment; choices: Candidate[] } | null {
     if (request) {
       const choices = requestChoices(request, this.#pool, this.#avoid(request), Math.random, this.#memory);
-      if (choices.length >= MIN_CHOICES) return { segment: requestSegment(request), choices };
+      if (choices.length >= MIN_CHOICES) return { segment: requestSegment(request, byExtension), choices };
     }
     return this.#ordinarySegment();
   }
@@ -1227,10 +1249,10 @@ class Dj {
 
   /** A request's set without the model: a template can't tell which songs fit a mood, so it plays only what the
    * request names, or an ordinary set while the request waits for the model. None when there's nothing to play. */
-  #forTemplate(request: string, choices: Candidate[]): { segment: Segment; choices: Candidate[] } | null {
+  #forTemplate(request: string, choices: Candidate[], byExtension: boolean): { segment: Segment; choices: Candidate[] } | null {
     const score = requestScore(request);
     const named = choices.filter((c) => score(c) > 0);
-    if (named.length >= MIN_CHOICES) return { segment: requestSegment(request), choices: named };
+    if (named.length >= MIN_CHOICES) return { segment: requestSegment(request, byExtension), choices: named };
     return this.#ordinarySegment();
   }
 
@@ -1379,7 +1401,10 @@ class Dj {
     this.said = [...this.said, line];
     this.#emit({ type: "line-spoken", line });
     // The request is on.
-    if (set.request && this.requested === set.request) this.requested = null;
+    if (set.request && this.requested === set.request && this.requestedBy?.id === set.requestBy?.id) {
+      this.requested = null;
+      this.requestedBy = null;
+    }
     if (set.speech) this.#talk(run, set, set.speech);
     else this.#show(set.talk);
   }

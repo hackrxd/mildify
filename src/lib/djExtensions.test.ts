@@ -46,6 +46,7 @@ function set(id: number, songs = [song(1), song(2)]): DjSet {
     byModel: false,
     why: "OpenAI didn't accept your API key: sk-pr…abcd",
     request: null,
+    requestBy: null,
     speech: { id: 1, durationMs: 4000, lines: [] } as unknown as DjSet["speech"],
     firstVocals: null,
     lookedUp: new Map(),
