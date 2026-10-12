@@ -150,10 +150,15 @@
         {:else}
           <section class="card start" in:rise>
             {#if dj.phase === "off"}
-              <form class="start-form" onsubmit={(e) => (e.preventDefault(), dj.start(startWith), (startWith = ""))}>
-                <button class="btn primary big" type="submit" in:rise={{ y: 4, scale: 0.96, duration: 300 }}>
-                  <Icon name="play" size={18} /> Start the DJ
-                </button>
+              <form
+                class="start-form"
+                onsubmit={(e) => {
+                  e.preventDefault();
+                  void dj.start(startWith);
+                  // Kept when it didn't start (not ready, no player), for another try.
+                  if (dj.phase !== "off") startWith = "";
+                }}
+              >
                 <input
                   class="field"
                   aria-label="Start with something in mind (optional)"
@@ -161,6 +166,9 @@
                   placeholder="Something in mind? A mood, an artist, a decade…"
                   bind:value={startWith}
                 />
+                <button class="btn primary big" type="submit" in:rise={{ y: 4, scale: 0.96, duration: 300 }}>
+                  <Icon name="play" size={18} /> Start the DJ
+                </button>
               </form>
               <p class="muted small" in:rise={{ y: 4, delay: 60, duration: 300 }}>
                 It plays on this computer, and talks over the ends and starts of songs, never over the singing.
