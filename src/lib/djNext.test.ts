@@ -80,6 +80,8 @@ describe("NextSet", () => {
     const e = await caught;
     expect(e).toBeInstanceOf(GaveUp);
     expect((e as Error).message).toBe("the model took too long");
+    // Over: nothing left to cut short, though the answer may yet come.
+    expect(next.waiting).toBe(false);
   });
 
   it("stops waiting when hurried, and only while it waits", async () => {

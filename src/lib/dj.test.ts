@@ -633,6 +633,7 @@ describe("asking for a set, and skipping one", () => {
     expect(dj.upNext).not.toBe(old);
     expect(dj.upNext?.requestBy).toEqual(timer);
     expect(lastPrompt()[1].content).toContain('An extension the listener turned on asked for this set:\n"""\nsongs for focus\n"""');
+    expect(lastPrompt()[1].content).not.toContain("a set the listener asked for");
     // Another extension is turned away while it's asked for; the listener isn't.
     expect(dj.request("something loud", { id: "loud.js", name: "Loud" })).toBe(false);
     expect(dj.request("something calm")).toBe(true);
@@ -1394,6 +1395,8 @@ describe("starting", () => {
   it("does nothing when told not to wait while nothing is waited for", async () => {
     await started();
     await vi.advanceTimersByTimeAsync(0);
+    // The next set is picked: nothing is being picked now.
+    expect(dj.stage).toBeNull();
     expect(dj.canHurry).toBe(false);
     dj.hurry();
     await vi.advanceTimersByTimeAsync(0);
