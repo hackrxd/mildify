@@ -61,7 +61,7 @@ export function ApplyIsByCommunity(data: any, LyricsContainer: HTMLElement): voi
   const providedByCommunitySpan = document.createElement("span");
   providedByCommunitySpan.style.opacity = "0.5";
   providedByCommunitySpan.textContent =
-    "These lyrics have been provided by our community";
+    "These lyrics have been provided by the Spicy Lyrics community";
   songInfoElement.appendChild(providedByCommunitySpan);
 
   const makerUsername = data.TTMLUploadMetadata?.Maker?.username;
