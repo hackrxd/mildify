@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "mildify"
-version = "1.4.1"
+version = "1.4.4"
 dependencies = [
  "base64 0.22.1",
  "bzip2",
