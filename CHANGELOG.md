@@ -8,6 +8,7 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 ### Fixed
 
 - Fixed lockfile
+- Dependency version mismatch
 
 ## 1.4.1 - 2026-10-17
 
