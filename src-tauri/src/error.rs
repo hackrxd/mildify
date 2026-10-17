@@ -6,9 +6,9 @@ pub type Result<T> = std::result::Result<T, AppError>;
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("Spotify API error {status}: {message}")]
-    Api { status: u16, message: String },
+    Api { status: u16, message: String, raw_response: Option<String> },
     #[error("Rate limited, retry in {retry_after}s")]
-    RateLimited { retry_after: u64 },
+    RateLimited { retry_after: u64, raw_response: Option<String> },
     #[error("Not signed in to Spotify")]
     NotSignedIn,
     #[error("No Spotify client ID configured")]
@@ -50,15 +50,27 @@ impl AppError {
             _ => None,
         }
     }
+
+    fn raw_response(&self) -> Option<&str> {
+        match self {
+            AppError::Api { raw_response, .. } => raw_response.as_deref(),
+            AppError::RateLimited { raw_response, .. } => raw_response.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Errors cross the IPC boundary as `{ kind, message, status }` so the UI can branch on `kind`.
 impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        let mut st = s.serialize_struct("AppError", 3)?;
+        let raw_response = self.raw_response();
+        let mut st = s.serialize_struct("AppError", if raw_response.is_some() { 4 } else { 3 })?;
         st.serialize_field("kind", self.kind())?;
         st.serialize_field("message", &self.to_string())?;
         st.serialize_field("status", &self.status())?;
+        if let Some(raw_response) = raw_response {
+            st.serialize_field("raw_response", raw_response)?;
+        }
         st.end()
     }
 }
@@ -77,7 +89,7 @@ mod tests {
     #[test]
     fn crosses_ipc_as_kind_message_status() {
         assert_eq!(
-            ipc(AppError::Api { status: 404, message: "Not found".into() }),
+            ipc(AppError::Api { status: 404, message: "Not found".into(), raw_response: None }),
             json!({ "kind": "api", "message": "Spotify API error 404: Not found", "status": 404 })
         );
         assert_eq!(
@@ -88,11 +100,23 @@ mod tests {
 
     #[test]
     fn rate_limits_carry_429_and_the_wait() {
-        let v = ipc(AppError::RateLimited { retry_after: 20 });
+        let v = ipc(AppError::RateLimited { retry_after: 20, raw_response: None });
         assert_eq!(v["kind"], "rate_limited");
         assert_eq!(v["status"], 429);
         // player.svelte.ts reads the wait back out of the message with /(\d+)s/.
         assert_eq!(v["message"], "Rate limited, retry in 20s");
+    }
+
+    #[test]
+    fn api_errors_can_carry_the_raw_response_without_changing_the_message() {
+        let raw = r#"{"error":{"status":400,"message":"Invalid limit","reason":"too_many"}}"#;
+        let v = ipc(AppError::Api {
+            status: 400,
+            message: "Invalid limit".into(),
+            raw_response: Some(raw.into()),
+        });
+        assert_eq!(v["message"], "Spotify API error 400: Invalid limit");
+        assert_eq!(v["raw_response"], raw);
     }
 
     #[test]
@@ -102,8 +126,8 @@ mod tests {
             "other",
         ];
         let errors = [
-            AppError::Api { status: 500, message: String::new() },
-            AppError::RateLimited { retry_after: 1 },
+            AppError::Api { status: 500, message: String::new(), raw_response: None },
+            AppError::RateLimited { retry_after: 1, raw_response: None },
             AppError::NotSignedIn,
             AppError::NoClientId,
             AppError::Cancelled,

@@ -34,6 +34,27 @@ describe("errorMessage", () => {
     expect(errorMessage("plain")).toBe("plain");
     expect(errorMessage(undefined)).toBe("undefined");
   });
+
+  it("shows the raw API response only in development builds", () => {
+    const raw = '{"error":{"status":400,"message":"Invalid limit","reason":"too_many"}}';
+    const error = { ...appError("api", "Spotify API error 400: Invalid limit", 400), raw_response: raw };
+
+    vi.stubEnv("DEV", true);
+    expect(errorMessage(error)).toBe(raw);
+    vi.stubEnv("DEV", false);
+    expect(errorMessage(error)).toBe("Spotify API error 400: Invalid limit");
+    vi.unstubAllEnvs();
+  });
+
+  it("shows raw Spotify rate-limit responses in development", () => {
+    const raw = '{"error":{"status":429,"message":"Too many requests"}}';
+    vi.stubEnv("DEV", true);
+    expect(errorMessage({ ...appError("rate_limited", "Rate limited, retry in 6s", 429), raw_response: raw })).toBe(raw);
+    expect(errorMessage(appError("rate_limited", "Rate limited, retry in 6s", 429))).toBe(
+      "Rate limited, retry in 6s\n\nNo Spotify response JSON is available for this cooldown.",
+    );
+    vi.unstubAllEnvs();
+  });
 });
 
 describe("api", () => {

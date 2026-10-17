@@ -15,6 +15,7 @@ export interface AppError {
     | "other";
   message: string;
   status: number | null;
+  raw_response?: string;
 }
 
 export function isAppError(e: unknown): e is AppError {
@@ -22,7 +23,13 @@ export function isAppError(e: unknown): e is AppError {
 }
 
 export function errorMessage(e: unknown): string {
-  if (isAppError(e)) return e.message;
+  if (isAppError(e)) {
+    if (import.meta.env.DEV && (e.kind === "api" || e.kind === "rate_limited")) {
+      if (e.raw_response) return e.raw_response;
+      if (e.kind === "rate_limited") return `${e.message}\n\nNo Spotify response JSON is available for this cooldown.`;
+    }
+    return e.message;
+  }
   if (e instanceof Error) return e.message;
   return String(e);
 }

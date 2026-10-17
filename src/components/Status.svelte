@@ -31,6 +31,8 @@
   }
   p {
     max-width: 60ch;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
   }
   .status > * {
     animation: fade-in 300ms ease-out backwards;

@@ -163,7 +163,7 @@ async fn download(
             tokio::fs::File::create(part).await?
         }
         _ => {
-            return Err(AppError::Api { status, message: format!("Download failed: {url}") });
+            return Err(AppError::Api { status, message: format!("Download failed: {url}"), raw_response: None });
         }
     };
     let total = resp.content_length().map(|n| n + have);

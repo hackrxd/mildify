@@ -210,6 +210,7 @@ impl LyricsClient {
                 return Err(AppError::Api {
                     status: 401,
                     message: "Sign in to the lyrics service to see lyrics".into(),
+                    raw_response: None,
                 });
             }
             _ => {
@@ -297,10 +298,10 @@ async fn check(resp: Response) -> Result<Response> {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok());
     if status == 429 {
-        return Err(AppError::RateLimited { retry_after: retry_after.unwrap_or(30) });
+        return Err(AppError::RateLimited { retry_after: retry_after.unwrap_or(30), raw_response: None });
     }
     let text = resp.text().await.unwrap_or_default();
-    Err(AppError::Api { status, message: error_message(&text) })
+    Err(AppError::Api { status, message: error_message(&text), raw_response: None })
 }
 
 /// The message in an error body: `{"error":{"message"}}`, `{"error":"..."}`, `{"message"}`,
@@ -373,9 +374,9 @@ mod tests {
 
     #[test]
     fn rate_limits_and_sign_ins_stop_a_warm_up() {
-        assert!(stops_warm_up(&AppError::RateLimited { retry_after: 10 }));
-        assert!(stops_warm_up(&AppError::Api { status: 401, message: String::new() }));
-        assert!(!stops_warm_up(&AppError::Api { status: 503, message: String::new() }));
+        assert!(stops_warm_up(&AppError::RateLimited { retry_after: 10, raw_response: None }));
+        assert!(stops_warm_up(&AppError::Api { status: 401, message: String::new(), raw_response: None }));
+        assert!(!stops_warm_up(&AppError::Api { status: 503, message: String::new(), raw_response: None }));
         assert!(!stops_warm_up(&AppError::Other(String::new())));
     }
 

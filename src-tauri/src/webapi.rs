@@ -59,12 +59,14 @@ struct Cooldown {
     client_id: String,
     /// Unix seconds.
     until: u64,
+    #[serde(default)]
+    raw_response: Option<String>,
 }
 
 enum Admit {
     Go,
     Wait(Duration),
-    Blocked(Duration),
+    Blocked(Duration, Option<String>),
 }
 
 /// Decides when each request may go out: never during a rate limit, and never more than
@@ -73,6 +75,7 @@ enum Admit {
 struct Limiter {
     sent: VecDeque<Instant>,
     blocked_until: Option<Instant>,
+    blocked_response: Option<String>,
 }
 
 impl Limiter {
@@ -81,9 +84,14 @@ impl Limiter {
         if let Some(until) = self.blocked_until {
             if until > now {
                 let left = until - now;
-                return if left <= MAX_WAIT { Admit::Wait(left) } else { Admit::Blocked(left) };
+                return if left <= MAX_WAIT {
+                    Admit::Wait(left)
+                } else {
+                    Admit::Blocked(left, self.blocked_response.clone())
+                };
             }
             self.blocked_until = None;
+            self.blocked_response = None;
         }
         while self.sent.front().is_some_and(|&t| now.duration_since(t) >= WINDOW) {
             self.sent.pop_front();
@@ -95,10 +103,13 @@ impl Limiter {
         Admit::Go
     }
 
-    fn block(&mut self, now: Instant, wait: Duration) {
+    fn block(&mut self, now: Instant, wait: Duration, raw_response: Option<String>) {
         let until = now + wait;
         if self.blocked_until.is_none_or(|b| b < until) {
             self.blocked_until = Some(until);
+        }
+        if raw_response.is_some() {
+            self.blocked_response = raw_response;
         }
     }
 }
@@ -126,7 +137,7 @@ impl WebApi {
         if let Some(c) = cooldown {
             // Only the app that was limited is still limited.
             if token.as_ref().is_some_and(|t| t.client_id == c.client_id) && c.until > now() {
-                limiter.block(Instant::now(), Duration::from_secs(c.until - now()));
+                limiter.block(Instant::now(), Duration::from_secs(c.until - now()), c.raw_response);
             }
         }
         Self {
@@ -195,21 +206,23 @@ impl WebApi {
             match verdict {
                 Admit::Go => return Ok(()),
                 Admit::Wait(wait) => tokio::time::sleep(wait).await,
-                Admit::Blocked(left) => return Err(AppError::RateLimited { retry_after: left.as_secs().max(1) }),
+                Admit::Blocked(left, raw_response) => {
+                    return Err(AppError::RateLimited { retry_after: left.as_secs().max(1), raw_response });
+                }
             }
         }
     }
 
     /// Holds every request back for `retry_after` seconds; a long wait outlives a restart.
-    async fn rate_limited(&self, retry_after: u64) {
+    async fn rate_limited(&self, retry_after: u64, raw_response: Option<String>) {
         let wait = Duration::from_secs(retry_after);
-        self.limiter.lock().unwrap().block(Instant::now(), wait);
+        self.limiter.lock().unwrap().block(Instant::now(), wait, raw_response.clone());
         if wait <= MAX_WAIT {
             return;
         }
         log::warn!("Spotify rate limited the Web API for {retry_after}s");
         let Some(client_id) = self.token.lock().await.as_ref().map(|t| t.client_id.clone()) else { return };
-        let cooldown = Cooldown { client_id, until: now() + retry_after };
+        let cooldown = Cooldown { client_id, until: now() + retry_after, raw_response };
         if let Err(e) = std::fs::write(&self.cooldown_file, serde_json::to_vec(&cooldown).unwrap_or_default()) {
             log::warn!("couldn't persist the rate limit: {e}");
         }
@@ -310,12 +323,16 @@ impl WebApi {
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(1)
                         .max(1);
-                    self.rate_limited(retry_after).await;
+                    let raw_response = resp.text().await.unwrap_or_default();
+                    self.rate_limited(retry_after, Some(raw_response.clone())).await;
                     // `admit` sleeps through a short limit before the retry.
                     if Duration::from_secs(retry_after) <= MAX_WAIT && attempt < 3 {
                         continue;
                     }
-                    return Err(AppError::RateLimited { retry_after });
+                    return Err(AppError::RateLimited {
+                        retry_after,
+                        raw_response: Some(raw_response),
+                    });
                 }
                 500..=599 if attempt < 2 && !once => {
                     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -331,7 +348,11 @@ impl WebApi {
                 }
                 return Ok(serde_json::from_str(&text).unwrap_or(Value::String(text)));
             }
-            return Err(AppError::Api { status, message: error_message(text) });
+            return Err(AppError::Api {
+                status,
+                message: error_message(text.clone()),
+                raw_response: Some(text),
+            });
         }
     }
 }
@@ -448,9 +469,9 @@ mod tests {
     fn a_long_rate_limit_fails_requests_without_sending_them() {
         let t0 = Instant::now();
         let mut l = Limiter::default();
-        l.block(t0, secs(2916));
+        l.block(t0, secs(2916), None);
         match l.admit(t0 + secs(16)) {
-            Admit::Blocked(left) => assert_eq!(left, secs(2900)),
+            Admit::Blocked(left, None) => assert_eq!(left, secs(2900)),
             _ => panic!("still limited"),
         }
         assert!(l.sent.is_empty(), "a refused request isn't counted");
@@ -461,22 +482,27 @@ mod tests {
     fn a_short_rate_limit_is_waited_out() {
         let t0 = Instant::now();
         let mut l = Limiter::default();
-        l.block(t0, secs(3));
+        l.block(t0, secs(3), None);
         assert!(matches!(l.admit(t0 + secs(1)), Admit::Wait(w) if w == secs(2)));
         // A shorter limit arriving later doesn't cut a longer one short.
-        l.block(t0 + secs(1), secs(1));
+        l.block(t0 + secs(1), secs(1), None);
         assert!(matches!(l.admit(t0 + secs(2)), Admit::Wait(w) if w == secs(1)));
     }
 
     #[tokio::test]
     async fn a_long_rate_limit_outlives_a_restart_for_the_same_app_only() {
         let (api, file) = with_token("mine");
-        api.rate_limited(600).await;
+        let raw = r#"{"error":{"status":429,"message":"API rate limit exceeded","reason":"too_many_requests"}}"#;
+        api.rate_limited(600, Some(raw.into())).await;
         let cooldown = file.with_file_name("webapi_cooldown.json");
         assert!(cooldown.exists());
 
         let again = WebApi::new(reqwest::Client::new(), file.clone());
-        assert!(matches!(again.request("GET", "/me", None, None).await, Err(AppError::RateLimited { retry_after }) if retry_after > 590));
+        assert!(matches!(
+            again.request("GET", "/me", None, None).await,
+            Err(AppError::RateLimited { retry_after, raw_response: Some(body) })
+                if retry_after > 590 && body == raw
+        ));
 
         // Another app's token isn't held back by it.
         let token = json!({ "client_id": "other", "access_token": "a", "refresh_token": "r", "expires_at": now() + 3600 });
@@ -486,10 +512,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
 
+    #[test]
+    fn reads_cooldowns_written_before_response_bodies_were_saved() {
+        let cooldown: Cooldown = serde_json::from_value(json!({
+            "client_id": "mine",
+            "until": now() + 600,
+        }))
+        .unwrap();
+        assert_eq!(cooldown.raw_response, None);
+    }
+
     #[tokio::test]
     async fn short_rate_limits_stay_in_memory() {
         let (api, file) = with_token("mine");
-        api.rate_limited(2).await;
+        api.rate_limited(2, None).await;
         assert!(!file.with_file_name("webapi_cooldown.json").exists());
         let _ = std::fs::remove_dir_all(file.parent().unwrap());
     }
@@ -574,7 +610,14 @@ mod tests {
                     }
                 }
                 seen.push(String::from_utf8_lossy(&buf).lines().next().unwrap_or_default().to_owned());
-                let reply = format!("HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}");
+                let retry_after = if status == 429 {
+                    "retry-after: 6\r\n"
+                } else {
+                    ""
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status} X\r\n{retry_after}content-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}"
+                );
                 sock.write_all(reply.as_bytes()).await.unwrap();
             }
             seen
@@ -592,8 +635,29 @@ mod tests {
         // Spotify may have added the songs before it failed: adding them again would add them twice.
         let (api, server) = stand_in(vec![502]).await;
         let songs = json!({ "uris": ["spotify:track:a"] });
-        let err = api.request_once("POST", "/playlists/p/items", None, Some(songs)).await.unwrap_err();
-        assert!(matches!(err, AppError::Api { status: 502, .. }), "{err:?}");
+        let err = api
+            .request_once("POST", "/playlists/p/items", None, Some(songs))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::Api { status: 502, raw_response: Some(ref body), .. } if body == "{}"
+        ), "{err:?}");
         assert_eq!(server.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn preserves_a_spotify_rate_limit_response_body() {
+        let (api, server) = stand_in(vec![429]).await;
+        let err = api
+            .request_once("GET", "/me", None, None)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            AppError::RateLimited { retry_after: 6, raw_response: Some(ref body) } if body == "{}"
+        ));
+        assert_eq!(server.await.unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(api.cooldown_file.parent().unwrap());
     }
 }
