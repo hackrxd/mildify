@@ -19,6 +19,9 @@ What's new page. Add to **Unreleased** as you go; a release renames it to the ne
 - Extensions can ask your DJ for its next set, as you can. Your own request always comes first, and the DJ page says
   which extension asked.
 
+### Changed
+- Spicy Lyrics' "These lyrics have been provided by our community" has been changed to "These lyrics have been provided by the Spicy Lyrics community"
+
 ### Fixed
 
 - After playing something else for a moment and going back to the DJ's song, Next while the DJ talks over its end
